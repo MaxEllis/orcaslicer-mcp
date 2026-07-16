@@ -25,3 +25,23 @@ async def test_apply_and_slice_composes(monkeypatch):
 
 async def _empty():
     return []
+
+
+@respx.mock
+async def test_apply_and_slice_skips_wait_when_already_valid(monkeypatch):
+    _env(monkeypatch)
+    respx.put("http://x:13130/api/v1/config").mock(
+        return_value=httpx.Response(200, json={"applied": ["layer_height"], "errors": {}}))
+    respx.post("http://x:13130/api/v1/slice").mock(
+        return_value=httpx.Response(200, json={"already_valid": True, "started": False}))
+    respx.get("http://x:13130/api/v1/slice/status").mock(
+        return_value=httpx.Response(200, json={"state": "done", "percent": 100,
+                                               "message": "", "stats": {"total_cost": 0.1}, "warnings": []}))
+
+    async def _should_not_be_called(self, seconds, stop_on=None):
+        raise AssertionError("collect_events should not be called when already_valid")
+
+    monkeypatch.setattr(srv.OrcaClient, "collect_events", _should_not_be_called)
+    out = await srv.apply_and_slice({"layer_height": 0.28})
+    assert out["applied"] == ["layer_height"]
+    assert out["result"]["state"] == "done"

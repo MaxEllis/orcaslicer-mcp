@@ -112,6 +112,7 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
         async with _client() as c:
             original = (await c.get_config([key])).get(key)
             rows = []
+            restore_error = None
             try:
                 for v in values:
                     row = {"value": v, "stats": None, "warnings": [], "error": None}
@@ -127,8 +128,14 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
                     rows.append(row)
             finally:
                 if original is not None:
-                    await c.put_config({key: original})
-            return {"key": key, "rows": rows}
+                    try:
+                        await c.put_config({key: original})
+                    except ApiError as e:
+                        restore_error = str(e)  # preserve collected rows even if restore fails
+            result = {"key": key, "rows": rows}
+            if restore_error is not None:
+                result["restore_error"] = restore_error
+            return result
     except ApiError as e:
         return _err(e)
 

@@ -59,3 +59,9 @@ async def test_get_status_not_reachable_returns_error(monkeypatch):
     respx.get("http://x:13130/api/v1/status").mock(side_effect=httpx.ConnectError("boom"))
     out = await srv.get_status()
     assert "error" in out
+
+
+async def test_missing_token_returns_error_dict(monkeypatch):
+    monkeypatch.delenv("ORCA_API_TOKEN", raising=False)
+    out = await srv.get_status()
+    assert "error" in out

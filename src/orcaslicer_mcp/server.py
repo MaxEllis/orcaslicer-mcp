@@ -1,15 +1,29 @@
 from __future__ import annotations
+import asyncio
 from mcp.server.fastmcp import FastMCP
 from .config import load_config
 from .client import OrcaClient
-from .errors import ApiError, Validation, NotFound, Conflict
+from .errors import ApiError, Validation, NotFound, Conflict, ConfigError
 from .models import summarize_slice
 
 mcp = FastMCP("orcaslicer")
 
 
 def _client() -> OrcaClient:
-    return OrcaClient(load_config())
+    try:
+        return OrcaClient(load_config())
+    except (RuntimeError, ValueError) as e:
+        raise ConfigError(str(e))
+
+
+async def _wait_for_slice(c, timeout: int) -> dict:
+    """Poll slice_status until the slice leaves the 'slicing' state or timeout. Returns the final status dict."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    s = await c.slice_status()
+    while s.get("state") == "slicing" and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(1.0)
+        s = await c.slice_status()
+    return s
 
 
 def _err(e: ApiError) -> dict:
@@ -69,9 +83,6 @@ async def get_slice_status() -> dict:
         return _err(e)
 
 
-_TERMINAL = {"slice.done", "slice.error", "slice.cancelled"}
-
-
 @mcp.tool()
 async def slice_and_wait(timeout: int = 300) -> dict:
     """Slice (or reuse a valid result) and wait for completion; return final stats + warnings."""
@@ -80,8 +91,7 @@ async def slice_and_wait(timeout: int = 300) -> dict:
             started = await c.slice()
             if started.get("already_valid"):
                 return summarize_slice(await c.slice_status())
-            await c.collect_events(seconds=timeout, stop_on=_TERMINAL)
-            return summarize_slice(await c.slice_status())
+            return summarize_slice(await _wait_for_slice(c, timeout))
     except ApiError as e:
         return _err(e)
 
@@ -94,7 +104,7 @@ async def apply_and_slice(changes: dict) -> dict:
             applied = await c.put_config(changes)
             started = await c.slice()
             if not started.get("already_valid"):
-                await c.collect_events(seconds=300, stop_on=_TERMINAL)
+                await _wait_for_slice(c, 300)
             result = summarize_slice(await c.slice_status())
             return {"applied": applied.get("applied", []),
                     "errors": applied.get("errors", {}), "result": result}
@@ -110,7 +120,8 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
     """
     try:
         async with _client() as c:
-            original = (await c.get_config([key])).get(key)
+            snapshot_keys = [key] + list((extra or {}).keys())
+            originals = await c.get_config(snapshot_keys)
             rows = []
             restore_error = None
             try:
@@ -118,8 +129,9 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
                     row = {"value": v, "stats": None, "warnings": [], "error": None}
                     try:
                         await c.put_config({key: v, **(extra or {})})
-                        await c.slice()
-                        await c.collect_events(seconds=300, stop_on=_TERMINAL)
+                        started = await c.slice()
+                        if not started.get("already_valid"):
+                            await _wait_for_slice(c, 300)
                         s = summarize_slice(await c.slice_status())
                         row["stats"] = s["stats"]
                         row["warnings"] = s["warnings"]
@@ -127,9 +139,9 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
                         row["error"] = str(e)
                     rows.append(row)
             finally:
-                if original is not None:
+                if originals:
                     try:
-                        await c.put_config({key: original})
+                        await c.put_config(originals)
                     except ApiError as e:
                         restore_error = str(e)  # preserve collected rows even if restore fails
             result = {"key": key, "rows": rows}

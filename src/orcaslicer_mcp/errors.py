@@ -29,6 +29,10 @@ class NotReachable(ApiError):
     pass
 
 
+class ConfigError(ApiError):
+    pass
+
+
 class ServerError(ApiError):
     pass
 

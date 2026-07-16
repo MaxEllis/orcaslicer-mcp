@@ -1,4 +1,4 @@
-import httpx, pytest, respx
+import httpx, json, pytest, respx
 from orcaslicer_mcp.config import Config
 from orcaslicer_mcp.client import OrcaClient
 from orcaslicer_mcp.errors import Conflict
@@ -33,4 +33,4 @@ async def test_select_preset_body():
         return_value=httpx.Response(200, json={"selected": {"name": "0.2 Std"}}))
     async with OrcaClient(CFG) as c:
         await c.select_preset("print", "0.2 Std")
-    assert route.calls.last.request.read() == b'{"type": "print", "name": "0.2 Std"}'
+    assert json.loads(route.calls.last.request.read()) == {"type": "print", "name": "0.2 Std"}

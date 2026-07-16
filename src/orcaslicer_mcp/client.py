@@ -1,5 +1,8 @@
 from __future__ import annotations
+import asyncio
+import json
 import httpx
+import websockets
 from .config import Config
 from .errors import error_from_status, NotReachable, ApiError
 
@@ -67,3 +70,33 @@ class OrcaClient:
                 body = {}
             raise error_from_status(resp.status_code, body)
         return resp.content
+
+    def _ws_url(self) -> str:
+        base = self._cfg.base_url
+        ws = base.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+        return f"{ws}/api/v1/events?token={self._cfg.token}"
+
+    async def collect_events(self, seconds: float, stop_on: set[str] | None = None) -> list[dict]:
+        events: list[dict] = []
+        deadline = asyncio.get_event_loop().time() + seconds
+        try:
+            async with websockets.connect(self._ws_url()) as ws:
+                while True:
+                    remaining = deadline - asyncio.get_event_loop().time()
+                    if remaining <= 0:
+                        break
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+                    except asyncio.TimeoutError:
+                        break
+                    try:
+                        evt = json.loads(raw)
+                    except (ValueError, TypeError):
+                        continue
+                    events.append(evt)
+                    if stop_on and evt.get("event") in stop_on:
+                        break
+        except Exception:
+            # A closed/failed WS (e.g. bad token) just yields what we have.
+            pass
+        return events

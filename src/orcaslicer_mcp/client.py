@@ -1,0 +1,44 @@
+from __future__ import annotations
+import httpx
+from .config import Config
+from .errors import error_from_status, NotReachable, ApiError
+
+
+class OrcaClient:
+    def __init__(self, cfg: Config):
+        self._cfg = cfg
+        self._http = httpx.AsyncClient(
+            base_url=cfg.base_url,
+            headers={"X-Api-Token": cfg.token},
+            timeout=cfg.timeout,
+        )
+
+    async def __aenter__(self) -> "OrcaClient":
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self._http.aclose()
+
+    async def _request(self, method: str, path: str, *, json=None, params=None) -> dict:
+        try:
+            resp = await self._http.request(method, path, json=json, params=params)
+        except httpx.ConnectError as e:
+            raise NotReachable(f"OrcaSlicer not reachable at {self._cfg.base_url}: {e}") from e
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+            except Exception:
+                body = {}
+            raise error_from_status(resp.status_code, body)
+        return resp.json()
+
+    async def get_status(self) -> dict:
+        return await self._request("GET", "/api/v1/status")
+
+    async def get_config(self, keys: list[str] | None) -> dict:
+        params = {"keys": ",".join(keys)} if keys else None
+        data = await self._request("GET", "/api/v1/config", params=params)
+        return data.get("config", {})
+
+    async def put_config(self, changes: dict) -> dict:
+        return await self._request("PUT", "/api/v1/config", json=changes)

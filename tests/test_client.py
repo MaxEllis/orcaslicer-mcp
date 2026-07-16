@@ -1,7 +1,7 @@
 import httpx, pytest, respx
 from orcaslicer_mcp.config import Config
 from orcaslicer_mcp.client import OrcaClient
-from orcaslicer_mcp.errors import Unauthorized, Validation, NotReachable
+from orcaslicer_mcp.errors import Unauthorized, Validation, NotReachable, UiTimeout
 
 CFG = Config(base_url="http://x:13130", token="tok", timeout=5)
 
@@ -43,4 +43,11 @@ async def test_connect_error_maps():
     respx.get("http://x:13130/api/v1/status").mock(side_effect=httpx.ConnectError("refused"))
     async with OrcaClient(CFG) as c:
         with pytest.raises(NotReachable):
+            await c.get_status()
+
+@respx.mock
+async def test_timeout_maps_to_uitimeout():
+    respx.get("http://x:13130/api/v1/status").mock(side_effect=httpx.ReadTimeout("slow"))
+    async with OrcaClient(CFG) as c:
+        with pytest.raises(UiTimeout):
             await c.get_status()

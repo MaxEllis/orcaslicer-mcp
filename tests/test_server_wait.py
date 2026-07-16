@@ -28,6 +28,21 @@ async def _empty():
 
 
 @respx.mock
+async def test_slice_and_wait_polls_until_done(monkeypatch):
+    _env(monkeypatch)
+    respx.post("http://x:13130/api/v1/slice").mock(
+        return_value=httpx.Response(202, json={"started": True}))
+    respx.get("http://x:13130/api/v1/slice/status").mock(
+        side_effect=[
+            httpx.Response(200, json={"state": "slicing", "percent": 50}),
+            httpx.Response(200, json={"state": "done", "percent": 100,
+                                      "message": "", "stats": {"total_cost": 0.1}, "warnings": []}),
+        ])
+    out = await srv.slice_and_wait(timeout=5)
+    assert out["state"] == "done"
+
+
+@respx.mock
 async def test_apply_and_slice_skips_wait_when_already_valid(monkeypatch):
     _env(monkeypatch)
     respx.put("http://x:13130/api/v1/config").mock(

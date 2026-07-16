@@ -4,7 +4,7 @@ import json
 import httpx
 import websockets
 from .config import Config
-from .errors import error_from_status, NotReachable, ApiError
+from .errors import error_from_status, NotReachable, ApiError, UiTimeout
 
 
 class OrcaClient:
@@ -25,7 +25,9 @@ class OrcaClient:
     async def _request(self, method: str, path: str, *, json=None, params=None) -> dict:
         try:
             resp = await self._http.request(method, path, json=json, params=params)
-        except httpx.ConnectError as e:
+        except httpx.TimeoutException as e:
+            raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
+        except httpx.TransportError as e:
             raise NotReachable(f"OrcaSlicer not reachable at {self._cfg.base_url}: {e}") from e
         if resp.status_code >= 400:
             try:
@@ -61,7 +63,9 @@ class OrcaClient:
     async def get_gcode(self) -> bytes:
         try:
             resp = await self._http.get("/api/v1/gcode")
-        except httpx.ConnectError as e:
+        except httpx.TimeoutException as e:
+            raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
+        except httpx.TransportError as e:
             raise NotReachable(f"OrcaSlicer not reachable at {self._cfg.base_url}: {e}") from e
         if resp.status_code >= 400:
             try:
@@ -92,6 +96,8 @@ class OrcaClient:
                     try:
                         evt = json.loads(raw)
                     except (ValueError, TypeError):
+                        continue
+                    if not isinstance(evt, dict):
                         continue
                     events.append(evt)
                     if stop_on and evt.get("event") in stop_on:

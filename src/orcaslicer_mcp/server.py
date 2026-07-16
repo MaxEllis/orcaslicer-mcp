@@ -2,7 +2,7 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 from .config import load_config
 from .client import OrcaClient
-from .errors import ApiError, Validation
+from .errors import ApiError, Validation, NotFound, Conflict
 from .models import summarize_slice
 
 mcp = FastMCP("orcaslicer")
@@ -138,6 +138,66 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
             return result
     except ApiError as e:
         return _err(e)
+
+
+def _m4a_err(e: ApiError) -> dict:
+    if isinstance(e, NotFound):
+        return {"error": "not available on this OrcaSlicer build (needs M4a)"}
+    return _err(e)
+
+
+@mcp.tool()
+async def watch_events(seconds: int = 10) -> dict:
+    """Collect live events (slice.*/config.changed/project.opened) over a bounded window."""
+    try:
+        async with _client() as c:
+            return {"events": await c.collect_events(seconds=seconds)}
+    except ApiError as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def find_config_keys(substring: str) -> dict:
+    """Find config keys containing `substring` (helps discover among the ~600 keys)."""
+    try:
+        async with _client() as c:
+            cfg = await c.get_config(None)
+            return {"keys": sorted(k for k in cfg if substring in k)}
+    except ApiError as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def load_model(path: str) -> dict:
+    """Load a model file (path on the OrcaSlicer host) onto the current plate. [needs M4a]"""
+    try:
+        async with _client() as c:
+            return await c.load_model(path)
+    except ApiError as e:
+        return _m4a_err(e)
+
+
+@mcp.tool()
+async def select_preset(type: str, name: str) -> dict:
+    """Select a named preset. type = print|filament|printer. [needs M4a]"""
+    try:
+        async with _client() as c:
+            return await c.select_preset(type, name)
+    except ApiError as e:
+        return _m4a_err(e)
+
+
+@mcp.tool()
+async def get_gcode() -> dict:
+    """Retrieve the last successful slice's G-code as text. [needs M4a]"""
+    try:
+        async with _client() as c:
+            data = await c.get_gcode()
+            return {"bytes": len(data), "gcode": data.decode("utf-8", errors="replace")}
+    except Conflict:
+        return {"error": "not_sliced"}
+    except ApiError as e:
+        return _m4a_err(e)
 
 
 def main() -> None:

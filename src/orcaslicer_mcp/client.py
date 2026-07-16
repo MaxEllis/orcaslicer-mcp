@@ -1,25 +1,13 @@
 from __future__ import annotations
 import httpx
-import json
 from .config import Config
 from .errors import error_from_status, NotReachable, ApiError
-
-
-class _CustomAsyncClient(httpx.AsyncClient):
-    """AsyncClient that serializes JSON with spaces for readability."""
-    async def request(self, method, url, **kwargs):
-        # If json parameter is present, serialize it with separators
-        if 'json' in kwargs and kwargs['json'] is not None:
-            kwargs['content'] = json.dumps(kwargs['json'], separators=(', ', ': '))
-            kwargs['headers'] = {**(kwargs.get('headers') or {}), 'Content-Type': 'application/json'}
-            kwargs.pop('json')
-        return await super().request(method, url, **kwargs)
 
 
 class OrcaClient:
     def __init__(self, cfg: Config):
         self._cfg = cfg
-        self._http = _CustomAsyncClient(
+        self._http = httpx.AsyncClient(
             base_url=cfg.base_url,
             headers={"X-Api-Token": cfg.token},
             timeout=cfg.timeout,

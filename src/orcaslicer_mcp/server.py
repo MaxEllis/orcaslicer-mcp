@@ -92,8 +92,9 @@ async def apply_and_slice(changes: dict) -> dict:
     try:
         async with _client() as c:
             applied = await c.put_config(changes)
-            await c.slice()
-            await c.collect_events(seconds=300, stop_on=_TERMINAL)
+            started = await c.slice()
+            if not started.get("already_valid"):
+                await c.collect_events(seconds=300, stop_on=_TERMINAL)
             result = summarize_slice(await c.slice_status())
             return {"applied": applied.get("applied", []),
                     "errors": applied.get("errors", {}), "result": result}

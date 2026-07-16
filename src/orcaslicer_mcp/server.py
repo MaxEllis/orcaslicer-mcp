@@ -102,6 +102,37 @@ async def apply_and_slice(changes: dict) -> dict:
         return _err(e)
 
 
+@mcp.tool()
+async def compare_settings(key: str, values: list, extra: dict | None = None) -> dict:
+    """For each value of `key`, slice and collect stats/warnings; restore the original when done.
+
+    Non-destructive: the original value of `key` is put back even on error.
+    """
+    try:
+        async with _client() as c:
+            original = (await c.get_config([key])).get(key)
+            rows = []
+            try:
+                for v in values:
+                    row = {"value": v, "stats": None, "warnings": [], "error": None}
+                    try:
+                        await c.put_config({key: v, **(extra or {})})
+                        await c.slice()
+                        await c.collect_events(seconds=300, stop_on=_TERMINAL)
+                        s = summarize_slice(await c.slice_status())
+                        row["stats"] = s["stats"]
+                        row["warnings"] = s["warnings"]
+                    except ApiError as e:
+                        row["error"] = str(e)
+                    rows.append(row)
+            finally:
+                if original is not None:
+                    await c.put_config({key: original})
+            return {"key": key, "rows": rows}
+    except ApiError as e:
+        return _err(e)
+
+
 def main() -> None:
     mcp.run()
 

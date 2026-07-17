@@ -19,3 +19,7 @@ node_modules/
 *.log
 .DS_Store
 ._*
+
+# Exception: the bundled settings schema is package data (not bulk/secrets) and must ship.
+!src/orcaslicer_mcp/data/
+!src/orcaslicer_mcp/data/*.json

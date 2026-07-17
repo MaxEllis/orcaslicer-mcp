@@ -1,7 +1,11 @@
 from __future__ import annotations
 import re
 
+# Strict: a real, named setting definition -> creates a record.
 _ADD_RE = re.compile(r'def\s*=\s*this->add\(\s*"([^"]+)"\s*,\s*(co\w+)\s*\)')
+# Any def = this->add / add_nullable -> block boundary (stops one setting's
+# block from absorbing a following add_nullable loop body, etc.).
+_BOUND_RE = re.compile(r'def\s*=\s*this->add(?:_nullable)?\(')
 _STR_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 _FIELD_RE = re.compile(r'def->(\w+)\s*=\s*(.*)', re.DOTALL)
 _DEFAULT_RE = re.compile(r'set_default_value\(\s*new\s+\w+[^(]*\((.*)\)\s*\)\s*$', re.DOTALL)
@@ -22,6 +26,26 @@ def _join_strings(stmt: str) -> str | None:
     if not parts:
         return None
     return _unescape("".join(parts)).strip()
+
+
+def _strip_line_comments(s: str) -> str:
+    """Remove C++ `//` line comments, honoring string literals (a `//` inside a
+    double-quoted string is kept)."""
+    out, in_str, esc, i, n = [], False, False, 0, len(s)
+    while i < n:
+        ch = s[i]
+        if esc:
+            out.append(ch); esc = False; i += 1; continue
+        if ch == "\\":
+            out.append(ch); esc = True; i += 1; continue
+        if ch == '"':
+            in_str = not in_str; out.append(ch); i += 1; continue
+        if not in_str and ch == "/" and i + 1 < n and s[i + 1] == "/":
+            while i < n and s[i] != "\n":
+                i += 1
+            continue
+        out.append(ch); i += 1
+    return "".join(out)
 
 
 def _split_statements(block: str) -> list[str]:
@@ -57,13 +81,19 @@ def _num(raw: str):
 
 def parse_print_config(text: str) -> tuple[dict[str, dict], list[str]]:
     """Parse PrintConfig.cpp source text into (settings, unparsed_keys)."""
+
+    def uncommented(m: re.Match) -> bool:
+        return "//" not in text[text.rfind("\n", 0, m.start()) + 1: m.start()]
+
+    create = [m for m in _ADD_RE.finditer(text) if uncommented(m)]
+    bounds = sorted(m.start() for m in _BOUND_RE.finditer(text) if uncommented(m))
+
     settings: dict[str, dict] = {}
-    matches = list(_ADD_RE.finditer(text))
-    for i, m in enumerate(matches):
+    for m in create:
         key, ctype = m.group(1), m.group(2)
         start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        block = text[start:end]
+        end = next((b for b in bounds if b > m.start()), len(text))
+        block = _strip_line_comments(text[start:end])
         rec = {"label": None, "category": None, "tooltip": None, "unit": None,
                "type": ctype, "min": None, "max": None, "mode": None,
                "enum_values": None, "enum_labels": None, "default": None}
@@ -83,7 +113,9 @@ def parse_print_config(text: str) -> tuple[dict[str, dict], list[str]]:
             if fm:
                 field, rhs = fm.group(1), fm.group(2)
                 if field in _STRING_FIELDS:
-                    rec[_STRING_FIELDS[field]] = _join_strings(s)
+                    val = _join_strings(s)
+                    if val is not None:  # never clobber a set value with a non-literal RHS
+                        rec[_STRING_FIELDS[field]] = val
                 elif field in ("min", "max"):
                     rec[field] = _num(rhs)
                 elif field == "mode":

@@ -40,6 +40,9 @@ class OrcaClient:
     async def get_status(self) -> dict:
         return await self._request("GET", "/api/v1/status")
 
+    async def get_objects(self) -> dict:
+        return await self._request("GET", "/api/v1/objects")
+
     async def get_config(self, keys: list[str] | None) -> dict:
         params = {"keys": ",".join(keys)} if keys else None
         data = await self._request("GET", "/api/v1/config", params=params)

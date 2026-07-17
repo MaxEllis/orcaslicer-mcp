@@ -159,6 +159,22 @@ def _m4a_err(e: ApiError) -> dict:
     return _err(e)
 
 
+def _m4b_err(e: ApiError) -> dict:
+    if isinstance(e, NotFound):
+        return {"error": "not available on this OrcaSlicer build (needs M4b)"}
+    return _err(e)
+
+
+@mcp.tool()
+async def list_objects() -> dict:
+    """List objects on the current plate: id (stable), name, size_mm, and transform (offset/rotation/scale). [needs M4b]"""
+    try:
+        async with _client() as c:
+            return await c.get_objects()
+    except ApiError as e:
+        return _m4b_err(e)
+
+
 @mcp.tool()
 async def watch_events(seconds: int = 10) -> dict:
     """Collect live events (slice.*/config.changed/project.opened) over a bounded window."""

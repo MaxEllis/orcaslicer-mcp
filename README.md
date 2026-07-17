@@ -38,6 +38,7 @@ uv tool install orcaslicer-mcp   # or, from a clone: uv pip install -e .
 ## Tools
 
 - **status/config:** `get_status`, `get_config`, `set_config`, `find_config_keys`
+- **settings knowledge (offline, no live API):** `describe_setting`, `search_settings` — authoritative label/tooltip/type/range/enum/default for ~800 settings, extracted from the fork's `PrintConfig.cpp` via `scripts/extract_settings_schema.py`.
 - **slicing:** `slice`, `get_slice_status`, `slice_and_wait`, `apply_and_slice`, `compare_settings`
 - **events:** `watch_events`
 - **M4a (needs the fork's model/preset/gcode endpoints):** `load_model`, `select_preset`, `get_gcode` — these return `"not available on this OrcaSlicer build (needs M4a)"` until the fork ships those endpoints.

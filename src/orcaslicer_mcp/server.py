@@ -5,6 +5,7 @@ from .config import load_config
 from .client import OrcaClient
 from .errors import ApiError, Validation, NotFound, Conflict, ConfigError
 from .models import summarize_slice
+from . import settings_schema
 
 mcp = FastMCP("orcaslicer")
 
@@ -177,6 +178,21 @@ async def find_config_keys(substring: str) -> dict:
             return {"keys": sorted(k for k in cfg if substring in k)}
     except ApiError as e:
         return _err(e)
+
+
+@mcp.tool()
+def describe_setting(key: str) -> dict:
+    """Authoritative definition of one OrcaSlicer setting: label, tooltip, type, unit, range, enum values, default. Offline; works even when OrcaSlicer is not running."""
+    rec = settings_schema.describe(key)
+    if rec is None:
+        return {"error": "unknown_setting", "key": key}
+    return rec
+
+
+@mcp.tool()
+def search_settings(query: str, limit: int = 25) -> dict:
+    """Search settings by keyword across key/label/tooltip; returns compact matches (key, label, category, short tooltip), ranked key/label first. Offline."""
+    return {"results": settings_schema.search(query, limit)}
 
 
 @mcp.tool()

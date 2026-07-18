@@ -41,7 +41,7 @@ uv tool install orcaslicer-mcp   # or, from a clone: uv pip install -e .
 - **settings knowledge (offline, no live API):** `describe_setting`, `search_settings` — authoritative label/tooltip/type/range/enum/default for ~800 settings, extracted from the fork's `PrintConfig.cpp` via `scripts/extract_settings_schema.py`.
 - **slicing:** `slice`, `get_slice_status`, `slice_and_wait`, `apply_and_slice`, `compare_settings`
 - **events:** `watch_events`
-- **M4b (needs the fork's plate/object endpoints):** `list_objects` — list plate objects (id, name, size_mm, transform); returns a `needs M4b` message until the fork ships `GET /objects`.
+- **M4b (needs the fork's plate/object endpoints):** `list_objects`, `transform_object`, `delete_object`, `arrange_plate`, `auto_orient`, `get_job_status` — inspect/move/delete objects and auto-arrange/orient the plate (async jobs; poll `get_job_status`). Each returns a `needs M4b` message until the fork ships the endpoint.
 - **M4a (needs the fork's model/preset/gcode endpoints):** `load_model`, `select_preset`, `get_gcode` — these return `"not available on this OrcaSlicer build (needs M4a)"` until the fork ships those endpoints.
 
 ## Development

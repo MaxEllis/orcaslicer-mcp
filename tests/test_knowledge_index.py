@@ -1,4 +1,4 @@
-from orcaslicer_mcp.knowledge_index import load_knowledge, KChunk, _parse
+from orcaslicer_mcp.knowledge_index import load_knowledge, KChunk, _parse, search_knowledge
 
 
 def test_load_knowledge_returns_chunks():
@@ -19,3 +19,12 @@ def test_load_knowledge_returns_fresh_list_over_shared_chunks():
 def test_parse_without_frontmatter_yields_tuples():
     c = _parse("x.md", "# No Frontmatter\n\nbody")
     assert isinstance(c.topics, tuple) and isinstance(c.orca_keys, tuple) and c.topics == ()
+
+
+def test_search_ranks_topic_match_first():
+    hits = search_knowledge("volumetric flow ceiling")
+    assert hits and hits[0].relpath.endswith("flow-limits.md")
+
+
+def test_search_empty_query_returns_nothing():
+    assert search_knowledge("") == []

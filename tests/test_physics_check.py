@@ -41,3 +41,40 @@ def test_long_retraction_warns():
 def test_missing_data_warns_not_raises():
     r = _by(run_checks({}), "flow_ceiling")
     assert r.status == "warn" and "insufficient" in r.detail
+
+def test_all_seven_checks_always_present():
+    names = {r.name for r in run_checks({})}
+    assert names == {"flow_ceiling", "temp_vs_flow", "layer_height_ratio",
+                     "line_width_ratio", "retraction_range", "cooling_sanity",
+                     "first_layer_height"}
+    assert all(r.status == "warn" for r in run_checks({}))
+
+def test_zero_flow_demand_passes_temp_check():
+    cfg = {"layer_height": "0.4", "line_width": "0.85", "nozzle_diameter": "0.8",
+           "filament_max_volumetric_speed": "16", "filament_type": "PLA",
+           "nozzle_temperature": "215", "outer_wall_speed": "0",
+           "outer_wall_line_width": "0.8"}
+    r = _by(run_checks(cfg), "temp_vs_flow")
+    assert r.status == "pass"
+
+def test_subbase_temp_reports_zero_not_negative():
+    cfg = {"layer_height": "0.4", "line_width": "0.85", "nozzle_diameter": "0.8",
+           "filament_max_volumetric_speed": "16", "filament_type": "PLA",
+           "nozzle_temperature": "180", "inner_wall_speed": "45",
+           "inner_wall_line_width": "0.88"}
+    r = _by(run_checks(cfg), "temp_vs_flow")
+    assert r.status == "fail" and "~0.0mm3/s" in r.detail
+
+def test_line_width_ratio_bounds():
+    base = {"nozzle_diameter": "0.8", "layer_height": "0.4"}
+    assert _by(run_checks(base | {"line_width": "0.5"}), "line_width_ratio").status == "warn"   # 0.625x
+    assert _by(run_checks(base | {"line_width": "0.4"}), "line_width_ratio").status == "fail"   # 0.5x
+    assert _by(run_checks(base | {"line_width": "0.9"}), "line_width_ratio").status == "pass"   # 1.125x
+
+def test_cooling_fan_inversion_fails():
+    cfg = {"fan_min_speed": "100", "fan_max_speed": "80"}
+    assert _by(run_checks(cfg), "cooling_sanity").status == "fail"
+
+def test_first_layer_height_cap():
+    cfg = {"nozzle_diameter": "0.4", "initial_layer_print_height": "0.36"}
+    assert _by(run_checks(cfg), "first_layer_height").status == "fail"  # 90% > 80%

@@ -52,3 +52,28 @@ def _load_knowledge_cached() -> tuple[KChunk, ...]:
 def load_knowledge() -> list[KChunk]:
     """Load knowledge chunks. Returns a fresh list each call over cached shared chunks."""
     return list(_load_knowledge_cached())
+
+
+def search_knowledge(query: str, limit: int = 6) -> list[KChunk]:
+    """Search knowledge chunks by ranking relevance to query.
+
+    Ranks chunks by topic match (+10), title match (+5), orca_keys match (+3),
+    and body word occurrences (up to +5). Returns top results by score.
+    """
+    q = query.lower().strip()
+    if not q:
+        return []
+    words = [w for w in re.split(r"[^a-z0-9_]+", q) if len(w) > 2]
+    scored = []
+    for c in load_knowledge():
+        score = 0
+        for w in words:
+            if any(w in t for t in c.topics):        score += 10
+            if w in c.title.lower():                 score += 5
+            if any(w in k for k in c.orca_keys):     score += 3
+            score += min(c.body.lower().count(w), 5)
+        # keep chunks with any signal
+        if score:
+            scored.append((score, c))
+    scored.sort(key=lambda t: -t[0])
+    return [c for _, c in scored[:limit]]

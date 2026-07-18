@@ -6,6 +6,9 @@ from .client import OrcaClient
 from .errors import ApiError, Validation, NotFound, Conflict, ConfigError
 from .models import summarize_slice
 from . import settings_schema
+from .knowledge_index import search_knowledge
+from .physics_check import run_checks
+from . import notes as _notes
 
 mcp = FastMCP("orcaslicer")
 
@@ -275,6 +278,44 @@ async def find_config_keys(substring: str) -> dict:
 
 
 @mcp.tool()
+async def consult(query: str) -> dict:
+    """Retrieve curated slicing knowledge + saved context notes for a topic,
+    symptom, or intent. ALWAYS call before deriving or changing settings for
+    a user goal. Composes principles per situation - never returns preset
+    bundles. Falls back to find_config_keys/web search if empty."""
+    chunks = [{"file": c.relpath, "title": c.title, "content": c.body}
+              for c in search_knowledge(query)]
+    return {"chunks": chunks, "notes": _notes.search_notes(query)}
+
+
+@mcp.tool()
+async def check_profile_physics(changes: dict | None = None) -> dict:
+    """Deterministic pre-save gate: fetches the live config, overlays optional
+    proposed `changes`, and runs flow/temperature/geometry/cooling math.
+    RUN THIS BEFORE save_preset. verdict=blocked means DO NOT SAVE."""
+    try:
+        async with _client() as c:
+            cfg = await c.get_config(None)
+    except ApiError as e:
+        return _err(e)
+    if changes:
+        cfg = dict(cfg) | {k: str(v) for k, v in changes.items()}
+    results = run_checks(cfg)
+    grouped = {"pass": [], "warn": [], "fail": []}
+    for r in results:
+        grouped[r.status].append({"name": r.name, "detail": r.detail})
+    grouped["verdict"] = "blocked" if grouped["fail"] else ("warnings" if grouped["warn"] else "ok")
+    return grouped
+
+
+@mcp.tool()
+async def remember(note: str, scope: str) -> dict:
+    """Persist a context fact for future sessions. scope: 'machine:<printer>/<filament>',
+    'user', or 'project:<name>'. Local plain files; user-readable and deletable."""
+    return {"saved": str(_notes.append_note(note, scope))}
+
+
+@mcp.tool()
 def describe_setting(key: str) -> dict:
     """Authoritative definition of one OrcaSlicer setting: label, tooltip, type, unit, range, enum values, default. Offline; works even when OrcaSlicer is not running."""
     rec = settings_schema.describe(key)
@@ -313,7 +354,9 @@ async def select_preset(type: str, name: str) -> dict:
 async def save_preset(type: str, name: str, detach: bool = False) -> dict:
     """Save the currently edited settings as a named user preset (create or update,
     visible in the GUI immediately). type = print|filament|printer. detach=True saves
-    it standalone instead of inheriting the current base preset. [needs preset/save]"""
+    it standalone instead of inheriting the current base preset. [needs preset/save]
+
+    Run check_profile_physics first; do not save when verdict=blocked."""
     try:
         async with _client() as c:
             return await c.save_preset(type, name, detach)

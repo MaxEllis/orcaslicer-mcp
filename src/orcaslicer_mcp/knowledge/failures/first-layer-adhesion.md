@@ -1,6 +1,6 @@
 ---
 topics: [adhesion, first-layer, bed]
-orca_keys: [initial_layer_speed, nozzle_temperature_initial_layer, hot_plate_temp_initial_layer, initial_layer_line_width]
+orca_keys: [initial_layer_speed, nozzle_temperature, nozzle_temperature_initial_layer, hot_plate_temp_initial_layer, initial_layer_line_width]
 ---
 
 # First-layer adhesion

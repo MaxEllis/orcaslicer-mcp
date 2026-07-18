@@ -9,14 +9,14 @@ from importlib import resources
 class KChunk:
     relpath: str
     title: str
-    topics: list[str]
-    orca_keys: list[str]
+    topics: tuple[str, ...]
+    orca_keys: tuple[str, ...]
     body: str
 
 
-def _parse_list(line: str) -> list[str]:
+def _parse_list(line: str) -> tuple[str, ...]:
     m = re.search(r"\[(.*)\]", line)
-    return [x.strip() for x in m.group(1).split(",") if x.strip()] if m else []
+    return tuple(x.strip() for x in m.group(1).split(",") if x.strip()) if m else ()
 
 
 def _parse(relpath: str, text: str) -> KChunk:
@@ -32,7 +32,7 @@ def _parse(relpath: str, text: str) -> KChunk:
 
 
 @functools.lru_cache(maxsize=1)
-def load_knowledge() -> list[KChunk]:
+def _load_knowledge_cached() -> tuple[KChunk, ...]:
     root = resources.files("orcaslicer_mcp") / "knowledge"
     out = []
     # Fallback to pathlib if rglob is not available on Traversable
@@ -46,4 +46,9 @@ def load_knowledge() -> list[KChunk]:
     for p in sorted(md_files):
         rel = str(p).split("knowledge/")[-1]
         out.append(_parse(rel, p.read_text(encoding="utf-8")))
-    return out
+    return tuple(out)
+
+
+def load_knowledge() -> list[KChunk]:
+    """Load knowledge chunks. Returns a fresh list each call over cached shared chunks."""
+    return list(_load_knowledge_cached())

@@ -46,6 +46,16 @@ uv tool install orcaslicer-mcp   # or, from a clone: uv pip install -e .
 
 - **M4c (needs the fork's per-object endpoints):** `set_object_config` — per-object config overrides (atomic); `needs M4c` until the fork ships `PUT /objects/{id}/config`.
 
+## Settings intelligence
+
+Three tools help you reason about and remember settings decisions across sessions:
+
+- **`consult(query)`** — retrieve curated slicing knowledge + saved context notes for a topic, symptom, or intent. Call this before deriving or changing settings for any user goal. Composes principles per situation — never returns preset bundles.
+- **`check_profile_physics(changes?)`** — deterministic pre-save gate: fetches the live config, overlays optional proposed changes, and runs flow/temperature/geometry/cooling math. Run this before saving a preset. Returns a `verdict` field: `blocked` (do not save), `warnings` (save with caution), or `ok`.
+- **`remember(note, scope)`** — persist a context fact for future sessions. Scopes: `machine:<printer>/<filament>`, `user`, or `project:<name>`. Notes live in `~/.orcaslicer-mcp/notes/` as plain local files — user-readable, deletable freely, never leaving your machine. Override the location via `ORCA_MCP_NOTES_DIR`.
+
+**Design:** knowledge is principles the AI composes per situation, never preset bundles. The system grounds decisions in live printer state (via `check_profile_physics`) and learned facts (via `remember` + `consult`), but does not impose rigid templates.
+
 ## Development
 
 ```bash

@@ -57,3 +57,29 @@ async def test_job_status(monkeypatch):
     _env(monkeypatch)
     respx.get("http://x:13130/api/v1/jobs/status").mock(return_value=httpx.Response(200, json={"idle": True}))
     assert (await srv.get_job_status())["idle"] is True
+
+
+@respx.mock
+async def test_duplicate_object(monkeypatch):
+    _env(monkeypatch)
+    respx.post("http://x:13130/api/v1/objects/5/duplicate").mock(
+        return_value=httpx.Response(200, json={"duplicated": True, "id": 5, "instances": 2}))
+    out = await srv.duplicate_object(5)
+    assert out["duplicated"] is True and out["instances"] == 2
+
+
+@respx.mock
+async def test_set_object_config(monkeypatch):
+    _env(monkeypatch)
+    respx.put("http://x:13130/api/v1/objects/9/config").mock(
+        return_value=httpx.Response(200, json={"applied": ["wall_loops"], "errors": {}, "object": "cube20"}))
+    out = await srv.set_object_config(9, {"wall_loops": 4})
+    assert out["applied"] == ["wall_loops"] and out["object"] == "cube20"
+
+
+@respx.mock
+async def test_set_object_config_needs_m4c(monkeypatch):
+    _env(monkeypatch)
+    respx.put("http://x:13130/api/v1/objects/9/config").mock(return_value=httpx.Response(404, json={"error": "not_found"}))
+    out = await srv.set_object_config(9, {"wall_loops": 4})
+    assert "M4c" in out["error"]

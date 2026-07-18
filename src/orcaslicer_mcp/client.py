@@ -46,6 +46,12 @@ class OrcaClient:
     async def delete_object(self, obj_id: int) -> dict:
         return await self._request("DELETE", f"/api/v1/objects/{obj_id}")
 
+    async def duplicate_object(self, obj_id: int) -> dict:
+        return await self._request("POST", f"/api/v1/objects/{obj_id}/duplicate")
+
+    async def set_object_config(self, obj_id: int, changes: dict) -> dict:
+        return await self._request("PUT", f"/api/v1/objects/{obj_id}/config", json=changes)
+
     async def transform_object(self, obj_id: int, translate=None, rotate=None, scale=None) -> dict:
         body = {}
         if translate is not None:
@@ -84,6 +90,31 @@ class OrcaClient:
 
     async def select_preset(self, ptype: str, name: str) -> dict:
         return await self._request("PUT", "/api/v1/preset", json={"type": ptype, "name": name})
+
+    async def save_preset(self, ptype: str, name: str, detach: bool = False) -> dict:
+        return await self._request("POST", "/api/v1/preset/save",
+                                   json={"type": ptype, "name": name, "detach": detach})
+
+    async def get_presets(self) -> dict:
+        return await self._request("GET", "/api/v1/presets")
+
+    async def get_preset_config(self, ptype: str, name: str) -> dict:
+        return await self._request("POST", "/api/v1/preset/config", json={"type": ptype, "name": name})
+
+    async def delete_preset(self, ptype: str, name: str) -> dict:
+        return await self._request("DELETE", "/api/v1/preset", json={"type": ptype, "name": name})
+
+    async def set_layer_height(self, obj_id: int, mode: str, quality: float = 0.5) -> dict:
+        body = {"mode": mode}
+        if mode == "adaptive":
+            body["quality"] = quality
+        return await self._request("PUT", f"/api/v1/objects/{obj_id}/layer_height", json=body)
+
+    async def set_height_range(self, obj_id: int, min_z: float | None = None,
+                               max_z: float | None = None, layer_height: float | None = None,
+                               clear: bool = False) -> dict:
+        body = {"clear": True} if clear else {"min_z": min_z, "max_z": max_z, "layer_height": layer_height}
+        return await self._request("PUT", f"/api/v1/objects/{obj_id}/height_range", json=body)
 
     async def get_gcode(self) -> bytes:
         try:

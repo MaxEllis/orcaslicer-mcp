@@ -176,6 +176,58 @@ async def list_objects() -> dict:
 
 
 @mcp.tool()
+async def delete_object(object_id: int) -> dict:
+    """Delete an object from the current plate by its id. [needs M4b]"""
+    try:
+        async with _client() as c:
+            return await c.delete_object(object_id)
+    except ApiError as e:
+        return _m4b_err(e)
+
+
+@mcp.tool()
+async def transform_object(object_id: int, translate: list[float] | None = None,
+                           rotate: list[float] | None = None,
+                           scale: list[float] | None = None) -> dict:
+    """Move/rotate/scale an object by id. translate=[dx,dy,dz] mm (relative), rotate=[rx,ry,rz] degrees (relative), scale=[sx,sy,sz] absolute factor. Provide at least one. [needs M4b]"""
+    try:
+        async with _client() as c:
+            return await c.transform_object(object_id, translate, rotate, scale)
+    except ApiError as e:
+        return _m4b_err(e)
+
+
+@mcp.tool()
+async def arrange_plate() -> dict:
+    """Auto-arrange all objects on the plate (async job; poll get_job_status until idle). [needs M4b]"""
+    try:
+        async with _client() as c:
+            return await c.arrange()
+    except ApiError as e:
+        return _m4b_err(e)
+
+
+@mcp.tool()
+async def auto_orient() -> dict:
+    """Auto-orient all objects for printing (async job; poll get_job_status until idle). [needs M4b]"""
+    try:
+        async with _client() as c:
+            return await c.orient()
+    except ApiError as e:
+        return _m4b_err(e)
+
+
+@mcp.tool()
+async def get_job_status() -> dict:
+    """Whether the plate job worker is idle (poll after arrange_plate/auto_orient). [needs M4b]"""
+    try:
+        async with _client() as c:
+            return await c.job_status()
+    except ApiError as e:
+        return _m4b_err(e)
+
+
+@mcp.tool()
 async def watch_events(seconds: int = 10) -> dict:
     """Collect live events (slice.*/config.changed/project.opened) over a bounded window."""
     try:

@@ -43,6 +43,28 @@ class OrcaClient:
     async def get_objects(self) -> dict:
         return await self._request("GET", "/api/v1/objects")
 
+    async def delete_object(self, obj_id: int) -> dict:
+        return await self._request("DELETE", f"/api/v1/objects/{obj_id}")
+
+    async def transform_object(self, obj_id: int, translate=None, rotate=None, scale=None) -> dict:
+        body = {}
+        if translate is not None:
+            body["translate"] = translate
+        if rotate is not None:
+            body["rotate"] = rotate
+        if scale is not None:
+            body["scale"] = scale
+        return await self._request("POST", f"/api/v1/objects/{obj_id}/transform", json=body)
+
+    async def arrange(self) -> dict:
+        return await self._request("POST", "/api/v1/arrange")
+
+    async def orient(self) -> dict:
+        return await self._request("POST", "/api/v1/orient")
+
+    async def job_status(self) -> dict:
+        return await self._request("GET", "/api/v1/jobs/status")
+
     async def get_config(self, keys: list[str] | None) -> dict:
         params = {"keys": ",".join(keys)} if keys else None
         data = await self._request("GET", "/api/v1/config", params=params)

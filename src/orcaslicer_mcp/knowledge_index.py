@@ -31,21 +31,25 @@ def _parse(relpath: str, text: str) -> KChunk:
     return KChunk(relpath, title, topics, keys, body.strip())
 
 
+def _walk_md(node, parts: list[str]):
+    """Recurse a Traversable (or pathlib.Path) yielding (relpath, text) for
+    every *.md file, using structural iterdir() traversal so relpaths are
+    built from name parts rather than string-splitting a path — this stays
+    correct regardless of OS path separators (Windows uses "\\", not "/")."""
+    entries = sorted(node.iterdir(), key=lambda e: e.name)
+    for entry in entries:
+        if entry.is_dir():
+            yield from _walk_md(entry, parts + [entry.name])
+        elif entry.is_file() and entry.name.endswith(".md"):
+            rel = "/".join(parts + [entry.name])
+            yield rel, entry.read_text(encoding="utf-8")
+
+
 @functools.lru_cache(maxsize=1)
 def _load_knowledge_cached() -> tuple[KChunk, ...]:
     root = resources.files("orcaslicer_mcp") / "knowledge"
-    out = []
-    # Fallback to pathlib if rglob is not available on Traversable
-    try:
-        md_files = root.rglob("*.md")
-    except AttributeError:
-        import pathlib
-        root = pathlib.Path(str(root))
-        md_files = root.rglob("*.md")
-
-    for p in sorted(md_files):
-        rel = str(p).split("knowledge/")[-1]
-        out.append(_parse(rel, p.read_text(encoding="utf-8")))
+    out = [_parse(rel, text) for rel, text in _walk_md(root, [])]
+    out.sort(key=lambda c: c.relpath)
     return tuple(out)
 
 

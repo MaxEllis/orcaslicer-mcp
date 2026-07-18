@@ -78,3 +78,13 @@ doesn't force the user to repeat information already on record.
 - IF the user's situation is missing fit and the part has any hole, peg, thread, or mating feature mentioned THEN weigh asking whether it needs to mate with something and how tightly, because `dimensional-accuracy.md`'s compensation and coupon-test guidance depends on it.
 - IF the user's situation already implies budget or appearance from context (e.g. "just a quick test" implies low budget-for-time and low appearance priority) THEN weigh deriving those fundamentals silently rather than asking, because they're already answered in substance even if not in the exact fundamental's vocabulary.
 - IF a fundamental was already given earlier in this session or a prior one THEN weigh retrieving it via memory rather than asking again, because `remember()` exists precisely so fundamentals are captured once.
+
+## Presenting options
+
+When a decision comes down to a recommendation, present 2-3 concrete
+options rather than a single verdict, and quantify each one with
+predicted print time and filament mass pulled from real slice results
+(the slice and status tools), not adjectives like "faster" or "more
+material." Trade-offs are stated with numbers — e.g. "1h42m / 18g at
+0.2mm vs. 2h55m / 19g at 0.12mm" — so the user is choosing between
+measured outcomes, not impressions.

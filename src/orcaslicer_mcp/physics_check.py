@@ -13,10 +13,38 @@ def _f(cfg: dict, key: str) -> float | None:
     v = cfg.get(key)
     if v in (None, ""):
         return None
+    s = str(v)
+    if "," in s:  # per-extruder vector like "80,80" -> use first element
+        s = s.split(",", 1)[0].strip()
     try:
-        return float(str(v).rstrip("%"))
+        return float(s.rstrip("%"))
     except ValueError:
         return None
+
+
+def _width(cfg: dict, key: str, nozzle: float | None) -> float | None:
+    """Line-width keys are float-or-percent; percent means percent OF NOZZLE
+    DIAMETER, and 0 means "auto" (not a literal zero-width line). Returns
+    None for missing/unparseable/auto values so callers treat them as
+    missing data rather than nonsensical widths."""
+    v = cfg.get(key)
+    if v in (None, ""):
+        return None
+    s = str(v).strip()
+    if s.endswith("%"):
+        if nozzle is None:
+            return None
+        try:
+            pct = float(s[:-1])
+        except ValueError:
+            return None
+        value = pct / 100 * nozzle
+    else:
+        try:
+            value = float(s)
+        except ValueError:
+            return None
+    return value if value > 0 else None
 
 def cross_section(line_width: float, layer_height: float) -> float:
     return (line_width - layer_height * (1 - math.pi / 4)) * layer_height
@@ -37,19 +65,21 @@ _TEMP_RULES = {"PLA": (195.0, 1.2), "PETG": (220.0, 1.4), "ABS": (225.0, 1.4), "
 def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
     out: list[CheckResult] = []
     lh, nd = _f(cfg, "layer_height"), _f(cfg, "nozzle_diameter")
-    lw, ceil = _f(cfg, "line_width"), _f(cfg, "filament_max_volumetric_speed")
+    lw = _width(cfg, "line_width", nd)
+    ceil = _f(cfg, "filament_max_volumetric_speed")
 
     # flow_ceiling
     if lh is None or ceil is None:
         out.append(CheckResult("flow_ceiling", "warn", "insufficient data (layer_height / filament_max_volumetric_speed)"))
         max_flow = None
     else:
+        default_w = lw
         worst, max_flow = "", 0.0
         found_any = False
         for speed_k, width_k in _FEATURES:
             sp = _f(cfg, speed_k)
-            w = _f(cfg, width_k)
-            w = lw if w is None else w
+            w = _width(cfg, width_k, nd)
+            w = default_w if w is None else w
             if sp is None or w is None:
                 continue
             found_any = True
@@ -62,7 +92,7 @@ def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
         else:
             status = "fail" if max_flow > ceil else "pass"
             if worst == "":
-                worst = "zero flow (all features disabled)"
+                worst = "zero flow demand (all found feature speeds are 0)"
             out.append(CheckResult("flow_ceiling", status, f"peak demand {worst}; ceiling {ceil:g}mm3/s"))
 
     # temp_vs_flow
@@ -110,6 +140,11 @@ def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
             out.append(CheckResult("cooling_sanity", "warn", f"slow_down_layer_time {sdlt:g}s < 3s risks molten stacking on small parts"))
         else:
             out.append(CheckResult("cooling_sanity", "pass", "fan range and layer-time slowdown sane"))
+    elif sdlt is not None:
+        if sdlt < 3:
+            out.append(CheckResult("cooling_sanity", "warn", f"slow_down_layer_time {sdlt:g}s < 3s risks molten stacking on small parts"))
+        else:
+            out.append(CheckResult("cooling_sanity", "pass", "layer-time slowdown sane (fan data missing)"))
     else:
         out.append(CheckResult("cooling_sanity", "warn", "insufficient data"))
 

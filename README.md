@@ -50,7 +50,7 @@ uv tool install orcaslicer-mcp   # or, from a clone: uv pip install -e .
 
 Three tools help you reason about and remember settings decisions across sessions:
 
-- **`consult(query)`** — retrieve curated slicing knowledge + saved context notes for a topic, symptom, or intent. Call this before deriving or changing settings for any user goal. Composes principles per situation — never returns preset bundles.
+- **`consult(query)`** — retrieve curated slicing knowledge + saved context notes for a topic, symptom, or intent. Call this before deriving or changing settings for any user goal. Composes principles per situation — never returns preset bundles. When recommending, present 2-3 concrete options quantified with predicted print time and filament mass from real slice results — never adjectives alone.
 - **`check_profile_physics(changes?)`** — deterministic pre-save gate: fetches the live config, overlays optional proposed changes, and runs flow/temperature/geometry/cooling math. Run this before saving a preset. Returns a `verdict` field: `blocked` (do not save), `warnings` (save with caution), or `ok`.
 - **`remember(note, scope)`** — persist a context fact for future sessions. Scopes: `machine:<printer>/<filament>`, `user`, or `project:<name>`. Notes live in `~/.orcaslicer-mcp/notes/` as plain local files — user-readable, deletable freely, never leaving your machine. Override the location via `ORCA_MCP_NOTES_DIR`.
 

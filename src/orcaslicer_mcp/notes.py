@@ -42,7 +42,8 @@ def search_notes(query: str) -> list[str]:
         scope = _scope_for(p, first_line)
         body_lines = lines[1:] if (first_line and first_line.startswith("# scope:")) else lines
         for line in body_lines:
-            text = line.lstrip("- ").split("] ", 1)[-1]
+            text = line[2:] if line.startswith("- ") else line
+            text = text.split("] ", 1)[-1]
             if any(w in text.lower() for w in words):
                 out.append(f"{scope}: {text}")
     return out

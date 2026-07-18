@@ -5,6 +5,7 @@ from orcaslicer_mcp import settings_schema
 def test_every_file_has_topics():
     for c in load_knowledge():
         assert c.topics, f"{c.relpath} missing topics frontmatter"
+        assert c.body.strip(), f"{c.relpath} has empty body"
 
 def test_every_orca_key_exists_in_schema():
     for c in load_knowledge():

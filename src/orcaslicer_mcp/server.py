@@ -282,7 +282,11 @@ async def consult(query: str) -> dict:
     """Retrieve curated slicing knowledge + saved context notes for a topic,
     symptom, or intent. ALWAYS call before deriving or changing settings for
     a user goal. Composes principles per situation - never returns preset
-    bundles. Falls back to find_config_keys/web search if empty."""
+    bundles. Falls back to find_config_keys/web search if empty.
+
+    When recommending, present 2-3 concrete options quantified with
+    predicted print time and filament mass from real slice results (slice +
+    status tools) - never adjectives alone."""
     chunks = [{"file": c.relpath, "title": c.title, "content": c.body}
               for c in search_knowledge(query)]
     return {"chunks": chunks, "notes": _notes.search_notes(query)}

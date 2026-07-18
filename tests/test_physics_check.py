@@ -78,3 +78,21 @@ def test_cooling_fan_inversion_fails():
 def test_first_layer_height_cap():
     cfg = {"nozzle_diameter": "0.4", "initial_layer_print_height": "0.36"}
     assert _by(run_checks(cfg), "first_layer_height").status == "fail"  # 90% > 80%
+
+def test_percent_line_width_resolves_against_nozzle():
+    cfg = {"nozzle_diameter": "0.8", "layer_height": "0.4", "line_width": "105%",
+           "inner_wall_speed": "45", "filament_max_volumetric_speed": "16",
+           "filament_type": "PLA", "nozzle_temperature": "215"}
+    r = _by(run_checks(cfg), "flow_ceiling")
+    assert r.status == "pass"  # 105% of 0.8 = 0.84mm, flow ~14.2 <= 16
+    assert _by(run_checks(cfg), "line_width_ratio").status == "pass"  # 1.05x
+
+def test_zero_auto_width_treated_as_missing():
+    cfg = {"nozzle_diameter": "0.8", "layer_height": "0.4", "line_width": "0",
+           "inner_wall_speed": "45", "filament_max_volumetric_speed": "16"}
+    assert _by(run_checks(cfg), "flow_ceiling").status == "warn"
+    assert _by(run_checks(cfg), "line_width_ratio").status == "warn"
+
+def test_vector_value_first_element_used():
+    cfg = {"fan_min_speed": "80,80", "fan_max_speed": "100,100", "slow_down_layer_time": "8"}
+    assert _by(run_checks(cfg), "cooling_sanity").status == "pass"

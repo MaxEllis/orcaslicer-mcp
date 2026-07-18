@@ -45,23 +45,32 @@ def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
         max_flow = None
     else:
         worst, max_flow = "", 0.0
+        found_any = False
         for speed_k, width_k in _FEATURES:
             sp = _f(cfg, speed_k)
-            w = _f(cfg, width_k) or lw
+            w = _f(cfg, width_k)
+            w = lw if w is None else w
             if sp is None or w is None:
                 continue
+            found_any = True
             flow = sp * cross_section(w, lh)
             if flow > max_flow:
                 max_flow, worst = flow, f"{speed_k.removesuffix('_speed')} {sp:g}mm/s x {w:g}mm = {flow:.1f}mm3/s"
-        status = "fail" if max_flow > ceil else "pass"
-        out.append(CheckResult("flow_ceiling", status, f"peak demand {worst}; ceiling {ceil:g}mm3/s"))
+        if not found_any:
+            out.append(CheckResult("flow_ceiling", "warn", "insufficient data (no feature speeds)"))
+            max_flow = None
+        else:
+            status = "fail" if max_flow > ceil else "pass"
+            if worst == "":
+                worst = "zero flow (all features disabled)"
+            out.append(CheckResult("flow_ceiling", status, f"peak demand {worst}; ceiling {ceil:g}mm3/s"))
 
     # temp_vs_flow
     mat = (cfg.get("filament_type") or "").upper()
     temp = _f(cfg, "nozzle_temperature")
-    if mat in _TEMP_RULES and temp is not None and max_flow:
+    if mat in _TEMP_RULES and temp is not None and max_flow is not None:
         base, slope = _TEMP_RULES[mat]
-        sustainable = (temp - base) / slope
+        sustainable = max(0.0, (temp - base) / slope)
         status = "fail" if max_flow > sustainable else "pass"
         out.append(CheckResult("temp_vs_flow", status,
             f"{mat}@{temp:g}C sustains ~{sustainable:.1f}mm3/s; profile demands {max_flow:.1f}mm3/s"))
@@ -81,12 +90,16 @@ def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
         r = lw / nd
         status = "fail" if (r < 0.6 or r > 2.0) else ("warn" if (r < 0.85 or r > 1.5) else "pass")
         out.append(CheckResult("line_width_ratio", status, f"line {lw:g}mm = {r:.2f}x nozzle (sane 0.85-1.5x)"))
+    else:
+        out.append(CheckResult("line_width_ratio", "warn", "insufficient data"))
 
     # retraction_range: warn >3mm (bowden-length on likely-DD) or ==0; fail >8mm
     ret = _f(cfg, "retraction_length")
     if ret is not None:
         status = "fail" if ret > 8 else ("warn" if (ret > 3 or ret == 0) else "pass")
         out.append(CheckResult("retraction_range", status, f"retraction {ret:g}mm (DD sane 0.2-2, bowden 2-7)"))
+    else:
+        out.append(CheckResult("retraction_range", "warn", "insufficient data"))
 
     # cooling_sanity
     fmin, fmax, sdlt = _f(cfg, "fan_min_speed"), _f(cfg, "fan_max_speed"), _f(cfg, "slow_down_layer_time")
@@ -97,10 +110,14 @@ def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
             out.append(CheckResult("cooling_sanity", "warn", f"slow_down_layer_time {sdlt:g}s < 3s risks molten stacking on small parts"))
         else:
             out.append(CheckResult("cooling_sanity", "pass", "fan range and layer-time slowdown sane"))
+    else:
+        out.append(CheckResult("cooling_sanity", "warn", "insufficient data"))
 
     # first_layer: initial height must be <= 0.8*nozzle and >= layer_height*0.75 is NOT required; just ratio cap
     ilh = _f(cfg, "initial_layer_print_height")
     if ilh is not None and nd is not None:
         status = "fail" if ilh / nd > 0.8 else "pass"
         out.append(CheckResult("first_layer_height", status, f"first layer {ilh:g}mm vs nozzle {nd:g}mm (max 80%)"))
+    else:
+        out.append(CheckResult("first_layer_height", "warn", "insufficient data"))
     return out

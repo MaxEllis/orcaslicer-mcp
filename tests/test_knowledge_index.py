@@ -1,3 +1,5 @@
+import pytest
+
 from orcaslicer_mcp.knowledge_index import load_knowledge, KChunk, _parse, search_knowledge
 
 
@@ -28,3 +30,12 @@ def test_search_ranks_topic_match_first():
 
 def test_search_empty_query_returns_nothing():
     assert search_knowledge("") == []
+
+
+@pytest.mark.parametrize("query,expect", [
+    ("stringing on travel moves", "failures/stringing.md"),
+    ("corners lifting off the bed", "failures/warping.md"),
+    ("layers splitting when part is stressed", "failures/layer-splitting.md"),
+])
+def test_failure_retrieval_goldens(query, expect):
+    assert any(c.relpath == expect for c in search_knowledge(query)), query

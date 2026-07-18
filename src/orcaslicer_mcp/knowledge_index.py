@@ -20,7 +20,7 @@ def _parse_list(line: str) -> tuple[str, ...]:
 
 
 def _parse(relpath: str, text: str) -> KChunk:
-    topics, keys, body = [], [], text
+    topics, keys, body = (), (), text
     if text.startswith("---"):
         head, _, body = text[3:].partition("---")
         for line in head.splitlines():

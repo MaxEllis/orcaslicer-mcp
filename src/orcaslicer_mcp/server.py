@@ -165,12 +165,38 @@ def _m4b_err(e: ApiError) -> dict:
     return _err(e)
 
 
+def _m4c_err(e: ApiError) -> dict:
+    if isinstance(e, NotFound):
+        return {"error": "not available on this OrcaSlicer build (needs M4c)"}
+    return _err(e)
+
+
 @mcp.tool()
 async def list_objects() -> dict:
     """List objects on the current plate: id (stable), name, size_mm, and transform (offset/rotation/scale). [needs M4b]"""
     try:
         async with _client() as c:
             return await c.get_objects()
+    except ApiError as e:
+        return _m4b_err(e)
+
+
+@mcp.tool()
+async def set_object_config(object_id: int, changes: dict) -> dict:
+    """Set per-object config overrides on an object by id, e.g. {"wall_loops": 4, "sparse_infill_density": "30%"}. Atomic (nothing applied if any key is invalid). [needs M4c]"""
+    try:
+        async with _client() as c:
+            return await c.set_object_config(object_id, changes)
+    except ApiError as e:
+        return _m4c_err(e)
+
+
+@mcp.tool()
+async def duplicate_object(object_id: int) -> dict:
+    """Duplicate an object on the plate by id (adds a copy, offset from the original). [needs M4b]"""
+    try:
+        async with _client() as c:
+            return await c.duplicate_object(object_id)
     except ApiError as e:
         return _m4b_err(e)
 
@@ -279,6 +305,104 @@ async def select_preset(type: str, name: str) -> dict:
     try:
         async with _client() as c:
             return await c.select_preset(type, name)
+    except ApiError as e:
+        return _m4a_err(e)
+
+
+@mcp.tool()
+async def save_preset(type: str, name: str, detach: bool = False) -> dict:
+    """Save the currently edited settings as a named user preset (create or update,
+    visible in the GUI immediately). type = print|filament|printer. detach=True saves
+    it standalone instead of inheriting the current base preset. [needs preset/save]"""
+    try:
+        async with _client() as c:
+            return await c.save_preset(type, name, detach)
+    except ApiError as e:
+        return _m4a_err(e)
+
+
+@mcp.tool()
+async def list_presets() -> dict:
+    """List all print/filament/printer presets with system/selected flags. [needs preset/save build]"""
+    try:
+        async with _client() as c:
+            return await c.get_presets()
+    except ApiError as e:
+        return _m4a_err(e)
+
+
+@mcp.tool()
+async def set_layer_height(object_id: int, mode: str, quality: float = 0.5) -> dict:
+    """Variable layer height for one object. mode='adaptive' (quality 0..1, higher = finer
+    detail) generates an adaptive profile; mode='reset' restores uniform layers. [needs M4c build]"""
+    try:
+        async with _client() as c:
+            return await c.set_layer_height(object_id, mode, quality)
+    except ApiError as e:
+        return _m4a_err(e)
+
+
+@mcp.tool()
+async def set_height_range(object_id: int, min_z: float | None = None, max_z: float | None = None,
+                           layer_height: float | None = None, clear: bool = False) -> dict:
+    """Set a per-height-band layer height on an object (e.g. 0-5mm at 0.1mm). Same exact
+    range again = update; clear=True removes all ranges. [needs M4c build]"""
+    try:
+        async with _client() as c:
+            return await c.set_height_range(object_id, min_z, max_z, layer_height, clear)
+    except ApiError as e:
+        return _m4a_err(e)
+
+
+@mcp.tool()
+async def get_preset_config(type: str, name: str) -> dict:
+    """Read the full settings of a named preset without selecting it.
+    type = print|filament|printer. [needs preset-CRUD build]"""
+    try:
+        async with _client() as c:
+            return await c.get_preset_config(type, name)
+    except ApiError as e:
+        return _m4a_err(e)
+
+
+@mcp.tool()
+async def delete_preset(type: str, name: str) -> dict:
+    """Delete a USER preset (system presets and the currently-selected one are refused).
+    type = print|filament|printer. [needs preset-CRUD build]"""
+    try:
+        async with _client() as c:
+            return await c.delete_preset(type, name)
+    except ApiError as e:
+        return _m4a_err(e)
+
+
+@mcp.tool()
+async def edit_preset(type: str, name: str, changes: dict) -> dict:
+    """Edit a named preset's settings and persist them: selects it, applies the
+    changes atomically, saves under the same name. [needs preset/save build]"""
+    try:
+        async with _client() as c:
+            await c.select_preset(type, name)
+            applied = await c.put_config(changes)
+            if applied.get("errors"):
+                return {"error": "invalid_keys", "errors": applied["errors"]}
+            saved = await c.save_preset(type, name)
+            return {"preset": name, "applied": applied.get("applied", []), "saved": saved}
+    except ApiError as e:
+        return _m4a_err(e)
+
+
+@mcp.tool()
+async def rename_preset(type: str, old_name: str, new_name: str) -> dict:
+    """Rename a USER preset: save a copy under the new name, select it, delete the old.
+    [needs preset-CRUD build]"""
+    try:
+        async with _client() as c:
+            await c.select_preset(type, old_name)
+            await c.save_preset(type, new_name)
+            await c.select_preset(type, new_name)
+            deleted = await c.delete_preset(type, old_name)
+            return {"renamed": old_name, "to": new_name, "deleted": deleted}
     except ApiError as e:
         return _m4a_err(e)
 

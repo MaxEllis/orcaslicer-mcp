@@ -65,3 +65,8 @@ place. With pressure advance properly tuned, the retraction length needed
 to stop oozing drops — profiles migrating to a Klipper printer with
 pressure advance enabled should expect to retune retraction downward
 rather than reusing values tuned on a printer without it.
+
+The ranges above are baselines for setups WITHOUT tuned pressure advance.
+With PA tuned (Klipper), Ellis' starting points drop to roughly 0.5-1 mm
+direct drive and 1-3 mm bowden — PA removes most of the pressure the
+retraction otherwise has to relieve.

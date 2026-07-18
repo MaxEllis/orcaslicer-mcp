@@ -65,10 +65,20 @@ best-case conditions (short retraction-free test paths, ideal cooling,
 sometimes non-standard hotends). Real print-quality ceilings run lower:
 
 - Standard brass-nozzle hotends (V6-style, ~20 mm melt zone) with PLA:
-  roughly **11–15 mm³/s** sustained.
+  roughly **10–15 mm³/s** sustained (CNC Kitchen bench data: measurable
+  under-extrusion from ~9 mm³/s and extruder skipping from 15 mm³/s at
+  215 °C on a stock V6; https://www.cnckitchen.com/blog/flow-rate-benchmarking-of-a-hotend).
 - Volcano-style hotends (longer melt zone, more heater contact) with PLA:
-  roughly **16–24 mm³/s** sustained.
+  roughly **16–24 mm³/s** sustained (community heuristic — no primary
+  bench citation found as of 2026-07-19; E3D itself declines to publish
+  single-number ceilings because the limit depends on temperature,
+  material, and tolerance for under-extrusion).
 
 Treat these as starting ceilings to derate from, not targets to chase —
 pushing right up to a spec-sheet number on a real profile routinely trades
 away wall consistency and top-surface finish for a small time savings.
+
+All ceilings above are temperature-, material-, and tolerance-dependent
+tuning targets, not constants: under-extrusion grows gradually as demand
+approaches the limit, so where you draw the line is a quality judgment.
+Derate for quality-critical prints.

@@ -26,6 +26,20 @@ bridges, and blurred fine detail from a larger, more mobile melt pool.
 
 ## Sustainable-flow rules by material
 
+**Provenance note (2026-07-19 fact-check):** the linear rules below are an
+in-house engineering heuristic, not literature-derived constants. External
+bench data (CNC Kitchen) confirms the DIRECTION — hotter sustains more flow —
+but no published source validates these slopes; CNC Kitchen's V6 skip-point
+data suggests a shallower slope (~0.2 mm³/s per °C) for the SKIPPING
+threshold. These rules are deliberately steeper/more conservative because
+they target QUALITY-grade extrusion (strong layer bonds), which degrades
+well before the extruder skips, and they match the real 2026-07-18
+Sidewinder incident (205 °C weak layers at ~14 mm³/s; 215 °C sound). Two
+structural limits apply regardless: sustainable flow can never exceed the
+hotend's melt-capacity ceiling (heater power bound — see flow-limits.md),
+and the profile's own `filament_max_volumetric_speed` gate catches demand
+above the machine ceiling independently of temperature.
+
 For the common filament families, a linear approximation of the
 temperature-to-sustainable-flow relationship (`T` = `nozzle_temperature`,
 result in mm³/s) is normative for validation:

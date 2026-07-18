@@ -31,7 +31,9 @@ when a layer's estimated print time drops below the configured threshold,
 the slicer slows the print (down to `slow_down_min_speed`) so that the
 layer takes longer to print, giving the previous layer more real time to
 cool. As a practical floor, small or thin-walled parts need
-`slow_down_layer_time` of roughly **8 seconds or more** per layer to avoid
+`slow_down_layer_time` of roughly **8 seconds or more** per layer (a
+conservative choice within the 4–10 s range of common slicer defaults —
+Cura ships 5–10 s per printer; PLA guides cite 3–5 s, ABS ~15 s) to avoid
 molten stacking; layer times well under that reliably show softening and
 dimensional creep on the smallest features of a print, regardless of fan
 speed.

@@ -74,3 +74,11 @@ is known and aligned, and the wrong choice when it isn't.
 - IF the user's situation says the load direction is known and in-plane (a bracket flexing on one axis) THEN weigh rectilinear `sparse_infill_pattern` as acceptable, because its cheaper print cost isn't paid for with a strength deficit along the known load axis.
 - IF the user's situation says the part is decorative or low-stress THEN weigh `wall_loops` and shell layers down toward the low end of what still avoids visible infill show-through, because functional-part minimums don't apply and print time matters more.
 - IF the user's situation flags under-extrusion, unusual weakness, or delamination at low apparent stress THEN weigh temperature/flow adequacy (`physics/couplings.md`) before adding walls or infill, because a process problem in layer bonding won't be fixed by adding more of the same badly-bonded geometry.
+
+Evidence note: the walls-over-infill rule is confirmed by manufacturer
+guidance (Prusa: strength is 'mostly defined by the number of perimeters')
+and destructive testing (CNC Kitchen: at equal part weight, 5 walls/10%
+infill tested ~22% stronger than 2 walls/42% infill). The exact +1-wall ~
++15%-infill equivalence is a working heuristic, not a measured constant,
+and is load-direction dependent (Z-tension loads care about layer adhesion
+first).

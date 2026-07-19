@@ -10,7 +10,13 @@ class Unauthorized(ApiError):
 
 
 class NotFound(ApiError):
-    """Unknown route, or an endpoint this OrcaSlicer build doesn't implement yet (e.g. M4)."""
+    """404 from the fork. `route_missing=True` means the endpoint itself doesn't exist
+    (older build, e.g. pre-M4); False means the route exists but the resource doesn't
+    (unknown_object / unknown_preset / missing file)."""
+
+    def __init__(self, message: str, route_missing: bool = False):
+        super().__init__(message)
+        self.route_missing = route_missing
 
 
 class BadRequest(ApiError):
@@ -48,7 +54,14 @@ def error_from_status(status: int, body: dict) -> ApiError:
     if status == 401:
         return Unauthorized("unauthorized (check ORCA_API_TOKEN)")
     if status == 404:
-        return NotFound("endpoint not found / not available on this OrcaSlicer build")
+        # The fork's dispatch fallback answers {"error":"not_found"} (or nothing) for a
+        # route that doesn't exist; resource-level 404s carry a specific token such as
+        # unknown_object / unknown_preset. Keep them distinguishable (F7).
+        err = body.get("error")
+        if err and err != "not_found":
+            return NotFound(err)
+        return NotFound("endpoint not found / not available on this OrcaSlicer build",
+                        route_missing=True)
     if status == 400:
         return BadRequest(msg)
     if status == 409:

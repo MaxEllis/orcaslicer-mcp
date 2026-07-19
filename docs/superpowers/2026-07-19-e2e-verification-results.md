@@ -113,3 +113,28 @@ Server-side backlog items fixed in orcaslicer-mcp (TDD, +8 regression tests, ful
 traffic even paced at 1.2s intervals (dumps 22:18 / 22:31). F8's trigger is any mutation burst that
 overlaps the 10s auto-backup exporter — preset saves included, not just config PUTs. Preset-op
 sequences against the live fork should be treated as crash-prone until the fork-side fix lands.
+
+## Fork fix round (2026-07-20) - F2/F8/F9 shipped and live-verified
+
+Fork build `1776a884` (remote-api, relayed to GitHub) closes the remaining fork-side backlog:
+
+- **F8 FIXED (root-caused):** the 10s auto-backup 3MF exporter pumps the wx event queue
+  mid-export, so a queued CallAfter API mutation could execute INSIDE export_3mf and mutate
+  the model/presets being serialized -> heap corruption. Fix = two-way exclusion: API UI tasks
+  arriving during an export are parked and flushed after it; the exporter skips+re-arms if an
+  API task is on the stack; plus `backup_defer(3s)` pushes the backup timer out of any mutation
+  window. **Verified: 150 rapid config writes -> 0 ui_timeouts (was ~25% + crash ~300 in);
+  preset save/select/delete bursts survived; same PID through two full stress runs.**
+- **F2 FIXED:** (a) `POST /api/v1/slice/cancel` aborts a running slice or unwedges a stale
+  state (new `Plater::stop_background_slicing()`); (b) handle_slice detects reslice()'s silent
+  no-start (outside-bed/INVALID) synchronously -> 422 `slice_not_started` + state=error instead
+  of the eternal "slicing" wedge. Verified live: outside-bed -> 422 + error state -> cancel ->
+  idle -> normal slice -> done. **New finding:** the background process can also transiently
+  decline to restart for ~1-2s right after a completed slice - same 422 (honest: nothing
+  started); orcaslicer-mcp's `_start_slice()` retries once (1.5s) to absorb it.
+- **F9 FIXED:** PUT /config on a recognized-but-not-editable key (merged-config layer:
+  wipe_tower_x, flush volumes, AMS maps...) now returns `not_editable_in_current_config`;
+  `unknown_key` is reserved for real typos. Verified live on wipe_tower_x + a garbage key.
+
+orcaslicer-mcp `1b14a73` adds the paired `cancel_slice` tool + the transient-decline retry
+(143 tests green). Remaining backlog: only minor F4 (key naming) / F5 (rotate units).

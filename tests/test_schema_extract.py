@@ -117,3 +117,69 @@ def test_setting_count():
     # printable_area, compatible_printers  (adaptive_layer_height commented out)
     assert set(settings) == {"layer_height", "sparse_infill_pattern", "branch_angle",
                              "min_wall", "after_loop", "printable_area", "compatible_printers"}
+
+
+# --- regression: enums populated with emplace_back (not just push_back) ---
+EMPLACE_FIXTURE = r'''
+    def = this->add("overhang_fan_threshold", coEnums);
+    def->label = L("Overhang cooling activation threshold");
+    def->enum_values.emplace_back("0%");
+    def->enum_values.emplace_back("25%");
+    def->enum_values.emplace_back("95%");
+    def->enum_labels.emplace_back("0%");
+    def->enum_labels.emplace_back("25%");
+    def->enum_labels.emplace_back("95%");
+    def->set_default_value(new ConfigOptionEnumsGeneric{ 0 });
+
+    def = this->add("curr_bed_type", coEnum);
+    def->label = L("Bed type");
+    def->enum_values.emplace_back("Cool Plate");
+    def->enum_values.emplace_back("Textured PEI Plate");
+    def->enum_labels.emplace_back(L("Smooth Cool Plate"));
+    def->enum_labels.emplace_back(L("Textured PEI Plate"));
+    def->set_default_value(new ConfigOptionEnum<BedType>(btPC));
+'''
+
+def test_parses_emplace_back_enum_values():
+    # emplace_back is used for ~29 enum-value lines in PrintConfig.cpp (bed type,
+    # overhang fan threshold, brim type, ...). Must be parsed just like push_back.
+    settings, _ = parse_print_config(EMPLACE_FIXTURE)
+    s = settings["overhang_fan_threshold"]
+    assert s["type"] == "coEnums"
+    assert s["enum_values"] == ["0%", "25%", "95%"]
+    assert s["enum_labels"] == ["0%", "25%", "95%"]
+
+def test_parses_emplace_back_enum_with_L_macro_labels():
+    settings, _ = parse_print_config(EMPLACE_FIXTURE)
+    s = settings["curr_bed_type"]
+    assert s["enum_values"] == ["Cool Plate", "Textured PEI Plate"]
+    assert s["enum_labels"] == ["Smooth Cool Plate", "Textured PEI Plate"]
+
+
+# --- regression: enum lists copied from a def alias (def->enum_values = X->enum_values) ---
+COPY_FIXTURE = r'''
+    auto def_top_fill_pattern = def = this->add("top_surface_pattern", coEnum);
+    def->label = L("Top surface pattern");
+    def->enum_values.push_back("monotonic");
+    def->enum_values.push_back("concentric");
+    def->enum_labels.push_back(L("Monotonic"));
+    def->enum_labels.push_back(L("Concentric"));
+    def->set_default_value(new ConfigOptionEnum<InfillPattern>(ipMonotonic));
+
+    def = this->add("bottom_surface_pattern", coEnum);
+    def->label = L("Bottom surface pattern");
+    def->enum_values = def_top_fill_pattern->enum_values;
+    def->enum_labels = def_top_fill_pattern->enum_labels;
+    def->set_default_value(new ConfigOptionEnum<InfillPattern>(ipMonotonic));
+'''
+
+def test_resolves_enum_values_copied_from_alias():
+    # bottom_surface_pattern / internal_solid_infill_pattern / infill_anchor_max copy
+    # their enum lists from another def via C++ assignment, not push_back.
+    settings, _ = parse_print_config(COPY_FIXTURE)
+    assert settings["top_surface_pattern"]["enum_values"] == ["monotonic", "concentric"]
+    b = settings["bottom_surface_pattern"]
+    assert b["enum_values"] == ["monotonic", "concentric"]
+    assert b["enum_labels"] == ["Monotonic", "Concentric"]
+    # temp resolution fields must not leak into the record
+    assert not any(k.startswith("_copy") for k in b)

@@ -162,3 +162,56 @@ async def test_rename_preset_deletes_source_after_saving_copy(monkeypatch):
     assert "delete" in ops
     assert ops.index("delete") > ops.index("save")
     assert '"old"' in calls[[op for op, _ in calls].index("delete")][1]
+
+
+# --- cancel_slice (fork F2 fix adds POST /slice/cancel) ---
+
+@respx.mock
+async def test_cancel_slice_resets_wedged_state(monkeypatch):
+    _env(monkeypatch)
+    route = respx.post("http://x:13130/api/v1/slice/cancel").mock(
+        return_value=httpx.Response(200, json={"cancelled": True}))
+    out = await srv.cancel_slice()
+    assert route.called
+    assert out == {"cancelled": True}
+
+
+@respx.mock
+async def test_cancel_slice_on_old_build_reports_capability(monkeypatch):
+    # route-level 404 (pre-F2 build) -> capability message, not a confusing error
+    _env(monkeypatch)
+    respx.post("http://x:13130/api/v1/slice/cancel").mock(
+        return_value=httpx.Response(404, json={"error": "not_found"}))
+    out = await srv.cancel_slice()
+    assert "not available" in out["error"]
+
+
+# --- slice_not_started is a transient decline window right after a completed
+# slice (fork F2 detection); the starters must retry once before giving up ---
+
+@respx.mock
+async def test_slice_and_wait_retries_transient_slice_not_started(monkeypatch):
+    _env(monkeypatch)
+    respx.post("http://x:13130/api/v1/slice").mock(
+        side_effect=[
+            httpx.Response(422, json={"error": "slice_not_started"}),
+            httpx.Response(202, json={"started": True}),
+        ])
+    respx.get("http://x:13130/api/v1/slice/status").mock(
+        return_value=httpx.Response(200, json={"state": "done", "percent": 100,
+                                               "message": "", "stats": {"total_cost": 0.1}, "warnings": []}))
+    async def _nosleep(_): pass
+    monkeypatch.setattr(srv.asyncio, "sleep", _nosleep)
+    out = await srv.slice_and_wait(timeout=5)
+    assert out["state"] == "done"
+
+
+@respx.mock
+async def test_slice_and_wait_gives_up_after_one_retry(monkeypatch):
+    _env(monkeypatch)
+    respx.post("http://x:13130/api/v1/slice").mock(
+        return_value=httpx.Response(422, json={"error": "slice_not_started"}))
+    async def _nosleep(_): pass
+    monkeypatch.setattr(srv.asyncio, "sleep", _nosleep)
+    out = await srv.slice_and_wait(timeout=5)
+    assert "slice_not_started" in out.get("error", "")

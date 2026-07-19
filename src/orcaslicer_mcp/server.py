@@ -37,6 +37,19 @@ async def _wait_for_slice(c, timeout: int) -> dict:
     return s
 
 
+async def _start_slice(c) -> dict:
+    """POST /slice with one retry: right after a slice completes, the fork's
+    background process can transiently decline to restart (422 slice_not_started,
+    surfaced by the F2 wedge detection). One short pause clears it."""
+    try:
+        return await c.slice()
+    except Validation as e:
+        if "slice_not_started" not in str(e):
+            raise
+        await asyncio.sleep(1.5)
+        return await c.slice()
+
+
 def _err(e: ApiError) -> dict:
     out = {"error": str(e)}
     if isinstance(e, Validation):
@@ -116,11 +129,22 @@ async def get_slice_warnings() -> dict:
 
 
 @mcp.tool()
+async def cancel_slice() -> dict:
+    """Abort a running slice, or unwedge a stale 'slicing' state (e.g. after an
+    object outside the bed). Safe when idle. [needs F2 build]"""
+    try:
+        async with _client() as c:
+            return await c.cancel_slice()
+    except ApiError as e:
+        return _m4_err(e, "the F2 fork fix")
+
+
+@mcp.tool()
 async def slice_and_wait(timeout: int = 300) -> dict:
     """Slice (or reuse a valid result) and wait for completion; return final stats + warnings."""
     try:
         async with _client() as c:
-            started = await c.slice()
+            started = await _start_slice(c)
             if started.get("already_valid"):
                 return summarize_slice(await c.slice_status())
             return summarize_slice(await _wait_for_slice(c, timeout))
@@ -134,7 +158,7 @@ async def apply_and_slice(changes: dict) -> dict:
     try:
         async with _client() as c:
             applied = await c.put_config(changes)
-            started = await c.slice()
+            started = await _start_slice(c)
             if not started.get("already_valid"):
                 await _wait_for_slice(c, 300)
             result = summarize_slice(await c.slice_status())
@@ -161,7 +185,7 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
                     row = {"value": v, "stats": None, "warnings": [], "error": None}
                     try:
                         await c.put_config({key: v, **(extra or {})})
-                        started = await c.slice()
+                        started = await _start_slice(c)
                         if not started.get("already_valid"):
                             await _wait_for_slice(c, 300)
                         s = summarize_slice(await c.slice_status())

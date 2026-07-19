@@ -91,6 +91,9 @@ class OrcaClient:
     async def slice_status(self) -> dict:
         return await self._request("GET", "/api/v1/slice/status")
 
+    async def cancel_slice(self) -> dict:
+        return await self._request("POST", "/api/v1/slice/cancel")
+
     async def load_model(self, path: str) -> dict:
         return await self._request("POST", "/api/v1/model", json={"path": path})
 

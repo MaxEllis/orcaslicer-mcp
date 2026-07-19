@@ -84,3 +84,32 @@ options that don't exist on a single-extruder SWX2 — recommended F9 resolution
 (`not_editable_in_current_config`) + document read-only, NOT whitelisting. Meanwhile `overhang_fan_threshold`
 was proven **writable** (needs exact `%` enum token, per-filament vector) — fixed data-side by repairing the
 schema extractor (emplace_back + alias-copy enum parsing), which now populates 56/56 coEnum keys.
+
+**F8 datapoint 2 (2026-07-19, later):** the crash is NOT limited to rapid `set_config` writes.
+A short preset-lifecycle sequence (save/select ×~6 + delete + list over ~10s, no config PUTs)
+also killed the fork (WER dump `orca-slicer.exe.21888.dmp`, 22:18) — consistent with the
+auto-backup-exporter race being triggered by any API mutation burst, not just config-apply.
+Relaunch gotcha reconfirmed: relaunching before port 13130's TIME_WAIT clears (~90s) yields a
+running GUI with the API silently unbound; kill, wait for 0 sockets on 13130, relaunch.
+
+## Fix round (2026-07-19, late) — F1/F3/F6/F7 resolved, live-verified
+
+Server-side backlog items fixed in orcaslicer-mcp (TDD, +8 regression tests, full suite 139 green):
+
+- **F1 FIXED:** `_wait_for_slice` now polls until a TERMINAL state (`done`/`error`/`idle`=cancelled)
+  instead of exiting on anything ≠ `slicing`. Live: `slice_and_wait` → `state=done`.
+- **F3 CANNOT REPRODUCE (build 43b86fc7):** `rename_preset` correctly deletes the source in both
+  the not-selected and currently-selected cases — verified live at the API **and on disk**
+  (`%APPDATA%\OrcaSlicer\user\default\process`: source .json/.info gone after rename). The composite's
+  ordering (save new → select new → delete old) is now locked by a unit test. Note: two fork crashes
+  (below) stranded rename *targets* on disk mid-test; sources were always cleaned correctly.
+- **F6 FIXED:** `set_layer_height` accepts `default`/`none` as aliases for `reset`; docstring updated.
+  Live: adaptive (37 points) → `mode=default` → `{"mode":"reset"}`.
+- **F7 FIXED:** 404s now distinguish route-missing (→ "needs M4x") from resource-missing
+  (`unknown_object`/`unknown_preset` pass through; fork's dispatch fallback `not_found` = route-level).
+  Live: `set_layer_height(999999,…)` → `{"error":"unknown_object"}`.
+
+**F8 datapoint 3:** two MORE crashes during this round, both within seconds of `save_preset`
+traffic even paced at 1.2s intervals (dumps 22:18 / 22:31). F8's trigger is any mutation burst that
+overlaps the 10s auto-backup exporter — preset saves included, not just config PUTs. Preset-op
+sequences against the live fork should be treated as crash-prone until the fork-side fix lands.

@@ -21,11 +21,17 @@ def _client() -> OrcaClient:
         raise ConfigError(str(e))
 
 
+# The fork's terminal slice states: done, error, and idle (= cancelled).
+# Anything else ("slicing", or transitional states like "starting") means
+# keep polling — returning early hands the caller a stale result (F1).
+_TERMINAL_SLICE_STATES = frozenset({"done", "error", "idle"})
+
+
 async def _wait_for_slice(c, timeout: int) -> dict:
-    """Poll slice_status until the slice leaves the 'slicing' state or timeout. Returns the final status dict."""
+    """Poll slice_status until it reaches a terminal state (done/error/idle) or timeout. Returns the final status dict."""
     deadline = asyncio.get_running_loop().time() + timeout
     s = await c.slice_status()
-    while s.get("state") == "slicing" and asyncio.get_running_loop().time() < deadline:
+    while s.get("state") not in _TERMINAL_SLICE_STATES and asyncio.get_running_loop().time() < deadline:
         await asyncio.sleep(1.0)
         s = await c.slice_status()
     return s
@@ -178,22 +184,24 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
         return _err(e)
 
 
-def _m4a_err(e: ApiError) -> dict:
-    if isinstance(e, NotFound):
-        return {"error": "not available on this OrcaSlicer build (needs M4a)"}
+def _m4_err(e: ApiError, milestone: str) -> dict:
+    # Only a route-level 404 means the build lacks the capability; a resource-level
+    # 404 (unknown_object / unknown_preset / missing file) must keep its message (F7).
+    if isinstance(e, NotFound) and e.route_missing:
+        return {"error": f"not available on this OrcaSlicer build (needs {milestone})"}
     return _err(e)
+
+
+def _m4a_err(e: ApiError) -> dict:
+    return _m4_err(e, "M4a")
 
 
 def _m4b_err(e: ApiError) -> dict:
-    if isinstance(e, NotFound):
-        return {"error": "not available on this OrcaSlicer build (needs M4b)"}
-    return _err(e)
+    return _m4_err(e, "M4b")
 
 
 def _m4c_err(e: ApiError) -> dict:
-    if isinstance(e, NotFound):
-        return {"error": "not available on this OrcaSlicer build (needs M4c)"}
-    return _err(e)
+    return _m4_err(e, "M4c")
 
 
 @mcp.tool()
@@ -450,7 +458,12 @@ async def list_presets() -> dict:
 @mcp.tool()
 async def set_layer_height(object_id: int, mode: str, quality: float = 0.5) -> dict:
     """Variable layer height for one object. mode='adaptive' (quality 0..1, higher = finer
-    detail) generates an adaptive profile; mode='reset' restores uniform layers. [needs M4c build]"""
+    detail) generates an adaptive profile; mode='reset' (aliases: 'default', 'none')
+    restores uniform layers. [needs M4c build]"""
+    # F6: the fork only understands adaptive|reset; accept the spellings that
+    # were documented for the clear path instead of bouncing them as unknown_mode.
+    if mode in ("default", "none"):
+        mode = "reset"
     try:
         async with _client() as c:
             return await c.set_layer_height(object_id, mode, quality)

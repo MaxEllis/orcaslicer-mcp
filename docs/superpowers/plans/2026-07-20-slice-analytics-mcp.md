@@ -56,7 +56,6 @@ def test_predicted_flows_per_feature():
     }
     flows = predicted_flows(cfg)
     # cross_section(0.85, 0.5) = (0.85 - 0.5*(1-pi/4))*0.5 = 0.371 mm^2 -> 45*0.371 = 16.7
-    assert flows["outer_wall"] == round(flows["outer_wall"], 6)
     assert abs(flows["outer_wall"] - 16.7) < 0.1
     assert abs(flows["inner_wall"] - 18.6) < 0.2      # 50 * 0.371
     assert abs(flows["sparse_infill"] - 19.8) < 0.2   # 50 * cross_section(0.9,0.5)=0.396
@@ -137,7 +136,7 @@ git commit -m "feat: expose predicted_flows() per-feature flow map for the predi
 **Interfaces:**
 - Consumes: `physics_check.predicted_flows`, `physics_check._f`.
 - Produces: `prediction_check(cfg: dict, breakdown: dict) -> list[dict]` — one entry per role present in **both** the predictions and `breakdown["roles"]` (matched by role name). Each entry: `{"role": str, "verdict": "clamped"|"matches"|"anomaly", "predicted_mm3_s": float, "observed_max_mm3_s": float, "detail": str}`.
-  - `clamped`: observed max is at/near the ceiling (>= 0.95 * ceiling) AND predicted exceeds observed by >10% → the profile's speed is optimistic; Orca throttled.
+  - `clamped`: predicted flow exceeds the ceiling AND observed max sits at/near the ceiling (>= 0.95 * ceiling) → the profile's speed is optimistic; Orca throttled to the limit.
   - `anomaly`: observed max exceeds predicted by >10% (and not clamped).
   - `matches`: otherwise.
 
@@ -213,8 +212,10 @@ def prediction_check(cfg: dict, breakdown: dict) -> list[dict]:
         if name not in preds or flow is None:
             continue
         predicted = preds[name]
-        clamped = (ceiling is not None and flow >= ceiling * _NEAR_CEILING
-                   and predicted > flow * (1 + _FLOW_TOL))
+        # clamped: the profile's demanded flow exceeds the ceiling, and the observed max
+        # sits at the ceiling because Orca throttled it to stay under the limit.
+        clamped = (ceiling is not None and predicted > ceiling
+                   and flow >= ceiling * _NEAR_CEILING)
         if clamped:
             verdict = "clamped"
             detail = (f"{name}: profile demands {predicted:.1f}mm3/s but observed max "

@@ -32,11 +32,14 @@ async def test_put_config_422_raises_validation():
 
 @respx.mock
 async def test_get_config_keys_query():
-    route = respx.get("http://x:13130/api/v1/config").mock(
-        return_value=httpx.Response(200, json={"config": {"layer_height": "0.2"}}))
+    route = respx.get(url__regex=r"http://x:13130/api/v1/config.*").mock(
+        return_value=httpx.Response(200, json={"config": {"layer_height": "0.2", "brim_width": "5"}}))
     async with OrcaClient(CFG) as c:
+        # filters locally to the requested key(s)
         assert (await c.get_config(["layer_height"])) == {"layer_height": "0.2"}
-    assert "keys=layer_height" in str(route.calls.last.request.url)
+    # must NOT send a `keys=` query param: the fork can't URL-decode the %2C comma, so the
+    # client fetches full config and filters in Python instead (see test_client_config).
+    assert "keys=" not in str(route.calls.last.request.url)
 
 @respx.mock
 async def test_connect_error_maps():

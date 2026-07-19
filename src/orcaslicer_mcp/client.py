@@ -72,9 +72,15 @@ class OrcaClient:
         return await self._request("GET", "/api/v1/jobs/status")
 
     async def get_config(self, keys: list[str] | None) -> dict:
-        params = {"keys": ",".join(keys)} if keys else None
-        data = await self._request("GET", "/api/v1/config", params=params)
-        return data.get("config", {})
+        # The fork's /config `keys` filter splits the RAW query string on ',' without
+        # URL-decoding first, so httpx's percent-encoded comma (%2C) matches nothing and
+        # returns {}. Rather than depend on that fragile path, fetch the full config
+        # (~20KB on LAN) and filter locally — parser-independent. See test_client_config.
+        data = await self._request("GET", "/api/v1/config")
+        cfg = data.get("config", {})
+        if keys:
+            return {k: cfg[k] for k in keys if k in cfg}
+        return cfg
 
     async def put_config(self, changes: dict) -> dict:
         return await self._request("PUT", "/api/v1/config", json=changes)

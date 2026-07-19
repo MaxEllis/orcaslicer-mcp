@@ -6,6 +6,7 @@ from .client import OrcaClient
 from .errors import ApiError, Validation, NotFound, Conflict, ConfigError
 from .models import summarize_slice
 from . import settings_schema
+from . import placement
 from .knowledge_index import search_knowledge
 from .physics_check import run_checks
 from . import notes as _notes
@@ -83,6 +84,27 @@ async def get_slice_status() -> dict:
     try:
         async with _client() as c:
             return summarize_slice(await c.slice_status())
+    except ApiError as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def get_slice_warnings() -> dict:
+    """Just the warnings/errors from the last (or current) slice, plus validity - the
+    fast 'did anything go wrong' check and the way to confirm a fix cleared.
+
+    NOTE: only as complete as the API exposes. On the current fork build this may report
+    valid with an empty warnings list even when the GUI shows a plate-boundary toast -
+    the fork must populate the plater warning list (tracked as the fork batch). Once it
+    does, this reports the real warnings with no change here."""
+    try:
+        async with _client() as c:
+            st = await c.slice_status()
+            status = await c.get_status()
+        s = summarize_slice(st)
+        return {"state": s["state"], "valid": status.get("slice_result_valid"),
+                "warnings": s["warnings"], "errors": st.get("errors", []),
+                "message": s["message"]}
     except ApiError as e:
         return _err(e)
 
@@ -275,6 +297,53 @@ async def find_config_keys(substring: str) -> dict:
             return {"keys": sorted(k for k in cfg if substring in k)}
     except ApiError as e:
         return _err(e)
+
+
+_PLATE_CFG_KEYS = ["printable_area", "bed_exclude_area", "skirt_loops", "skirt_distance",
+                   "skirt_height", "brim_type", "brim_width", "brim_object_gap",
+                   "extruder_clearance_radius", "draft_shield"]
+
+
+@mcp.tool()
+async def diagnose_plate() -> dict:
+    """One-call plate diagnosis: app/slice status, objects on the plate, bed + active
+    skirt/brim/clearance settings, and the last slice's warnings - so you don't have to
+    chain status->objects->config. Start here for 'why won't this slice / fit'.
+
+    Slice warnings are only as complete as the fork exposes today (see get_slice_warnings).
+    For a 'does it fit the bed' estimate, pair with check_placement."""
+    try:
+        async with _client() as c:
+            status = await c.get_status()
+            try:
+                objs = await c.get_objects()
+            except NotFound:
+                objs = {"count": 0, "objects": [], "note": "objects API needs M4b build"}
+            cfg = await c.get_config(_PLATE_CFG_KEYS)
+            sl = summarize_slice(await c.slice_status())
+        return {"status": status, "objects": objs, "adhesion_bed": cfg,
+                "slice": {"state": sl["state"], "warnings": sl["warnings"],
+                          "valid": status.get("slice_result_valid")}}
+    except ApiError as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def check_placement() -> dict:
+    """Estimate whether every object (plus its skirt/brim ring) fits inside the printable
+    area. Returns per-object fit, expanded first-layer bbox, per-edge clearance (mm), and
+    overflow.
+
+    APPROXIMATE: uses the object footprint from size+offset, not the sliced toolpath (skirt
+    arcs, half-line-width, travel/wipe excluded); single-instance objects only. At ~mm
+    margins the true verdict needs get_slice_warnings - this is a fast first-pass. [needs M4b]"""
+    try:
+        async with _client() as c:
+            objs = await c.get_objects()
+            cfg = await c.get_config(placement.CFG_KEYS)
+        return placement.check_placement(objs, cfg)
+    except ApiError as e:
+        return _m4b_err(e)
 
 
 @mcp.tool()

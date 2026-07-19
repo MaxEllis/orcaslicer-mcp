@@ -9,6 +9,10 @@ _BOUND_RE = re.compile(r'def\s*=\s*this->add(?:_nullable)?\(')
 _STR_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 _FIELD_RE = re.compile(r'def->(\w+)\s*=\s*(.*)', re.DOTALL)
 _DEFAULT_RE = re.compile(r'set_default_value\(\s*new\s+\w+[^(]*\((.*)\)\s*\)\s*$', re.DOTALL)
+# `auto <alias> = def = this->add("key", ...)` -> map alias var to its setting key.
+_ALIAS_RE = re.compile(r'auto\s+(\w+)\s*=\s*def\s*=\s*this->add\(\s*"([^"]+)"')
+# `def->enum_values = <alias>->enum_values;` (enum list copied from another def).
+_ENUM_COPY_RE = re.compile(r'def->enum_(values|labels)\s*=\s*(\w+)->enum_(?:values|labels)')
 
 # def-> string field name -> output record key
 _STRING_FIELDS = {"label": "label", "full_label": "full_label",
@@ -87,6 +91,8 @@ def parse_print_config(text: str) -> tuple[dict[str, dict], list[str]]:
 
     create = [m for m in _ADD_RE.finditer(text) if uncommented(m)]
     bounds = sorted(m.start() for m in _BOUND_RE.finditer(text) if uncommented(m))
+    aliases = {m.group(1): m.group(2)
+               for m in _ALIAS_RE.finditer(text) if uncommented(m)}
 
     settings: dict[str, dict] = {}
     for m in create:
@@ -99,15 +105,19 @@ def parse_print_config(text: str) -> tuple[dict[str, dict], list[str]]:
                "enum_values": None, "enum_labels": None, "default": None}
         for stmt in _split_statements(block):
             s = stmt.strip()
-            if s.startswith("def->enum_values.push_back"):
+            if s.startswith(("def->enum_values.push_back", "def->enum_values.emplace_back")):
                 v = _join_strings(s)
                 if v is not None:
                     rec["enum_values"] = (rec["enum_values"] or []) + [v]
                 continue
-            if s.startswith("def->enum_labels.push_back"):
+            if s.startswith(("def->enum_labels.push_back", "def->enum_labels.emplace_back")):
                 v = _join_strings(s)
                 if v is not None:
                     rec["enum_labels"] = (rec["enum_labels"] or []) + [v]
+                continue
+            cm = _ENUM_COPY_RE.match(s)
+            if cm:
+                rec["_copy_%s_from" % cm.group(1)] = cm.group(2)
                 continue
             fm = _FIELD_RE.match(s)
             if fm:
@@ -125,5 +135,14 @@ def parse_print_config(text: str) -> tuple[dict[str, dict], list[str]]:
             if dm:
                 rec["default"] = dm.group(1).strip() or None
         settings.setdefault(key, rec)
+    # Resolve enum lists copied from another def via `def->enum_x = alias->enum_x;`.
+    for rec in settings.values():
+        for which in ("values", "labels"):
+            alias = rec.pop("_copy_%s_from" % which, None)
+            if not alias:
+                continue
+            src = settings.get(aliases.get(alias, ""))
+            if src and src.get("enum_%s" % which) is not None:
+                rec["enum_%s" % which] = list(src["enum_%s" % which])
     unparsed = [k for k, r in settings.items() if not r["label"] and not r["tooltip"]]
     return settings, unparsed

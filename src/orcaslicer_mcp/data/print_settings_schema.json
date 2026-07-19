@@ -1,8 +1,8 @@
 {
  "_meta": {
   "source": "PrintConfig.cpp",
-  "source_git_sha": "6a4ef314",
-  "extracted": "2026-07-17",
+  "source_git_sha": "43b86fc7",
+  "extracted": "2026-07-19",
   "setting_count": 807,
   "with_label": 704,
   "with_label_and_tooltip": 653,
@@ -668,8 +668,26 @@
   "min": null,
   "max": null,
   "mode": null,
-  "enum_values": null,
-  "enum_labels": null,
+  "enum_values": [
+   "monotonic",
+   "monotonicline",
+   "rectilinear",
+   "alignedrectilinear",
+   "concentric",
+   "hilbertcurve",
+   "archimedeanchords",
+   "octagramspiral"
+  ],
+  "enum_labels": [
+   "Monotonic",
+   "Monotonic line",
+   "Rectilinear",
+   "Aligned Rectilinear",
+   "Concentric",
+   "Hilbert Curve",
+   "Archimedean Chords",
+   "Octagram Spiral"
+  ],
   "default": "ipMonotonic"
  },
  "bridge_acceleration": {
@@ -811,8 +829,24 @@
   "min": null,
   "max": null,
   "mode": "comSimple",
-  "enum_values": null,
-  "enum_labels": null,
+  "enum_values": [
+   "auto_brim",
+   "brim_ears",
+   "painted",
+   "outer_only",
+   "inner_only",
+   "outer_and_inner",
+   "no_brim"
+  ],
+  "enum_labels": [
+   "Auto",
+   "Mouse ear",
+   "Painted",
+   "Outer brim only",
+   "Inner brim only",
+   "Outer and inner brim",
+   "No-brim"
+  ],
   "default": "btAutoBrim"
  },
  "brim_use_efc_outline": {
@@ -1134,8 +1168,16 @@
   "min": null,
   "max": null,
   "mode": "comAdvanced",
-  "enum_values": null,
-  "enum_labels": null,
+  "enum_values": [
+   "none",
+   "partiallybridge",
+   "sacrificiallayer"
+  ],
+  "enum_labels": [
+   "None",
+   "Partially bridged",
+   "Sacrificial layer"
+  ],
   "default": "chbNone"
  },
  "curr_bed_type": {
@@ -1147,8 +1189,22 @@
   "min": null,
   "max": null,
   "mode": "comSimple",
-  "enum_values": null,
-  "enum_labels": null,
+  "enum_values": [
+   "Cool Plate",
+   "Engineering Plate",
+   "High Temp Plate",
+   "Textured PEI Plate",
+   "Textured Cool Plate",
+   "SuperTack Plate"
+  ],
+  "enum_labels": [
+   "Smooth Cool Plate",
+   "Engineering Plate",
+   "Smooth High Temp Plate",
+   "Textured PEI Plate",
+   "Textured Cool Plate",
+   "Cool Plate (SuperTack)"
+  ],
   "default": "btPC"
  },
  "current_extruder": {
@@ -4189,7 +4245,14 @@
   "min": null,
   "max": null,
   "mode": "comAdvanced",
-  "enum_values": null,
+  "enum_values": [
+   "0",
+   "1",
+   "2",
+   "5",
+   "10",
+   "1000"
+  ],
   "enum_labels": [
    "0 (Simple connect)",
    "1 mm",
@@ -4781,8 +4844,26 @@
   "min": null,
   "max": null,
   "mode": null,
-  "enum_values": null,
-  "enum_labels": null,
+  "enum_values": [
+   "monotonic",
+   "monotonicline",
+   "rectilinear",
+   "alignedrectilinear",
+   "concentric",
+   "hilbertcurve",
+   "archimedeanchords",
+   "octagramspiral"
+  ],
+  "enum_labels": [
+   "Monotonic",
+   "Monotonic line",
+   "Rectilinear",
+   "Aligned Rectilinear",
+   "Concentric",
+   "Hilbert Curve",
+   "Archimedean Chords",
+   "Octagram Spiral"
+  ],
   "default": "ipMonotonic"
  },
  "internal_solid_infill_speed": {
@@ -6445,8 +6526,22 @@
   "min": null,
   "max": null,
   "mode": "comAdvanced",
-  "enum_values": null,
-  "enum_labels": null,
+  "enum_values": [
+   "0%",
+   "10%",
+   "25%",
+   "50%",
+   "75%",
+   "95%"
+  ],
+  "enum_labels": [
+   "0%",
+   "10%",
+   "25%",
+   "50%",
+   "75%",
+   "95%"
+  ],
   "default": null
  },
  "overhang_flow_ratio": {
@@ -10002,8 +10097,14 @@
   "min": null,
   "max": null,
   "mode": "comSimple",
-  "enum_values": null,
-  "enum_labels": null,
+  "enum_values": [
+   "0",
+   "1"
+  ],
+  "enum_labels": [
+   "Traditional",
+   "Smooth"
+  ],
   "default": "tlTraditional"
  },
  "timestamp": {
@@ -10967,8 +11068,14 @@
   "min": null,
   "max": null,
   "mode": "comAdvanced",
-  "enum_values": null,
-  "enum_labels": null,
+  "enum_values": [
+   "type1",
+   "type2"
+  ],
+  "enum_labels": [
+   "Type 1",
+   "Type 2"
+  ],
   "default": "WipeTowerType::Type2"
  },
  "wipe_tower_wall_type": {
@@ -10980,8 +11087,16 @@
   "min": null,
   "max": null,
   "mode": "comAdvanced",
-  "enum_values": null,
-  "enum_labels": null,
+  "enum_values": [
+   "rectangle",
+   "cone",
+   "rib"
+  ],
+  "enum_labels": [
+   "Rectangle",
+   "Cone",
+   "Rib"
+  ],
   "default": "wtwRectangle"
  },
  "wipe_tower_x": {

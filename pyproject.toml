@@ -1,9 +1,26 @@
 [project]
 name = "orcaslicer-mcp"
 version = "0.1.0"
-description = "MCP server that drives OrcaSlicer via its Remote API"
+description = "OrcaSlicer MCP — drive OrcaSlicer from Claude or any MCP client: load models, tune settings, slice, analyze"
+readme = "README.md"
+license = { text = "AGPL-3.0-only" }
+authors = [{ name = "Max Ellis" }]
 requires-python = ">=3.11"
+keywords = ["mcp", "orcaslicer", "3d-printing", "slicer", "claude", "model-context-protocol"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Printing",
+]
 dependencies = ["mcp>=1.2.0", "httpx>=0.27", "websockets>=12"]
+
+[project.urls]
+Homepage = "https://github.com/maxellis/orcaslicer-mcp"
+Repository = "https://github.com/maxellis/orcaslicer-mcp"
+"OrcaSlicer MCP build (required fork)" = "https://github.com/maxellis/OrcaSlicer"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "respx>=0.21"]

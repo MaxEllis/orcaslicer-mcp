@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import sys
 from mcp.server.fastmcp import FastMCP
 from .config import load_config
 from .client import OrcaClient
@@ -625,7 +626,29 @@ async def get_gcode() -> dict:
         return _m4a_err(e)
 
 
+def _hide_windows_console() -> None:
+    """Hide the console window an MCP client pops when launching this stdio server
+    on Windows (GUI clients have no console, so uv.exe/the launcher spawns one).
+
+    The MCP transport uses the redirected stdin/stdout *pipes* the client hands us,
+    not the console, so hiding the window leaves the protocol untouched. No-op off
+    Windows and when there is no console (e.g. launched from a terminal a user owns
+    — GetConsoleWindow returns NULL and ShowWindow(NULL, ...) does nothing).
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+    except Exception:
+        pass  # never let a cosmetic tweak stop the server from starting
+
+
 def main() -> None:
+    _hide_windows_console()
     mcp.run()
 
 

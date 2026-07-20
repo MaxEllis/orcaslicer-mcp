@@ -53,3 +53,36 @@ def test_build_breakdown_unavailable_when_absent():
     out = build_breakdown({"state": "done"}, _CFG)
     assert out["available"] is False
     assert "reason" in out
+
+
+# --- F14 integration guard: fork role tokens must match predicted_flows keys ---
+
+# The fork (RemoteAPIController.cpp `role_token`) maps each ExtrusionRole to a stable
+# Orca feature token. Only the subset that overlaps predicted_flows participates in
+# prediction_check; if EITHER side renames, prediction_check would silently return []
+# for those roles. This test turns that silent failure into a loud one.
+# See docs/superpowers/plans/2026-07-20-fork-slice-breakdown.md (token contract table).
+FORK_MATCHABLE_TOKENS = {
+    "outer_wall", "inner_wall", "sparse_infill", "internal_solid_infill",
+    "top_surface", "gap_infill", "bridge",
+}
+
+_FULL_CFG = {
+    "layer_height": "0.4", "nozzle_diameter": "0.8", "line_width": "0.85",
+    "outer_wall_speed": "35", "outer_wall_line_width": "0.8",
+    "inner_wall_speed": "45", "inner_wall_line_width": "0.85",
+    "sparse_infill_speed": "50", "sparse_infill_line_width": "0.9",
+    "internal_solid_infill_speed": "45", "internal_solid_infill_line_width": "0.85",
+    "top_surface_speed": "30", "top_surface_line_width": "0.8",
+    "initial_layer_speed": "20", "initial_layer_line_width": "0.85",
+    "gap_infill_speed": "40",
+    "bridge_speed": "25",
+}
+
+def test_fork_role_tokens_match_predicted_flows_keys():
+    from orcaslicer_mcp.physics_check import predicted_flows
+    pred = set(predicted_flows(_FULL_CFG))
+    assert "initial_layer" in pred  # guard: cfg actually exercised every feature
+    # initial_layer is a predicted feature with NO ExtrusionRole counterpart (the
+    # first layer is cross-cutting, not a role), so it has no observed match by design.
+    assert pred - {"initial_layer"} == FORK_MATCHABLE_TOKENS

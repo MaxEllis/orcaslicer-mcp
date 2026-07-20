@@ -13,7 +13,7 @@ Two pieces:
 
 Stock OrcaSlicer does not have the control API — the MCP server requires the build above.
 
-> ⚠️ **Don't update from inside the app.** This build is based on OrcaSlicer 2.3.2, so OrcaSlicer's own "new version available" prompt will offer to "upgrade" you — but that installs *stock* OrcaSlicer and **removes the control API**, breaking OrcaSlicer MCP. Always click **Skip this Version** (or **Cancel**) on that prompt. New MCP-enabled builds come only from the [releases page](https://github.com/maxellis/OrcaSlicer/releases).
+> **Updating:** always get new builds from the [releases page](https://github.com/maxellis/OrcaSlicer/releases), never from inside the app. Builds **mcp.2 and later** disable OrcaSlicer's built-in updater for you (left on, it offers *stock* OrcaSlicer — which removes the control API). If you're on an older build and a "new version available" prompt appears, click **Skip this Version**.
 
 ## Quickstart
 
@@ -40,8 +40,6 @@ You'll need [uv](https://docs.astral.sh/uv/getting-started/installation/) instal
     `ORCA_API_URL` defaults to `http://127.0.0.1:13130` — set it only if you changed the port, or run OrcaSlicer on another machine (with LAN access enabled there).
 
 4. Restart your client and ask: *“Load benchy.stl, slice it with the current profile, and tell me the print time.”*
-
-> **Updating:** OrcaSlicer's built-in "new version available" prompt points at *stock* OrcaSlicer — installing that way replaces this build and removes the control API. Skip it, and get new MCP-enabled builds from the [releases page](https://github.com/maxellis/OrcaSlicer/releases) instead.
 
 ## What Claude can do with it
 

@@ -18,7 +18,7 @@ Stock OrcaSlicer does not have the control API — the MCP server requires the b
 You'll need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed (it provides the `uvx` command that runs the server) — one line: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows.
 
 1. Install and launch the OrcaSlicer MCP build, and complete the one-time first-run setup (pick your printer). On a fresh install OrcaSlicer may show a **"Bambu Network Plug-in Required"** dialog — click **Skip for Now**; that plug-in is only for Bambu cloud printing and isn't needed here. (The control API starts once first-run setup is finished.)
-2. In OrcaSlicer: **Preferences → Remote API → Enable Remote API**, then copy the API token shown on that page. (Access is localhost-only unless you also switch on "Allow LAN access".)
+2. In OrcaSlicer: **Preferences** (Ctrl+P) **→ Remote API → Enable Remote API**, then copy the API token shown on that page. (Access is localhost-only unless you also switch on "Allow LAN access".)
 3. Add the server to your MCP client config (Claude Desktop `claude_desktop_config.json`, or a project `.mcp.json` for Claude Code):
 
     ```json
@@ -38,6 +38,8 @@ You'll need [uv](https://docs.astral.sh/uv/getting-started/installation/) instal
     `ORCA_API_URL` defaults to `http://127.0.0.1:13130` — set it only if you changed the port, or run OrcaSlicer on another machine (with LAN access enabled there).
 
 4. Restart your client and ask: *“Load benchy.stl, slice it with the current profile, and tell me the print time.”*
+
+> **Updating:** OrcaSlicer's built-in "new version available" prompt points at *stock* OrcaSlicer — installing that way replaces this build and removes the control API. Skip it, and get new MCP-enabled builds from the [releases page](https://github.com/maxellis/OrcaSlicer/releases) instead.
 
 ## What Claude can do with it
 

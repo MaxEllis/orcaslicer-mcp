@@ -1,4 +1,4 @@
-from orcaslicer_mcp.physics_check import run_checks, cross_section
+from orcaslicer_mcp.physics_check import run_checks, cross_section, predicted_flows
 
 BASE = {
     "nozzle_diameter": "0.8", "layer_height": "0.4", "line_width": "0.85",
@@ -96,3 +96,20 @@ def test_zero_auto_width_treated_as_missing():
 def test_vector_value_first_element_used():
     cfg = {"fan_min_speed": "80,80", "fan_max_speed": "100,100", "slow_down_layer_time": "8"}
     assert _by(run_checks(cfg), "cooling_sanity").status == "pass"
+
+def test_predicted_flows_per_feature():
+    cfg = {
+        "layer_height": "0.5", "nozzle_diameter": "0.8", "line_width": "0.85",
+        "outer_wall_speed": "45", "inner_wall_speed": "50",
+        "sparse_infill_speed": "50", "sparse_infill_line_width": "0.9",
+    }
+    flows = predicted_flows(cfg)
+    # cross_section(0.85, 0.5) = (0.85 - 0.5*(1-pi/4))*0.5 = 0.371 mm^2 -> 45*0.371 = 16.7
+    assert abs(flows["outer_wall"] - 16.7) < 0.1
+    assert abs(flows["inner_wall"] - 18.6) < 0.2      # 50 * 0.371
+    assert abs(flows["sparse_infill"] - 19.8) < 0.2   # 50 * cross_section(0.9,0.5)=0.396
+    assert "bridge" not in flows                        # no bridge_speed given
+
+def test_predicted_flows_skips_unparseable():
+    cfg = {"layer_height": "0.5", "nozzle_diameter": "0.8", "outer_wall_speed": ""}
+    assert predicted_flows(cfg) == {}

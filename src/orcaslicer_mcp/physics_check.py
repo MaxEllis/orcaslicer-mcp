@@ -62,6 +62,24 @@ _FEATURES = [  # (speed key, line-width key)
 
 _TEMP_RULES = {"PLA": (195.0, 1.2), "PETG": (220.0, 1.4), "ABS": (225.0, 1.4), "ASA": (225.0, 1.4)}
 
+def predicted_flows(cfg: dict) -> dict[str, float]:
+    """Per-feature demanded volumetric flow (mm3/s): speed * cross_section(width, layer_height).
+    Key is the speed key without its '_speed' suffix. Skips features missing speed/width/layer_height."""
+    lh = _f(cfg, "layer_height")
+    nd = _f(cfg, "nozzle_diameter")
+    default_w = _width(cfg, "line_width", nd)
+    if lh is None:
+        return {}
+    out: dict[str, float] = {}
+    for speed_k, width_k in _FEATURES:
+        sp = _f(cfg, speed_k)
+        w = _width(cfg, width_k, nd)
+        w = default_w if w is None else w
+        if sp is None or w is None:
+            continue
+        out[speed_k.removesuffix("_speed")] = sp * cross_section(w, lh)
+    return out
+
 def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
     out: list[CheckResult] = []
     lh, nd = _f(cfg, "layer_height"), _f(cfg, "nozzle_diameter")
@@ -73,26 +91,18 @@ def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
         out.append(CheckResult("flow_ceiling", "warn", "insufficient data (layer_height / filament_max_volumetric_speed)"))
         max_flow = None
     else:
-        default_w = lw
-        worst, max_flow = "", 0.0
-        found_any = False
-        for speed_k, width_k in _FEATURES:
-            sp = _f(cfg, speed_k)
-            w = _width(cfg, width_k, nd)
-            w = default_w if w is None else w
-            if sp is None or w is None:
-                continue
-            found_any = True
-            flow = sp * cross_section(w, lh)
-            if flow > max_flow:
-                max_flow, worst = flow, f"{speed_k.removesuffix('_speed')} {sp:g}mm/s x {w:g}mm = {flow:.1f}mm3/s"
-        if not found_any:
+        flows = predicted_flows(cfg)
+        if not flows:
             out.append(CheckResult("flow_ceiling", "warn", "insufficient data (no feature speeds)"))
             max_flow = None
         else:
+            worst_name = max(flows, key=flows.get)
+            max_flow = flows[worst_name]
+            sp = _f(cfg, worst_name + "_speed")
+            w = _width(cfg, dict(_FEATURES)[worst_name + "_speed"], nd)
+            w = lw if w is None else w
+            worst = f"{worst_name} {sp:g}mm/s x {w:g}mm = {max_flow:.1f}mm3/s" if max_flow > 0 else "zero flow demand (all found feature speeds are 0)"
             status = "fail" if max_flow > ceil else "pass"
-            if worst == "":
-                worst = "zero flow demand (all found feature speeds are 0)"
             out.append(CheckResult("flow_ceiling", status, f"peak demand {worst}; ceiling {ceil:g}mm3/s"))
 
     # temp_vs_flow

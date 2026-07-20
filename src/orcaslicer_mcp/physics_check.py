@@ -133,9 +133,19 @@ def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
     else:
         out.append(CheckResult("line_width_ratio", "warn", "insufficient data"))
 
-    # retraction_range: warn >3mm (bowden-length on likely-DD) or ==0; fail >8mm
+    # retraction_range: warn >3mm (bowden-length on likely-DD) or ==0; fail >8mm.
+    # F10: when use_firmware_retraction is on, Orca's retraction_length is IGNORED at
+    # slice time - the printer firmware value governs - so the Orca number is not
+    # authoritative and must not read as pass (this masked a real 0.3mm-firmware vs
+    # 1mm-Orca mismatch last run).
     ret = _f(cfg, "retraction_length")
-    if ret is not None:
+    fw_ret = _f(cfg, "use_firmware_retraction")
+    if fw_ret is not None and fw_ret >= 1:
+        orca = f"{ret:g}mm" if ret is not None else "unset"
+        out.append(CheckResult("retraction_range", "warn",
+            f"use_firmware_retraction=on: Orca retraction_length ({orca}) is IGNORED; effective "
+            f"retraction is set in printer firmware - verify there (e.g. Klipper SET_RETRACTION)"))
+    elif ret is not None:
         status = "fail" if ret > 8 else ("warn" if (ret > 3 or ret == 0) else "pass")
         out.append(CheckResult("retraction_range", status, f"retraction {ret:g}mm (DD sane 0.2-2, bowden 2-7)"))
     else:
@@ -165,4 +175,18 @@ def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
         out.append(CheckResult("first_layer_height", status, f"first layer {ilh:g}mm vs nozzle {nd:g}mm (max 80%)"))
     else:
         out.append(CheckResult("first_layer_height", "warn", "insufficient data"))
+
+    # initial_layer_temp (F11): a first-layer nozzle temp BELOW the bulk temp hurts
+    # first-layer adhesion (the 215-first / 230-bulk mismatch a human caught last run).
+    t_bulk = _f(cfg, "nozzle_temperature")
+    t_init = _f(cfg, "nozzle_temperature_initial_layer")
+    if t_bulk is not None and t_init is not None:
+        if t_init < t_bulk:
+            out.append(CheckResult("initial_layer_temp", "warn",
+                f"first-layer nozzle {t_init:g}C < bulk {t_bulk:g}C; first layer is usually equal-or-hotter for adhesion"))
+        else:
+            out.append(CheckResult("initial_layer_temp", "pass",
+                f"first-layer nozzle {t_init:g}C >= bulk {t_bulk:g}C"))
+    else:
+        out.append(CheckResult("initial_layer_temp", "warn", "insufficient data (nozzle_temperature/initial_layer)"))
     return out

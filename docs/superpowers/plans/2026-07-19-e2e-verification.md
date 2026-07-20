@@ -6,11 +6,11 @@
 
 **Architecture:** Drive each feature two ways and cross-check: (A) the **MCP tool surface** the way an agent calls it (`mcp__orca__*` once Claude Code has reloaded `.mcp.json`, else the identical `srv.<tool>()` module path), and (B) the **raw Remote API** via `curl` as ground truth. Divergence between A and B is a bug (that is exactly how `%2C` hid). Every mutation snapshots state first and restores it after. Slicing computes G-code only — **no physical print is ever started** (explicitly out of scope).
 
-**Tech Stack:** Python 3.12 + FastMCP (the MCP server), httpx client, the OrcaSlicer fork's Remote HTTP+WS API on max-pc (Tailscale `100.84.203.81:13130`), pytest+respx (unit backstop), bash+curl+ssh harness from homeserver.
+**Tech Stack:** Python 3.12 + FastMCP (the MCP server), httpx client, the OrcaSlicer fork's Remote HTTP+WS API on max-pc (Tailscale `<orca-host>:13130`), pytest+respx (unit backstop), bash+curl+ssh harness from homeserver.
 
 ## Global Constraints
 
-- **Live target:** the freshly-rebuilt fork (branch `remote-api`, this session's build adding `TOOLPATH_OUTSIDE` + `/config` URL-decode) must be running on max-pc with the Remote API bound on `100.84.203.81:13130`. Confirm in Suite 0.
+- **Live target:** the freshly-rebuilt fork (branch `remote-api`, this session's build adding `TOOLPATH_OUTSIDE` + `/config` URL-decode) must be running on max-pc with the Remote API bound on `<orca-host>:13130`. Confirm in Suite 0.
 - **Token:** never printed to the transcript or any git-tracked file. Always sourced from the gitignored `/home/max/projects/3d-printer/.env` (`set -a; . .env; set +a`).
 - **No physical printing.** Never call anything that starts a print or moves/heats the printer hardware. The orcaslicer-mcp product does not print (it slices only); the legacy `3dprint`/Moonraker tools that *can* print are covered read-only in Appendix A with all hardware-affecting actions excluded.
 - **State safety:** every mutating step is bracketed by snapshot → mutate → assert → restore. Never mutate Max's tuned presets in place; operate on throwaway copies. Restore the config, selected presets, and plate to their pre-test state in Suite 12 (teardown).
@@ -33,7 +33,7 @@
 - [ ] **0.1 Confirm the rebuilt fork is live and is the NEW build.**
   Run:
   ```bash
-  set -a; . ~/projects/3d-printer/.env; set +a; U=http://100.84.203.81:13130
+  set -a; . ~/projects/3d-printer/.env; set +a; U=http://<orca-host>:13130
   curl -s -H "X-Api-Token: $ORCA_API_TOKEN" "$U/api/v1/status" | python3 -m json.tool
   ```
   Expect: HTTP 200 JSON; `app_version` `2.3.2`; `capabilities` includes `status,config,slice,events,model,preset,gcode,objects,arrange,orient,object_config`. Record the `capabilities` list — it gates M4a/M4b/M4c suites.
@@ -56,7 +56,7 @@
               await asyncio.sleep(4)
   print(json.dumps(asyncio.run(run(sys.argv[1])), indent=2, default=str))
   ```
-  Driver env prelude (every `TOOL` call): `cd ~/projects/orcaslicer-mcp; set -a; . ~/projects/3d-printer/.env; set +a; export ORCA_API_URL=http://100.84.203.81:13130 ORCA_API_TIMEOUT=30`.
+  Driver env prelude (every `TOOL` call): `cd ~/projects/orcaslicer-mcp; set -a; . ~/projects/3d-printer/.env; set +a; export ORCA_API_URL=http://<orca-host>:13130 ORCA_API_TIMEOUT=30`.
   Verify the harness: `TOOL 'get_status()'` prints a status dict (not `_UNREACHABLE`).
 
 - [ ] **0.4 Full config snapshot (master restore point).**
@@ -205,7 +205,7 @@
 
 - [ ] **9.1 Not-found object** — `TOOL "transform_object(999999, translate=[1,0,0])"`. Expect a clean error dict (`error` key), NOT an exception/crash.
 - [ ] **9.2 Bad preset** — `TOOL "get_preset_config('print','__no_such_preset__')"`. Expect a clean error dict.
-- [ ] **9.3 Unreachable handling** — temporarily point at a dead port: `ORCA_API_URL=http://100.84.203.81:1 TOOL 'get_status()'`. Expect a `NotReachable`-derived error dict / `_UNREACHABLE`, not a stack trace. (Restore the real URL.)
+- [ ] **9.3 Unreachable handling** — temporarily point at a dead port: `ORCA_API_URL=http://<orca-host>:1 TOOL 'get_status()'`. Expect a `NotReachable`-derived error dict / `_UNREACHABLE`, not a stack trace. (Restore the real URL.)
 - [ ] **9.4 Milestone degradation honesty** — for any capability NOT in `status.capabilities` (from 0.1), confirm its tool returns the matching `needs M4a/M4b/M4c` message rather than a hard failure. If all capabilities are present, record "N/A — full build" and confirm at least one M4b tool (e.g. `list_objects`) returns real data, not the degraded string.
 
 **Pass criteria:** every error path yields a structured dict; nothing throws to the caller.

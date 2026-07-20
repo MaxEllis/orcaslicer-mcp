@@ -117,7 +117,7 @@ Legend: **P1** blocks core use · **P2** major friction · **P3** annoyance.
 **Shipped (no-rebuild batch, TDD, orcaslicer-mcp @ working tree; 128 passed / 1 skipped):**
 - **A1 DONE** — `orca` server wired into `3d-printer/.mcp.json` via a bash wrapper that
   sources `ORCA_API_TOKEN` from the **gitignored `.env`** (token staged from the max-pc
-  conf; verified `git check-ignore` + untracked). `ORCA_API_URL=http://100.84.203.81:13130`
+  conf; verified `git check-ignore` + untracked). `ORCA_API_URL=http://<orca-host>:13130`
   (Tailscale). Takes effect on next Claude Code MCP reload.
 - **B3 DONE** — `diagnose_plate()` tool: status + objects + bed/skirt/brim + slice warnings
   in one call. (`server.py`, `test_server_diagnose.py`.)

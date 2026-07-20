@@ -490,14 +490,45 @@ async def save_preset(type: str, name: str, detach: bool = False) -> dict:
         return _m4a_err(e)
 
 
+_PRESET_TYPES = ("print", "filament", "printer")
+
+
+def _filter_presets(presets: dict, ptype: str | None, include_system: bool) -> dict:
+    """F12 filter: unless include_system, keep only user presets plus whatever is
+    currently selected (a selected system preset is the active config, so it stays
+    visible). Reports how many system presets were hidden."""
+    cats = [ptype] if ptype else list(_PRESET_TYPES)
+    out: dict = {}
+    hidden = 0
+    for cat in cats:
+        items = presets.get(cat, []) or []
+        if include_system:
+            kept = items
+        else:
+            kept = [p for p in items if not p.get("system") or p.get("selected")]
+        hidden += len(items) - len(kept)
+        out[cat] = kept
+    out["hidden_system"] = hidden
+    return out
+
+
 @mcp.tool()
-async def list_presets() -> dict:
-    """List all print/filament/printer presets with system/selected flags. [needs preset/save build]"""
+async def list_presets(type: str | None = None, include_system: bool = False) -> dict:
+    """List print/filament/printer presets with system/selected/visible flags.
+
+    F12: by default returns only USER presets plus whatever is currently SELECTED -
+    the built-in system presets are ~400 entries of noise. Pass include_system=True
+    for the full list, and/or type='print'|'filament'|'printer' to restrict to one
+    category. `hidden_system` reports how many system presets were filtered out.
+    [needs preset/save build]"""
+    if type is not None and type not in _PRESET_TYPES:
+        return {"error": "invalid_type", "type": type, "valid": list(_PRESET_TYPES)}
     try:
         async with _client() as c:
-            return await c.get_presets()
+            presets = await c.get_presets()
     except ApiError as e:
         return _m4a_err(e)
+    return _filter_presets(presets, type, include_system)
 
 
 @mcp.tool()

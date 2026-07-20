@@ -1,3 +1,4 @@
+import math
 import httpx, pytest, respx
 from orcaslicer_mcp.config import Config
 from orcaslicer_mcp.client import OrcaClient
@@ -12,6 +13,46 @@ async def test_get_status_sends_token():
     async with OrcaClient(CFG) as c:
         assert (await c.get_status())["app"] == "OrcaSlicer"
     assert route.calls.last.request.headers["X-Api-Token"] == "tok"
+
+@respx.mock
+async def test_get_status_normalizes_filaments_key_to_singular():
+    # F4: the fork emits presets.filaments (plural) while everything else in the
+    # API (type=filament, /presets, modified.filament) is singular. Normalize.
+    respx.get("http://x:13130/api/v1/status").mock(
+        return_value=httpx.Response(200, json={
+            "app": "OrcaSlicer",
+            "presets": {"filaments": ["PLA Fast"], "print": "0.5mm", "printer": "SWX2"},
+        }))
+    async with OrcaClient(CFG) as c:
+        r = await c.get_status()
+    assert r["presets"]["filament"] == ["PLA Fast"]
+    assert "filaments" not in r["presets"]
+    assert r["presets"]["print"] == "0.5mm" and r["presets"]["printer"] == "SWX2"
+
+@respx.mock
+async def test_get_status_without_presets_is_untouched():
+    respx.get("http://x:13130/api/v1/status").mock(
+        return_value=httpx.Response(200, json={"app": "OrcaSlicer"}))
+    async with OrcaClient(CFG) as c:
+        assert (await c.get_status()) == {"app": "OrcaSlicer"}
+
+@respx.mock
+async def test_get_objects_converts_rotation_radians_to_degrees():
+    # F5: transform_object rotate takes DEGREES, but readback reports RADIANS.
+    # Normalize the readback to degrees so the round-trip is consistent.
+    respx.get("http://x:13130/api/v1/objects").mock(
+        return_value=httpx.Response(200, json={"count": 1, "objects": [
+            {"id": 1, "name": "x", "size_mm": [1, 1, 1],
+             "transform": {"offset": [0, 0, 0], "rotation": [0.0, math.pi / 2, math.pi],
+                           "scale": [1, 1, 1]}}]}))
+    async with OrcaClient(CFG) as c:
+        r = await c.get_objects()
+    rot = r["objects"][0]["transform"]["rotation"]
+    assert abs(rot[0] - 0.0) < 1e-9
+    assert abs(rot[1] - 90.0) < 1e-6
+    assert abs(rot[2] - 180.0) < 1e-6
+    # other transform fields untouched
+    assert r["objects"][0]["transform"]["scale"] == [1, 1, 1]
 
 @respx.mock
 async def test_401_raises_unauthorized():

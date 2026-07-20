@@ -13,6 +13,8 @@ Two pieces:
 
 Stock OrcaSlicer does not have the control API — the MCP server requires the build above.
 
+> ⚠️ **Don't update from inside the app.** This build is based on OrcaSlicer 2.3.2, so OrcaSlicer's own "new version available" prompt will offer to "upgrade" you — but that installs *stock* OrcaSlicer and **removes the control API**, breaking OrcaSlicer MCP. Always click **Skip this Version** (or **Cancel**) on that prompt. New MCP-enabled builds come only from the [releases page](https://github.com/maxellis/OrcaSlicer/releases).
+
 ## Quickstart
 
 You'll need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed (it provides the `uvx` command that runs the server) — one line: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows.

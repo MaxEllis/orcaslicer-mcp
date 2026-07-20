@@ -1,67 +1,79 @@
-# orcaslicer-mcp
+# OrcaSlicer MCP
 
-An MCP server that drives a running OrcaSlicer via its Remote API — status,
-config read/write, slicing, live events, and (with the fork's M4a endpoints)
-load-model / select-preset / get-gcode.
+**Drive OrcaSlicer with AI.** OrcaSlicer MCP is an [MCP](https://modelcontextprotocol.io) server that lets Claude (Desktop or Code — or any MCP client) operate a real, running OrcaSlicer: load models, arrange the plate, tune settings, slice, and analyze the result — live, with every change visible in the GUI.
 
-It is a local, transparent assistant layer: the slicer stays authoritative, every
-change is visible live in the OrcaSlicer GUI, and the server holds no LLM (no API cost —
-it runs under your Claude subscription via Claude Code / Claude Desktop).
+The slicer stays authoritative and on your machine. The server contains no LLM and makes no cloud calls; it talks only to OrcaSlicer on localhost (or a host you explicitly allow).
 
-## Setup
+## How it works
 
-Enable the Remote API in OrcaSlicer (Preferences → **Remote API**), copy the token.
+Two pieces:
 
-```bash
-uv tool install orcaslicer-mcp   # or, from a clone: uv pip install -e .
-```
+1. **The OrcaSlicer MCP build of OrcaSlicer** — OrcaSlicer 2.3.2 with an embedded local control API (token-authenticated, localhost-only by default). Get it from the [releases page](https://github.com/maxellis/OrcaSlicer/releases); if no binary is up for your platform yet, build the `remote-api` branch from source.
+2. **This package (`orcaslicer-mcp`)** — the MCP server that connects your AI client to that build.
 
-## Configure in Claude Code / Claude Desktop
+Stock OrcaSlicer does not have the control API — the MCP server requires the build above.
 
-```json
-{
-  "mcpServers": {
-    "orcaslicer": {
-      "command": "uvx",
-      "args": ["orcaslicer-mcp"],
-      "env": {
-        "ORCA_API_URL": "http://<orca-host>:13130",
-        "ORCA_API_TOKEN": "<token>"
+## Quickstart
+
+1. Install and launch the OrcaSlicer MCP build.
+2. In OrcaSlicer: **Preferences → Remote API → Enable Remote API**, then copy the API token shown on that page. (Access is localhost-only unless you also switch on "Allow LAN access".)
+3. Add the server to your MCP client config (Claude Desktop `claude_desktop_config.json`, or a project `.mcp.json` for Claude Code):
+
+    ```json
+    {
+      "mcpServers": {
+        "orcaslicer": {
+          "command": "uvx",
+          "args": ["orcaslicer-mcp"],
+          "env": {
+            "ORCA_API_TOKEN": "<token from Preferences>"
+          }
+        }
       }
     }
-  }
-}
-```
+    ```
 
-`ORCA_API_URL` defaults to `http://127.0.0.1:13130`; `ORCA_API_TOKEN` is required.
+    `ORCA_API_URL` defaults to `http://127.0.0.1:13130` — set it only if you changed the port, or run OrcaSlicer on another machine (with LAN access enabled there).
 
-## Tools
+4. Restart your client and ask: *“Load benchy.stl, slice it with the current profile, and tell me the print time.”*
 
-- **status/config:** `get_status`, `get_config`, `set_config`, `find_config_keys`
-- **settings knowledge (offline, no live API):** `describe_setting`, `search_settings` — authoritative label/tooltip/type/range/enum/default for ~800 settings, extracted from the fork's `PrintConfig.cpp` via `scripts/extract_settings_schema.py`.
-- **slicing:** `slice`, `get_slice_status`, `slice_and_wait`, `apply_and_slice`, `compare_settings`
-- **events:** `watch_events`
-- **M4b (needs the fork's plate/object endpoints):** `list_objects`, `transform_object`, `delete_object`, `duplicate_object`, `arrange_plate`, `auto_orient`, `get_job_status` — inspect/move/delete objects and auto-arrange/orient the plate (async jobs; poll `get_job_status`). Each returns a `needs M4b` message until the fork ships the endpoint.
-- **M4a (needs the fork's model/preset/gcode endpoints):** `load_model`, `select_preset`, `get_gcode` — these return `"not available on this OrcaSlicer build (needs M4a)"` until the fork ships those endpoints.
+## What Claude can do with it
 
-- **M4c (needs the fork's per-object endpoints):** `set_object_config` — per-object config overrides (atomic); `needs M4c` until the fork ships `PUT /objects/{id}/config`.
+- **Plate & models:** `load_model`, `list_objects`, `transform_object`, `duplicate_object`, `delete_object`, `arrange_plate`, `auto_orient`, `check_placement`, `diagnose_plate`, `get_job_status`
+- **Settings:** `get_config`, `set_config`, `find_config_keys`, `describe_setting`, `search_settings`, `compare_settings`, `set_layer_height`, `set_height_range`, `set_object_config` (per-object overrides)
+- **Presets:** `list_presets`, `select_preset`, `get_preset_config`, `edit_preset`, `save_preset`, `rename_preset`, `delete_preset`
+- **Slicing:** `slice`, `slice_and_wait`, `apply_and_slice`, `cancel_slice`, `get_slice_status`, `get_slice_warnings`, `get_slice_breakdown` (per-feature time/flow analysis), `get_gcode`
+- **Live state & events:** `get_status`, `watch_events`
 
-## Settings intelligence
+### Settings intelligence
 
-Three tools help you reason about and remember settings decisions across sessions:
+- **`consult(query)`** — curated slicing knowledge plus your saved notes, composed per topic, symptom, or goal.
+- **`check_profile_physics(changes?)`** — deterministic sanity gate: overlays proposed changes on the live config and runs flow/temperature/geometry/cooling math. Verdict: `ok`, `warnings`, or `blocked`.
+- **`remember(note, scope)`** — persist machine/user/project facts for future sessions as plain local files in `~/.orcaslicer-mcp/notes/` (relocatable via `ORCA_MCP_NOTES_DIR`).
 
-- **`consult(query)`** — retrieve curated slicing knowledge + saved context notes for a topic, symptom, or intent. Call this before deriving or changing settings for any user goal. Composes principles per situation — never returns preset bundles. When recommending, present 2-3 concrete options quantified with predicted print time and filament mass from real slice results — never adjectives alone.
-- **`check_profile_physics(changes?)`** — deterministic pre-save gate: fetches the live config, overlays optional proposed changes, and runs flow/temperature/geometry/cooling math. Run this before saving a preset. Returns a `verdict` field: `blocked` (do not save), `warnings` (save with caution), or `ok`.
-- **`remember(note, scope)`** — persist a context fact for future sessions. Scopes: `machine:<printer>/<filament>`, `user`, or `project:<name>`. Notes live in `~/.orcaslicer-mcp/notes/` as plain local files — user-readable, deletable freely, never leaving your machine. Override the location via `ORCA_MCP_NOTES_DIR`.
+Plus an offline settings reference: authoritative label/tooltip/type/range/enum/default for ~800 OrcaSlicer settings, bundled with the package.
 
-**Design:** knowledge is principles the AI composes per situation, never preset bundles. The system grounds decisions in live printer state (via `check_profile_physics`) and learned facts (via `remember` + `consult`), but does not impose rigid templates.
+## Security
+
+- The control API binds **127.0.0.1 only** by default; LAN access is an explicit opt-in in Preferences.
+- Every request must carry the API token; OrcaSlicer generates it on first run and can regenerate it at any time.
+- The MCP server is a local stdio process. No telemetry, no cloud.
 
 ## Development
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
-uv run pytest            # unit tests (mock API) + a guarded live smoke test
+uv run pytest   # unit tests (mock API) + a guarded live smoke test
 ```
 
-The live smoke test (`tests/test_integration.py`) is skipped unless both
-`ORCA_API_URL` and `ORCA_API_TOKEN` point at a running OrcaSlicer.
+The live smoke test is skipped unless `ORCA_API_URL` / `ORCA_API_TOKEN` point at a running OrcaSlicer MCP build.
+
+Developer docs — protocol notes, design specs, verification results — live in [`docs/`](docs/).
+
+## Status
+
+Early public release (soft launch). The server is exercised by ~170 unit tests and real print workflows; prebuilt binaries of the OrcaSlicer MCP build are rolling out per-platform. Issues and reports welcome.
+
+## License
+
+AGPL-3.0 — the same license as OrcaSlicer, from whose source the bundled settings schema is derived. See [LICENSE](LICENSE).

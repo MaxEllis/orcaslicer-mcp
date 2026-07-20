@@ -72,7 +72,7 @@ Developer docs — protocol notes, design specs, verification results — live i
 
 ## Status
 
-Early public release (soft launch). The server is exercised by ~170 unit tests and real print workflows; prebuilt binaries of the OrcaSlicer MCP build are rolling out per-platform. Issues and reports welcome.
+Early public release (soft launch). The server is exercised by ~170 unit tests and real print workflows; prebuilt OrcaSlicer MCP builds are available for Windows, macOS, and Linux on the [releases page](https://github.com/maxellis/OrcaSlicer/releases). Issues and reports welcome.
 
 ## License
 

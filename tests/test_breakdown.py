@@ -1,4 +1,4 @@
-from orcaslicer_mcp.breakdown import prediction_check
+from orcaslicer_mcp.breakdown import prediction_check, build_breakdown
 
 def _role(name, flow_max):
     return {"role": name, "time_s": 100.0, "time_pct": 10.0, "filament_g": 1.0,
@@ -35,3 +35,21 @@ def test_prediction_check_skips_roles_without_prediction():
     # travel/support have no predicted flow -> not in output
     bd = {"roles": [_role("travel", 0.0), _role("support", 5.0)]}
     assert prediction_check(_CFG, bd) == []
+
+def test_build_breakdown_available():
+    status = {"state": "done", "breakdown": {
+        "mode": "normal", "total_time_s": 26854.9,
+        "roles": [_role("outer_wall", 16.5)],
+        "metrics": {"speed": {"unit": "mm/s", "min": 0, "max": 300, "mean": 210, "buckets": []}},
+        "layers": [{"z": 0.4, "time_s": 61.2, "filament_g": 1.1, "top_role": "internal_solid_infill"}],
+    }}
+    out = build_breakdown(status, _CFG)
+    assert out["available"] is True
+    assert out["total_time_s"] == 26854.9
+    assert out["roles"][0]["role"] == "outer_wall"
+    assert out["prediction_check"][0]["verdict"] == "matches"
+
+def test_build_breakdown_unavailable_when_absent():
+    out = build_breakdown({"state": "done"}, _CFG)
+    assert out["available"] is False
+    assert "reason" in out

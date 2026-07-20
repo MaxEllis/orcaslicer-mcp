@@ -34,3 +34,18 @@ def prediction_check(cfg: dict, breakdown: dict) -> list[dict]:
                     "predicted_mm3_s": round(predicted, 2),
                     "observed_max_mm3_s": round(flow, 2), "detail": detail})
     return out
+
+
+def build_breakdown(status: dict, cfg: dict) -> dict:
+    bd = status.get("breakdown")
+    if not bd:
+        return {"available": False,
+                "reason": "no breakdown in slice status (fork build predates this feature, "
+                          "or no valid slice yet)"}
+    return {"available": True,
+            "mode": bd.get("mode"),
+            "total_time_s": bd.get("total_time_s"),
+            "roles": bd.get("roles", []),
+            "metrics": bd.get("metrics", {}),
+            "layers": bd.get("layers", []),
+            "prediction_check": prediction_check(cfg, bd)}

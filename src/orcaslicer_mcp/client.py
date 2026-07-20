@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import math
 import httpx
 import websockets
 from .config import Config
@@ -38,10 +39,26 @@ class OrcaClient:
         return resp.json()
 
     async def get_status(self) -> dict:
-        return await self._request("GET", "/api/v1/status")
+        data = await self._request("GET", "/api/v1/status")
+        # F4: the fork emits presets.filaments (plural), but the rest of the API
+        # surface is singular (type=filament, /presets keys, modified.filament).
+        # Normalize here so callers see one convention (it holds a list either way).
+        presets = data.get("presets")
+        if isinstance(presets, dict) and "filaments" in presets:
+            presets["filament"] = presets.pop("filaments")
+        return data
 
     async def get_objects(self) -> dict:
-        return await self._request("GET", "/api/v1/objects")
+        data = await self._request("GET", "/api/v1/objects")
+        # F5: transform_object takes rotate in DEGREES, but the fork reports
+        # transform.rotation in RADIANS. Convert the readback to degrees so a
+        # set-then-read round-trip is consistent. (placement uses size_mm, not
+        # rotation, so this is safe for internal consumers.)
+        for obj in data.get("objects") or []:
+            rot = obj.get("transform", {}).get("rotation")
+            if isinstance(rot, list):
+                obj["transform"]["rotation"] = [math.degrees(v) for v in rot]
+        return data
 
     async def delete_object(self, obj_id: int) -> dict:
         return await self._request("DELETE", f"/api/v1/objects/{obj_id}")

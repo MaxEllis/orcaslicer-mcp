@@ -38,15 +38,46 @@ def test_long_retraction_warns():
     cfg = BASE | {"retraction_length": "4"}
     assert _by(run_checks(cfg), "retraction_range").status == "warn"
 
+def test_firmware_retraction_warns_orca_value_not_authoritative():
+    # F10: with use_firmware_retraction on, Orca's retraction_length is ignored;
+    # the printer firmware governs, so the sane-looking 1mm must NOT read as pass.
+    cfg = BASE | {"use_firmware_retraction": "1", "retraction_length": "1"}
+    r = _by(run_checks(cfg), "retraction_range")
+    assert r.status == "warn" and "firmware" in r.detail.lower()
+
+def test_firmware_retraction_flagged_even_without_orca_length():
+    cfg = {"use_firmware_retraction": "1"}
+    r = _by(run_checks(cfg), "retraction_range")
+    assert r.status == "warn" and "firmware" in r.detail.lower()
+
+def test_firmware_retraction_off_uses_orca_value():
+    cfg = BASE | {"use_firmware_retraction": "0", "retraction_length": "1"}
+    assert _by(run_checks(cfg), "retraction_range").status == "pass"
+
+def test_initial_layer_temp_below_bulk_warns():
+    # F11: first-layer nozzle temp below bulk risks first-layer adhesion (real user error).
+    cfg = BASE | {"nozzle_temperature": "230", "nozzle_temperature_initial_layer": "215"}
+    r = _by(run_checks(cfg), "initial_layer_temp")
+    assert r.status == "warn" and "215" in r.detail and "230" in r.detail
+
+def test_initial_layer_temp_equal_or_hotter_passes():
+    cfg = BASE | {"nozzle_temperature": "230", "nozzle_temperature_initial_layer": "230"}
+    assert _by(run_checks(cfg), "initial_layer_temp").status == "pass"
+    cfg2 = BASE | {"nozzle_temperature": "230", "nozzle_temperature_initial_layer": "235"}
+    assert _by(run_checks(cfg2), "initial_layer_temp").status == "pass"
+
+def test_initial_layer_temp_insufficient_data_warns():
+    assert _by(run_checks({}), "initial_layer_temp").status == "warn"
+
 def test_missing_data_warns_not_raises():
     r = _by(run_checks({}), "flow_ceiling")
     assert r.status == "warn" and "insufficient" in r.detail
 
-def test_all_seven_checks_always_present():
+def test_all_checks_always_present():
     names = {r.name for r in run_checks({})}
     assert names == {"flow_ceiling", "temp_vs_flow", "layer_height_ratio",
                      "line_width_ratio", "retraction_range", "cooling_sanity",
-                     "first_layer_height"}
+                     "first_layer_height", "initial_layer_temp"}
     assert all(r.status == "warn" for r in run_checks({}))
 
 def test_zero_flow_demand_passes_temp_check():

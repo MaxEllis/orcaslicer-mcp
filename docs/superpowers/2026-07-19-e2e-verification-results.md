@@ -1,6 +1,6 @@
 # orcaslicer-mcp — End-to-End Verification Results (2026-07-19)
 
-**Target:** fork build `remote-api` @ `43b86fc7` on max-pc (Tailscale `100.84.203.81:13130`),
+**Target:** fork build `remote-api` @ `43b86fc7` on max-pc (Tailscale `<orca-host>:13130`),
 OrcaSlicer 2.3.2, capabilities FULL (11/11: status,config,slice,events,model,preset,gcode,objects,arrange,orient,object_config).
 **Method:** each feature driven via the MCP surface (`mcp__orca__*`) and/or the `srv.<tool>()` module path, cross-checked against the raw Remote API by `curl`/`httpx`. No physical print performed.
 

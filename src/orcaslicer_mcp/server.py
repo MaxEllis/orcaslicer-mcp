@@ -9,6 +9,7 @@ from . import settings_schema
 from . import placement
 from .knowledge_index import search_knowledge
 from .physics_check import run_checks
+from .breakdown import build_breakdown
 from . import notes as _notes
 
 mcp = FastMCP("orcaslicer")
@@ -124,6 +125,26 @@ async def get_slice_warnings() -> dict:
         return {"state": s["state"], "valid": status.get("slice_result_valid"),
                 "warnings": s["warnings"], "errors": st.get("errors", []),
                 "message": s["message"]}
+    except ApiError as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def get_slice_breakdown() -> dict:
+    """Per-feature breakdown of the last slice + a stateless predicted-vs-observed flow check.
+
+    Returns per-role time/filament + speed/flow ranges, global time-weighted metric
+    distributions, per-layer aggregates, and a prediction_check flagging where the profile's
+    speed was silently throttled at the flow ceiling ('clamped'). Answers 'which feature is
+    the time hog' directly instead of by trial slicing.
+
+    Degrades to {"available": false, "reason": ...} on fork builds that don't emit the
+    breakdown, or when there is no valid slice. [needs fork breakdown build]"""
+    try:
+        async with _client() as c:
+            status = await c.slice_status()
+            cfg = await c.get_config(None)
+        return build_breakdown(status, cfg)
     except ApiError as e:
         return _err(e)
 

@@ -95,3 +95,17 @@ async def test_timeout_maps_to_uitimeout():
     async with OrcaClient(CFG) as c:
         with pytest.raises(UiTimeout):
             await c.get_status()
+
+
+@respx.mock
+async def test_load_model_uses_extended_timeout():
+    # STEP tessellation can far exceed the default request timeout (a 140 KB
+    # assembly took ~50 s); the fork holds the request up to 120 s. Ask httpx
+    # for a matching per-request timeout instead of the global default.
+    route = respx.post("http://x:13130/api/v1/model").mock(
+        return_value=httpx.Response(200, json={"loaded": True, "objects": []}))
+    async with OrcaClient(CFG) as c:
+        out = await c.load_model("G:/parts/bracket.step")
+    assert out["loaded"] is True
+    ext = route.calls.last.request.extensions["timeout"]
+    assert ext["read"] == 130.0

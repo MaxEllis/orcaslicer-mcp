@@ -23,9 +23,12 @@ class OrcaClient:
     async def __aexit__(self, *exc) -> None:
         await self._http.aclose()
 
-    async def _request(self, method: str, path: str, *, json=None, params=None) -> dict:
+    async def _request(self, method: str, path: str, *, json=None, params=None,
+                       timeout: float | None = None) -> dict:
         try:
-            resp = await self._http.request(method, path, json=json, params=params)
+            resp = await self._http.request(
+                method, path, json=json, params=params,
+                timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT)
         except httpx.TimeoutException as e:
             raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
         except httpx.TransportError as e:
@@ -112,7 +115,10 @@ class OrcaClient:
         return await self._request("POST", "/api/v1/slice/cancel")
 
     async def load_model(self, path: str) -> dict:
-        return await self._request("POST", "/api/v1/model", json={"path": path})
+        # STEP tessellation can far exceed the default timeout (the fork holds
+        # the request up to 120 s); give the read a matching allowance.
+        return await self._request("POST", "/api/v1/model", json={"path": path},
+                                   timeout=130.0)
 
     async def select_preset(self, ptype: str, name: str) -> dict:
         return await self._request("PUT", "/api/v1/preset", json={"type": ptype, "name": name})

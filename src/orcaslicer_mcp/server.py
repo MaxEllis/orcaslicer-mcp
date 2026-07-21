@@ -459,7 +459,9 @@ def search_settings(query: str, limit: int = 25) -> dict:
 
 @mcp.tool()
 async def load_model(path: str) -> dict:
-    """Load a model file (path on the OrcaSlicer host) onto the current plate. [needs M4a]"""
+    """Load a model file (path on the OrcaSlicer host) onto the current plate.
+    Accepts .stl/.obj/.3mf, plus .step/.stp on fork v2.3.2-mcp.3+. Large STEP files
+    can take a minute to tessellate; the call waits. [needs M4a]"""
     try:
         async with _client() as c:
             return await c.load_model(path)

@@ -39,6 +39,8 @@ You'll need [uv](https://docs.astral.sh/uv/getting-started/installation/) instal
 
     `ORCA_API_URL` defaults to `http://127.0.0.1:13130` — set it only if you changed the port, or run OrcaSlicer on another machine (with LAN access enabled there).
 
+    > **macOS note:** Claude Desktop doesn't inherit your terminal's PATH, so `"command": "uvx"` can fail silently (Claude acts as if the server doesn't exist). Use the full path instead: run `which uvx` in Terminal (usually `~/.local/bin/uvx` or `/opt/homebrew/bin/uvx`) and put that path in `"command"`. Then quit Claude Desktop fully (Cmd-Q) and reopen.
+
 4. Restart your client and ask: *“Load benchy.stl, slice it with the current profile, and tell me the print time.”*
 
 ## What Claude can do with it

@@ -1,0 +1,55 @@
+{
+  "manifest_version": "0.3",
+  "name": "orcaslicer-mcp",
+  "display_name": "OrcaSlicer MCP",
+  "version": "0.1.1",
+  "description": "Drive OrcaSlicer with AI: load models, arrange the plate, tune settings, slice, and analyze the result.",
+  "long_description": "Connects Claude to a real, running OrcaSlicer (the OrcaSlicer MCP build, which adds a token-authenticated local control API). Load models, arrange the plate, tune and sanity-check settings, slice, and analyze the result, live, with every change visible in the GUI. The slicer stays authoritative and on your machine: no cloud calls, no telemetry, no accounts.\n\nRequires: (1) the OrcaSlicer MCP build from https://github.com/maxellis/OrcaSlicer/releases with its Remote API enabled in Preferences, and (2) uv (https://docs.astral.sh/uv/), which supplies the uvx command this extension uses to run the server.",
+  "author": {
+    "name": "Max Ellis",
+    "url": "https://github.com/maxellis"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maxellis/orcaslicer-mcp"
+  },
+  "homepage": "https://github.com/maxellis/orcaslicer-mcp",
+  "documentation": "https://github.com/maxellis/orcaslicer-mcp#readme",
+  "support": "https://github.com/maxellis/orcaslicer-mcp/issues",
+  "license": "AGPL-3.0",
+  "keywords": ["3d-printing", "orcaslicer", "slicer", "gcode", "klipper", "cad"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "ORCA_API_TOKEN": "${user_config.api_token}",
+        "ORCA_API_URL": "${user_config.api_url}"
+      }
+    }
+  },
+  "user_config": {
+    "api_token": {
+      "type": "string",
+      "title": "Remote API token",
+      "description": "In OrcaSlicer (MCP build): Preferences -> Remote API -> Enable Remote API, then copy the token shown there.",
+      "sensitive": true,
+      "required": true
+    },
+    "api_url": {
+      "type": "string",
+      "title": "OrcaSlicer address",
+      "description": "Leave as-is unless you changed the port or run OrcaSlicer on another machine (with LAN access enabled there).",
+      "default": "http://127.0.0.1:13130",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=16.0.0"
+    }
+  }
+}

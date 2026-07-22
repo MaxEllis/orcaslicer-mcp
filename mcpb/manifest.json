@@ -17,13 +17,22 @@
   "documentation": "https://github.com/maxellis/orcaslicer-mcp#readme",
   "support": "https://github.com/maxellis/orcaslicer-mcp/issues",
   "license": "AGPL-3.0",
-  "keywords": ["3d-printing", "orcaslicer", "slicer", "gcode", "klipper", "cad"],
+  "keywords": [
+    "3d-printing",
+    "orcaslicer",
+    "slicer",
+    "gcode",
+    "klipper",
+    "cad"
+  ],
   "server": {
     "type": "node",
     "entry_point": "server/index.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/server/index.js"],
+      "args": [
+        "${__dirname}/server/index.js"
+      ],
       "env": {
         "ORCA_API_TOKEN": "${user_config.api_token}",
         "ORCA_API_URL": "${user_config.api_url}"
@@ -47,9 +56,16 @@
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "win32", "linux"],
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
     "runtimes": {
       "node": ">=16.0.0"
     }
-  }
+  },
+  "privacy_policies": [
+    "https://github.com/MaxEllis/orcaslicer-mcp#privacy-policy"
+  ]
 }

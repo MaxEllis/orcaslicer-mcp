@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "orcaslicer-mcp",
   "display_name": "OrcaSlicer MCP",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Drive OrcaSlicer with AI: load models, arrange the plate, tune settings, slice, and analyze the result.",
   "long_description": "Connects Claude to a real, running OrcaSlicer (the OrcaSlicer MCP build, which adds a token-authenticated local control API). Load models, arrange the plate, tune and sanity-check settings, slice, and analyze the result, live, with every change visible in the GUI. The slicer stays authoritative and on your machine: no cloud calls, no telemetry, no accounts.\n\nRequires: (1) the OrcaSlicer MCP build from https://github.com/maxellis/OrcaSlicer/releases with its Remote API enabled in Preferences, and (2) uv (https://docs.astral.sh/uv/), which supplies the uvx command this extension uses to run the server.",
   "author": {

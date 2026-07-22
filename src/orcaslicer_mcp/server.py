@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from .config import load_config
 from .client import OrcaClient
 from .errors import ApiError, Validation, NotFound, Conflict, ConfigError
@@ -626,6 +627,73 @@ async def get_gcode() -> dict:
         return {"error": "not_sliced"}
     except ApiError as e:
         return _m4a_err(e)
+
+
+
+# --- Tool annotations (title + read-only/destructive hints) -----------------
+# The Claude connectors directory requires every tool to carry a title and the
+# applicable readOnlyHint / destructiveHint. Kept as one table so completeness
+# is reviewable at a glance; _apply_tool_annotations() raises on any tool
+# missing from it, and tests/test_tool_annotations.py enforces the inverse.
+
+_TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
+    # name: (title, read_only, destructive)
+    "get_status": ("Get OrcaSlicer status", True, False),
+    "get_config": ("Get config values", True, False),
+    "get_slice_status": ("Get slice status", True, False),
+    "get_slice_warnings": ("Get slice warnings", True, False),
+    "get_slice_breakdown": ("Get slice time/flow breakdown", True, False),
+    "compare_settings": ("Compare settings", True, False),
+    "list_objects": ("List plate objects", True, False),
+    "get_job_status": ("Get background job status", True, False),
+    "watch_events": ("Watch OrcaSlicer events", True, False),
+    "find_config_keys": ("Find config keys", True, False),
+    "diagnose_plate": ("Diagnose plate issues", True, False),
+    "check_placement": ("Check object placement", True, False),
+    "consult": ("Consult slicing knowledge", True, False),
+    "check_profile_physics": ("Sanity-check profile physics", True, False),
+    "describe_setting": ("Describe a setting", True, False),
+    "search_settings": ("Search settings", True, False),
+    "list_presets": ("List presets", True, False),
+    "get_preset_config": ("Get preset config", True, False),
+    "get_gcode": ("Download sliced gcode", True, False),
+    "set_config": ("Set config values", False, False),
+    "slice": ("Start slicing", False, False),
+    "slice_and_wait": ("Slice and wait for result", False, False),
+    "apply_and_slice": ("Apply config and slice", False, False),
+    "cancel_slice": ("Cancel running slice", False, False),
+    "set_object_config": ("Set per-object config", False, False),
+    "duplicate_object": ("Duplicate object", False, False),
+    "transform_object": ("Transform object", False, False),
+    "arrange_plate": ("Arrange plate", False, False),
+    "auto_orient": ("Auto-orient objects", False, False),
+    "remember": ("Save a note", False, False),
+    "load_model": ("Load a model file", False, False),
+    "select_preset": ("Select preset", False, False),
+    "set_layer_height": ("Set layer height", False, False),
+    "set_height_range": ("Set height-range config", False, False),
+    "rename_preset": ("Rename preset", False, False),
+    "save_preset": ("Save preset (overwrites stored settings)", False, True),
+    "edit_preset": ("Edit preset (overwrites stored settings)", False, True),
+    "delete_object": ("Delete object from plate", False, True),
+    "delete_preset": ("Delete preset", False, True),
+}
+
+
+def _apply_tool_annotations() -> None:
+    for name, tool in mcp._tool_manager._tools.items():
+        title, read_only, destructive = _TOOL_ANNOTATIONS[name]
+        tool.title = title
+        # destructiveHint is only meaningful on tools that modify state, so
+        # read-only tools carry no hint rather than a misleading False.
+        tool.annotations = ToolAnnotations(
+            title=title,
+            readOnlyHint=read_only,
+            destructiveHint=None if read_only else destructive,
+        )
+
+
+_apply_tool_annotations()
 
 
 def _hide_windows_console() -> None:

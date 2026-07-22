@@ -82,9 +82,15 @@ The live smoke test is skipped unless `ORCA_API_URL` / `ORCA_API_TOKEN` point at
 
 Developer docs — protocol notes, design specs, verification results — live in [`docs/`](docs/).
 
-## Privacy
+## Privacy Policy
 
-Everything runs on your own machines. The server talks only to OrcaSlicer's local API at the address you configure (localhost by default) and to nothing else: no telemetry, no analytics, no accounts, no cloud calls. Models, settings, and gcode never leave your computer. The API token authenticates the server to OrcaSlicer and is stored by your MCP client (Claude Desktop keeps extension settings in the operating system's credential store). Notes you save with `remember` are plain files under `~/.orcaslicer-mcp/notes/`, yours to read or delete at any time.
+Everything runs on your own machines. The server talks only to OrcaSlicer's local API at the address you configure (localhost by default) and to nothing else: no telemetry, no analytics, no accounts, no cloud calls.
+
+- **Data collection:** none. The server collects nothing about you or your usage.
+- **Usage and storage:** models, settings, and gcode stay on your computer, handled in memory only for the duration of each request. The API token authenticates the server to OrcaSlicer and is stored by your MCP client (Claude Desktop keeps extension settings in the operating system's credential store).
+- **Third-party sharing:** none. Nothing is transmitted to us or to any third party — there is no server-side "us" to transmit to.
+- **Data retention:** the only data written to disk is notes you explicitly save with `remember`, stored as plain files under `~/.orcaslicer-mcp/notes/`, yours to read or delete at any time. Delete the folder and nothing remains.
+- **Contact:** questions or concerns — [open an issue](https://github.com/MaxEllis/orcaslicer-mcp/issues).
 
 ## Status
 

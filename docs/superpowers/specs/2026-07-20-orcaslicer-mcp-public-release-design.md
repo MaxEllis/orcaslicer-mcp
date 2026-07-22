@@ -111,7 +111,7 @@ after this gate passes.
 
 - Printer control (Klipper / Moonraker / any printer-side MCP).
 - Community announcements, registry listings (post-gate decision).
-- Upstreaming the Remote API into SoftFever/OrcaSlicer (future option; repo
+- Upstreaming the Remote API into OrcaSlicer/OrcaSlicer (org moved from SoftFever, 2026; future option; repo
   naming and clean fork lineage deliberately preserve it).
 - Hosted/cloud anything.
 - Rebasing the fork onto a newer upstream OrcaSlicer (only if the gate forces

@@ -93,3 +93,5 @@ Early public release (soft launch). The server is exercised by ~170 unit tests a
 ## License
 
 AGPL-3.0 — the same license as OrcaSlicer, from whose source the bundled settings schema is derived. See [LICENSE](LICENSE).
+
+<!-- mcp-name: io.github.maxellis/orcaslicer-mcp -->

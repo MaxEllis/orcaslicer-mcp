@@ -1,0 +1,37 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.MaxEllis/orcaslicer-mcp",
+  "description": "Drive a running OrcaSlicer with AI: load models, tune settings, slice, and analyze results",
+  "repository": {
+    "url": "https://github.com/MaxEllis/orcaslicer-mcp",
+    "source": "github"
+  },
+  "version": "0.1.4",
+  "websiteUrl": "https://github.com/MaxEllis/orcaslicer-mcp",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "orcaslicer-mcp",
+      "version": "0.1.4",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "ORCA_API_TOKEN",
+          "description": "Remote API token from the OrcaSlicer MCP build (Preferences -> Remote API)",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "ORCA_API_URL",
+          "description": "OrcaSlicer Remote API address; defaults to http://127.0.0.1:13130",
+          "isRequired": false,
+          "default": "http://127.0.0.1:13130"
+        }
+      ]
+    }
+  ]
+}

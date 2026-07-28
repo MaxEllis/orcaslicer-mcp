@@ -163,6 +163,23 @@ class OrcaClient:
             raise error_from_status(resp.status_code, body)
         return resp.content
 
+    async def get_plate_render(self, view: str = "editor", angle: str = "iso",
+                               width: int = 800, height: int = 600) -> bytes:
+        try:
+            resp = await self._http.get("/api/v1/plate/render", params={
+                "view": view, "angle": angle, "width": width, "height": height})
+        except httpx.TimeoutException as e:
+            raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
+        except httpx.TransportError as e:
+            raise NotReachable(f"OrcaSlicer not reachable at {self._cfg.base_url}: {e}") from e
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+            except Exception:
+                body = {}
+            raise error_from_status(resp.status_code, body)
+        return resp.content
+
     def _ws_url(self) -> str:
         base = self._cfg.base_url
         ws = base.replace("https://", "wss://", 1).replace("http://", "ws://", 1)

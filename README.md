@@ -1,33 +1,39 @@
 # OrcaSlicer MCP
 
-**Drive OrcaSlicer with AI.** OrcaSlicer MCP is an [MCP](https://modelcontextprotocol.io) server that lets Claude (Desktop or Code — or any MCP client) operate a real, running OrcaSlicer: load models, arrange the plate, tune settings, slice, and analyze the result — live, with every change visible in the GUI.
+[![PyPI](https://img.shields.io/pypi/v/orcaslicer-mcp)](https://pypi.org/project/orcaslicer-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/orcaslicer-mcp)](https://pypi.org/project/orcaslicer-mcp/)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
-The slicer stays authoritative and on your machine. The server contains no LLM and makes no cloud calls; it talks only to OrcaSlicer on localhost (or a host you explicitly allow).
+Let Claude drive a real, running OrcaSlicer. It loads models, arranges the plate, tunes settings, slices, and reads the result back. Every change lands in the GUI while you watch.
 
-## How it works
+![A sliced plate with support, rendered by OrcaSlicer itself over the control API](docs/images/preview-support.png)
 
-Two pieces:
+*What the assistant sees after a slice: support in green, its interface in white, top surfaces in orange.*
 
-1. **The OrcaSlicer MCP build of OrcaSlicer** — OrcaSlicer 2.3.2 with an embedded local control API (token-authenticated, localhost-only by default). Get it from the [releases page](https://github.com/maxellis/OrcaSlicer/releases); if no binary is up for your platform yet, build the `remote-api` branch from source.
-2. **This package (`orcaslicer-mcp`)** — the MCP server that connects your AI client to that build.
+The slicer stays in charge and stays on your machine. This package is an [MCP](https://modelcontextprotocol.io) server, so it holds no model of its own and makes no cloud calls. It talks to OrcaSlicer at an address you configure, which is localhost by default.
 
-Stock OrcaSlicer does not have the control API — the MCP server requires the build above.
+## What you need
 
-> **Updating:** always get new builds from the [releases page](https://github.com/maxellis/OrcaSlicer/releases), never from inside the app. Builds **mcp.2 and later** disable OrcaSlicer's built-in updater for you (left on, it offers *stock* OrcaSlicer — which removes the control API). If you're on an older build and a "new version available" prompt appears, click **Skip this Version**.
+Stock OrcaSlicer ships without a control API, so a matching build does that half of the job.
+
+1. **The OrcaSlicer MCP build.** OrcaSlicer 2.3.2 with an embedded local API, token-authenticated and bound to localhost until you say otherwise. Get it from the [releases page](https://github.com/maxellis/OrcaSlicer/releases). If no binary is up for your platform yet, build the `remote-api` branch from source.
+2. **This package (`orcaslicer-mcp`).** The MCP server that connects your AI client to that build.
+
+> **Updating:** take new builds from the [releases page](https://github.com/maxellis/OrcaSlicer/releases), never from inside the app. The in-app updater offers *stock* OrcaSlicer, which drops the control API. Builds mcp.2 and later turn that updater off for you. On an older build, click **Skip this Version** if a "new version available" prompt appears.
 
 ## Quickstart
 
-You'll need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed (it provides the `uvx` command that runs the server) — one line: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first, because it provides the `uvx` command that runs the server. One line does it: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS and Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows.
 
-1. Install and launch the OrcaSlicer MCP build, and complete the one-time first-run setup (pick your printer). On a fresh install OrcaSlicer may show a **"Bambu Network Plug-in Required"** dialog — click **Skip for Now**; that plug-in is only for Bambu cloud printing and isn't needed here. (The control API starts once first-run setup is finished.)
-2. In OrcaSlicer: **Preferences** (Ctrl+P) **→ Remote API → Enable Remote API**, then copy the API token shown on that page. (Access is localhost-only unless you also switch on "Allow LAN access".)
+1. Install the OrcaSlicer MCP build, launch it, and finish the one-time setup by picking your printer. A fresh install may show a **“Bambu Network Plug-in Required”** dialog. Click **Skip for Now**, since that plug-in only serves Bambu cloud printing. The control API starts once setup is finished.
+2. Open **Preferences** (Ctrl+P), go to **Remote API**, and tick **Enable Remote API**. Copy the token shown on that page. Access stays localhost-only unless you also switch on "Allow LAN access".
 3. Connect your MCP client.
 
-    **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [releases page](https://github.com/maxellis/orcaslicer-mcp/releases/latest) and open the file. Claude Desktop shows an install prompt. Once it's in, open the extension's settings, paste the token from step 2, and enable it.
+    **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [releases page](https://github.com/maxellis/orcaslicer-mcp/releases/latest) and open the file. Claude Desktop offers to install it. Open the extension's settings afterwards, paste the token from step 2, and enable it.
 
-    > Skip any guide that tells you to hand-edit `claude_desktop_config.json`. Current Claude Desktop builds rewrite that file on their own and drop added `mcpServers` entries, so edits don't stick. The extension never touches the file, and it finds `uvx` by itself.
+    > Ignore any guide that tells you to hand-edit `claude_desktop_config.json`. Current Claude Desktop builds rewrite that file themselves and drop added `mcpServers` entries, so the edit will not stick. The extension leaves the file alone and finds `uvx` by itself.
 
-    **Claude Code and other MCP clients:** add the server to the client's MCP config (for Claude Code, a project `.mcp.json`):
+    **Claude Code and other MCP clients:** add the server to your client's MCP config. For Claude Code that means a project `.mcp.json`:
 
     ```json
     {
@@ -43,62 +49,74 @@ You'll need [uv](https://docs.astral.sh/uv/getting-started/installation/) instal
     }
     ```
 
-    `ORCA_API_URL` defaults to `http://127.0.0.1:13130` — set it only if you changed the port, or run OrcaSlicer on another machine (with LAN access enabled there).
+    `ORCA_API_URL` defaults to `http://127.0.0.1:13130`. Set it only if you changed the port, or if OrcaSlicer runs on another machine with LAN access enabled there.
 
-    > **macOS note for GUI clients other than Claude Desktop:** apps launched from the Dock don't inherit your terminal's PATH, so `"command": "uvx"` can fail silently. Run `which uvx` in Terminal and put the full path it prints (usually `~/.local/bin/uvx`) in `"command"`.
+    > **macOS note for GUI clients other than Claude Desktop:** apps launched from the Dock do not inherit your terminal's PATH, so `"command": "uvx"` can fail silently. Run `which uvx` in Terminal, then paste the full path it prints into `"command"`. It is usually `~/.local/bin/uvx`.
 
-4. Restart your client and ask: *“Load benchy.stl, slice it with the current profile, and tell me the print time.”*
+4. Restart your client and ask: *"Load benchy.stl, slice it with the current profile, and tell me the print time."*
 
-## What Claude can do with it
+## What the assistant can do
 
-- **Plate & models:** `load_model` (`.stl`/`.obj`/`.3mf`, plus `.step`/`.stp` with fork v2.3.2-mcp.3+), `list_objects`, `transform_object`, `duplicate_object`, `delete_object`, `arrange_plate`, `auto_orient`, `check_placement`, `diagnose_plate`, `get_job_status`
-- **Settings:** `get_config`, `set_config`, `find_config_keys`, `describe_setting`, `search_settings`, `compare_settings`, `set_layer_height`, `set_height_range`, `set_object_config` (per-object overrides)
+- **Plate and models:** `load_model` (`.stl`, `.obj`, `.3mf`, plus `.step` and `.stp` on fork v2.3.2-mcp.3+), `list_objects`, `transform_object`, `duplicate_object`, `delete_object`, `arrange_plate`, `auto_orient`, `check_placement`, `diagnose_plate`, `get_job_status`
+- **Settings:** `get_config`, `set_config`, `find_config_keys`, `describe_setting`, `search_settings`, `compare_settings`, `set_layer_height`, `set_height_range`, `set_object_config` for per-object overrides
 - **Presets:** `list_presets`, `select_preset`, `get_preset_config`, `edit_preset`, `save_preset`, `rename_preset`, `delete_preset`
-- **Slicing:** `slice`, `slice_and_wait`, `apply_and_slice`, `cancel_slice`, `get_slice_status`, `get_slice_warnings`, `get_slice_breakdown` (per-feature time/flow analysis), `get_gcode`
-- **Seeing the plate:** `render_plate` — a real PNG of the plate, so Claude can *look* instead of inferring from numbers. `view="editor"` shows the models on the bed (orientation, plate contact, first-layer footprint); `view="preview"` shows the sliced toolpaths colored by feature role, so support placement is visible. Seven camera angles, and `frame="plate"`/`"object"` to zoom out to the whole bed or in on the part. Requires fork v2.3.2-mcp.4+.
-- **Live state & events:** `get_status`, `watch_events`
+- **Slicing:** `slice`, `slice_and_wait`, `apply_and_slice`, `cancel_slice`, `get_slice_status`, `get_slice_warnings`, `get_slice_breakdown` for per-feature time and flow analysis, `get_gcode`
+- **Live state:** `get_status`, `watch_events`
 
-### Settings intelligence
+## Seeing the plate
 
-- **`consult(query)`** — curated slicing knowledge plus your saved notes, composed per topic, symptom, or goal.
-- **`check_profile_physics(changes?)`** — deterministic sanity gate: overlays proposed changes on the live config and runs flow/temperature/geometry/cooling math. Verdict: `ok`, `warnings`, or `blocked`.
-- **`remember(note, scope)`** — persist machine/user/project facts for future sessions as plain local files in `~/.orcaslicer-mcp/notes/` (relocatable via `ORCA_MCP_NOTES_DIR`).
+`render_plate` hands back a real PNG, so the assistant looks instead of inferring from coordinates. A rotation reads instantly as a picture and barely at all as three Euler angles.
 
-Plus an offline settings reference: authoritative label/tooltip/type/range/enum/default for ~800 OrcaSlicer settings, bundled with the package.
+| `view="editor"` | `view="preview"` |
+|---|---|
+| ![The bed with a model on it](docs/images/editor-plate.png) | ![Sliced toolpaths with support](docs/images/preview-support.png) |
+| Your models on the bed. Answers orientation, plate contact, and first-layer footprint. | Sliced toolpaths coloured by feature role, so support placement is plain to see. |
+
+Seven camera angles cover `iso`, `top`, `front`, `left`, `right`, `rear`, and `bottom`. Use `frame="plate"` to stand back for the whole bed, or `frame="object"` to lean in on the part. Requires fork v2.3.2-mcp.4 or later.
+
+`list_objects` reports the matching numbers, including each object's world-space bounding box and an `on_plate` flag.
+
+## Settings intelligence
+
+- **`consult(query)`** composes curated slicing knowledge and your saved notes per topic, symptom, or goal.
+- **`check_profile_physics(changes?)`** is a deterministic sanity gate. It overlays proposed changes on the live config, runs flow, temperature, geometry, and cooling math, then returns `ok`, `warnings`, or `blocked`.
+- **`remember(note, scope)`** persists machine, user, and project facts for later sessions. They are plain local files in `~/.orcaslicer-mcp/notes/`, relocatable with `ORCA_MCP_NOTES_DIR`.
+
+An offline settings reference ships with the package: authoritative label, tooltip, type, range, enum, and default for roughly 800 OrcaSlicer settings.
 
 ## Security
 
-- The control API binds **127.0.0.1 only** by default; LAN access is an explicit opt-in in Preferences.
-- Every request must carry the API token; OrcaSlicer generates it on first run and can regenerate it at any time.
-- The MCP server is a local stdio process. No telemetry, no cloud.
+- The control API binds **127.0.0.1 only** by default. LAN access is an explicit opt-in in Preferences.
+- Every request must carry the API token. OrcaSlicer generates it on first run and can regenerate it at any time.
+- The MCP server runs as a local stdio process. No telemetry, no cloud.
 
 ## Development
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
-uv run pytest   # unit tests (mock API) + a guarded live smoke test
+uv run pytest   # unit tests against a mock API, plus a guarded live smoke test
 ```
 
-The live smoke test is skipped unless `ORCA_API_URL` / `ORCA_API_TOKEN` point at a running OrcaSlicer MCP build.
+The live smoke test skips itself unless `ORCA_API_URL` and `ORCA_API_TOKEN` point at a running OrcaSlicer MCP build.
 
-Developer docs — protocol notes, design specs, verification results — live in [`docs/`](docs/).
+Protocol notes, design specs, and verification results live in [`docs/`](docs/).
 
-## Privacy Policy
+## Privacy policy
 
-Everything runs on your own machines. The server talks only to OrcaSlicer's local API at the address you configure (localhost by default) and to nothing else: no telemetry, no analytics, no accounts, no cloud calls.
+Everything runs on your own machines. The server talks to OrcaSlicer's local API at the address you configure, localhost by default, and to nothing else. No telemetry, no analytics, no accounts, no cloud calls.
 
 - **Data collection:** none. The server collects nothing about you or your usage.
-- **Usage and storage:** models, settings, and gcode stay on your computer, handled in memory only for the duration of each request. The API token authenticates the server to OrcaSlicer and is stored by your MCP client (Claude Desktop keeps extension settings in the operating system's credential store).
-- **Third-party sharing:** none. Nothing is transmitted to us or to any third party — there is no server-side "us" to transmit to.
-- **Data retention:** the only data written to disk is notes you explicitly save with `remember`, stored as plain files under `~/.orcaslicer-mcp/notes/`, yours to read or delete at any time. Delete the folder and nothing remains.
-- **Contact:** questions or concerns — [open an issue](https://github.com/MaxEllis/orcaslicer-mcp/issues).
+- **Usage and storage:** models, settings, and gcode stay on your computer, held in memory only for the duration of each request. The API token authenticates the server to OrcaSlicer, and your MCP client stores it. Claude Desktop keeps extension settings in the operating system's credential store.
+- **Third-party sharing:** none. Nothing goes to us or to any third party, and there is no server-side "us" to send it to.
+- **Data retention:** the only data written to disk is notes you save yourself with `remember`, stored as plain files under `~/.orcaslicer-mcp/notes/`. Read or delete them whenever you like. Delete the folder and nothing remains.
+- **Contact:** questions and concerns go in [an issue](https://github.com/MaxEllis/orcaslicer-mcp/issues).
 
 ## Status
 
-Early public release (soft launch). The server is exercised by ~170 unit tests and real print workflows; prebuilt OrcaSlicer MCP builds are available for Windows, macOS, and Linux on the [releases page](https://github.com/maxellis/OrcaSlicer/releases). Issues and reports welcome.
+Early public release, soft launch. The server carries 183 unit tests and gets exercised on real print jobs. Prebuilt OrcaSlicer MCP builds cover Windows, macOS, and Linux on the [releases page](https://github.com/maxellis/OrcaSlicer/releases). Issues and reports are welcome.
 
 ## License
 
-AGPL-3.0 — the same license as OrcaSlicer, from whose source the bundled settings schema is derived. See [LICENSE](LICENSE).
+AGPL-3.0, matching OrcaSlicer, from whose source the bundled settings schema derives. See [LICENSE](LICENSE).
 
 <!-- mcp-name: io.github.MaxEllis/orcaslicer-mcp -->

@@ -43,3 +43,11 @@ async def test_render_plate_route_missing_means_old_fork(monkeypatch):
         return_value=httpx.Response(404, json={"error": "not_found"}))
     out = await srv.render_plate()
     assert "not available on this OrcaSlicer build" in out["error"]
+
+@respx.mock
+async def test_render_plate_forwards_frame(monkeypatch):
+    _env(monkeypatch)
+    route = respx.get("http://x:13130/api/v1/plate/render").mock(
+        return_value=httpx.Response(200, content=PNG))
+    await srv.render_plate(view="editor", angle="front", frame="object")
+    assert route.calls.last.request.url.params["frame"] == "object"

@@ -164,10 +164,14 @@ class OrcaClient:
         return resp.content
 
     async def get_plate_render(self, view: str = "editor", angle: str = "iso",
-                               width: int = 800, height: int = 600) -> bytes:
+                               width: int = 800, height: int = 600,
+                               frame: str | None = None) -> bytes:
+        params: dict[str, str | int] = {
+            "view": view, "angle": angle, "width": width, "height": height}
+        if frame is not None:
+            params["frame"] = frame
         try:
-            resp = await self._http.get("/api/v1/plate/render", params={
-                "view": view, "angle": angle, "width": width, "height": height})
+            resp = await self._http.get("/api/v1/plate/render", params=params)
         except httpx.TimeoutException as e:
             raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
         except httpx.TransportError as e:

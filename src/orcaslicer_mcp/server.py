@@ -631,7 +631,8 @@ async def get_gcode() -> dict:
 
 @mcp.tool()
 async def render_plate(view: str = "editor", angle: str = "iso",
-                       width: int = 800, height: int = 600):
+                       width: int = 800, height: int = 600,
+                       frame: str | None = None):
     """Render a PNG picture of the current plate so you can SEE it.
 
     view="editor": the models on the bed BEFORE slicing - use to check
@@ -639,13 +640,17 @@ async def render_plate(view: str = "editor", angle: str = "iso",
     near-unreadable; this is the ground truth). view="preview": the sliced
     toolpaths colored by feature role AFTER a successful slice - support is
     visibly distinct, so use it to check where support actually went.
-    angle: iso|top|front|left|right|rear|bottom. [needs plate_render capability,
-    fork v2.3.2-mcp.4+]
+    angle: iso|top|front|left|right|rear|bottom.
+    frame: "plate" zooms out to the whole bed (where the part sits, footprint),
+    "object" zooms in on the model/toolpaths (detail). Defaults to "plate" for
+    the editor view and "object" for the preview view; pass it explicitly when
+    a side view of a small part would otherwise be a speck on a big bed.
+    [needs plate_render capability, fork v2.3.2-mcp.4+]
     """
     try:
         async with _client() as c:
             png = await c.get_plate_render(view=view, angle=angle,
-                                           width=width, height=height)
+                                           width=width, height=height, frame=frame)
             return Image(data=png, format="png")
     except Conflict:
         return {"error": "no_slice_result",

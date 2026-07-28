@@ -55,7 +55,7 @@ You'll need [uv](https://docs.astral.sh/uv/getting-started/installation/) instal
 - **Settings:** `get_config`, `set_config`, `find_config_keys`, `describe_setting`, `search_settings`, `compare_settings`, `set_layer_height`, `set_height_range`, `set_object_config` (per-object overrides)
 - **Presets:** `list_presets`, `select_preset`, `get_preset_config`, `edit_preset`, `save_preset`, `rename_preset`, `delete_preset`
 - **Slicing:** `slice`, `slice_and_wait`, `apply_and_slice`, `cancel_slice`, `get_slice_status`, `get_slice_warnings`, `get_slice_breakdown` (per-feature time/flow analysis), `get_gcode`
-- **Seeing the plate:** `render_plate` — a real PNG of the plate, so Claude can *look* instead of inferring from numbers. `view="editor"` shows the models on the bed (orientation, plate contact, first-layer footprint); `view="preview"` shows the sliced toolpaths colored by feature role, so support placement is visible. Seven camera angles. Requires fork v2.3.2-mcp.4+.
+- **Seeing the plate:** `render_plate` — a real PNG of the plate, so Claude can *look* instead of inferring from numbers. `view="editor"` shows the models on the bed (orientation, plate contact, first-layer footprint); `view="preview"` shows the sliced toolpaths colored by feature role, so support placement is visible. Seven camera angles, and `frame="plate"`/`"object"` to zoom out to the whole bed or in on the part. Requires fork v2.3.2-mcp.4+.
 - **Live state & events:** `get_status`, `watch_events`
 
 ### Settings intelligence

@@ -35,3 +35,19 @@ async def test_plate_render_409_no_slice():
     async with OrcaClient(CFG) as c:
         with pytest.raises(Conflict):
             await c.get_plate_render(view="preview")
+
+@respx.mock
+async def test_plate_render_omits_frame_when_none():
+    route = respx.get("http://x:13130/api/v1/plate/render").mock(
+        return_value=httpx.Response(200, content=PNG))
+    async with OrcaClient(CFG) as c:
+        await c.get_plate_render()
+    assert "frame" not in route.calls.last.request.url.params
+
+@respx.mock
+async def test_plate_render_sends_frame_when_given():
+    route = respx.get("http://x:13130/api/v1/plate/render").mock(
+        return_value=httpx.Response(200, content=PNG))
+    async with OrcaClient(CFG) as c:
+        await c.get_plate_render(frame="object")
+    assert route.calls.last.request.url.params["frame"] == "object"

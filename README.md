@@ -6,9 +6,9 @@
 
 Let Claude drive a real, running OrcaSlicer. It loads models, arranges the plate, tunes settings, slices, and reads the result back. Every change lands in the GUI while you watch.
 
-![A sliced plate with support, rendered by OrcaSlicer itself over the control API](docs/images/preview-support.png)
+![A sliced press-fit connector, rendered by OrcaSlicer itself over the control API](docs/images/conn-preview.png)
 
-*What the assistant sees after a slice: support in green, its interface in white, top surfaces in orange.*
+*A press-fit tube connector after slicing, as the assistant sees it. Walls in orange, top surfaces in gold, sparse infill in dark red, bridges in purple, brim in blue, and the white column is support interface in the internal corner.*
 
 The slicer stays in charge and stays on your machine. This package is an [MCP](https://modelcontextprotocol.io) server, so it holds no model of its own and makes no cloud calls. It talks to OrcaSlicer at an address you configure, which is localhost by default.
 
@@ -69,12 +69,34 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first, bec
 
 | `view="editor"` | `view="preview"` |
 |---|---|
-| ![The bed with a model on it](docs/images/editor-plate.png) | ![Sliced toolpaths with support](docs/images/preview-support.png) |
+| ![The connector sitting on the bed](docs/images/conn-editor.png) | ![The same part sliced, toolpaths coloured by role](docs/images/conn-preview.png) |
 | Your models on the bed. Answers orientation, plate contact, and first-layer footprint. | Sliced toolpaths coloured by feature role, so support placement is plain to see. |
 
 Seven camera angles cover `iso`, `top`, `front`, `left`, `right`, `rear`, and `bottom`. Use `frame="plate"` to stand back for the whole bed, or `frame="object"` to lean in on the part. Requires fork v2.3.2-mcp.4 or later.
 
 `list_objects` reports the matching numbers, including each object's world-space bounding box and an `on_plate` flag.
+
+### Reading the slice details
+
+OrcaSlicer shows a legend beside the preview with per-feature colours and totals. The render leaves that panel out on purpose, since it is interface chrome sized for a screen. `get_slice_breakdown` returns the same information as numbers instead, which an assistant can compare and act on:
+
+```
+role                    time      share   filament   mean flow
+inner_wall              5m 41s    30.8%     6.43 g    16.0 mm3/s
+outer_wall              3m 19s    18.0%     3.20 g    13.6 mm3/s
+sparse_infill           3m 07s    17.0%     3.57 g    17.0 mm3/s
+internal_solid_infill   2m 01s    11.0%     1.72 g    11.8 mm3/s
+bridge                     52s     4.7%     0.26 g     4.4 mm3/s
+support_interface          36s     3.2%     0.52 g    12.3 mm3/s
+overhang_perimeter         28s     2.5%     0.13 g     3.7 mm3/s
+internal_bridge            21s     1.9%     0.45 g    19.9 mm3/s
+top_surface                19s     1.7%     0.29 g    12.5 mm3/s
+brim                       12s     1.1%     0.21 g    14.7 mm3/s
+bottom_surface              7s     0.7%     0.10 g    11.8 mm3/s
+                        18m 24s            16.89 g
+```
+
+That is the real breakdown for the part above. It answers which feature is eating the time without slicing repeatedly to find out, and it cross-checks the picture: `support_interface` appears with no plain `support` role, which is exactly the interface-only column visible in the render. A `prediction_check` rides along and flags any role where the profile's requested speed got throttled at the flow ceiling.
 
 ## Settings intelligence
 

@@ -6,11 +6,64 @@
 
 Let Claude drive a real, running OrcaSlicer. It loads models, arranges the plate, tunes settings, slices, and reads the result back. Every change lands in the GUI while you watch.
 
-![A sliced press-fit connector, rendered by OrcaSlicer itself over the control API](docs/images/conn-preview.png)
+This package is an [MCP](https://modelcontextprotocol.io) server: it bundles no model and talks to nothing but OrcaSlicer, at an address you configure, localhost by default. The model comes from your MCP client. If that client uses a hosted one, your conversation goes there as any chat does; your models, profiles, and gcode stay on the machine running the slicer. Point the client at a local model and nothing leaves at all.
 
-*A press-fit tube connector after slicing, as the assistant sees it. Walls in orange, top surfaces in gold, sparse infill in dark red, bridges in purple, brim in blue, and the white column is support interface in the internal corner.*
+## What it can do
 
-The slicer stays in charge and stays on your machine. This package is an [MCP](https://modelcontextprotocol.io) server, so it holds no model of its own and makes no cloud calls. It talks to OrcaSlicer at an address you configure, which is localhost by default.
+### Settings
+
+Read and write any of roughly 800 OrcaSlicer settings on the live config, for the whole plate or scoped narrower: `get_config`, `set_config`, `find_config_keys`, `set_layer_height`, `set_height_range` for a band of layers, and `set_object_config` for one object's overrides.
+
+### Knowing what the settings mean
+
+An offline settings reference ships with the package, carrying the authoritative label, tooltip, type, range, enum, and default for each key, so `describe_setting`, `search_settings`, and `compare_settings` answer from OrcaSlicer's own source instead of guessing. `consult` composes curated slicing knowledge and your saved notes by topic, symptom, or goal.
+
+`check_profile_physics` is a deterministic gate. It overlays proposed changes on the live config, runs flow, temperature, geometry, and cooling math, then returns `ok`, `warnings`, or `blocked`. Accelerations your printer cannot reach and speeds past the flow ceiling get caught before they reach a print.
+
+### Presets
+
+`list_presets`, `select_preset`, `get_preset_config`, `edit_preset`, `save_preset`, `rename_preset`, `delete_preset`.
+
+### Slicing, and reading the result back
+
+`slice`, `slice_and_wait`, `apply_and_slice`, `cancel_slice`, `get_slice_status`, `get_slice_warnings`, `get_gcode`.
+
+`get_slice_breakdown` returns per-feature time, filament, and flow. OrcaSlicer shows the same information in the legend beside its preview, sized for a screen; this returns it as numbers an assistant can compare and act on:
+
+```
+role                    time      share   filament   mean flow
+inner_wall              5m 41s    30.8%     6.43 g    16.0 mm3/s
+outer_wall              3m 19s    18.0%     3.20 g    13.6 mm3/s
+sparse_infill           3m 07s    17.0%     3.57 g    17.0 mm3/s
+internal_solid_infill   2m 01s    11.0%     1.72 g    11.8 mm3/s
+bridge                     52s     4.7%     0.26 g     4.4 mm3/s
+support_interface          36s     3.2%     0.52 g    12.3 mm3/s
+overhang_perimeter         28s     2.5%     0.13 g     3.7 mm3/s
+internal_bridge            21s     1.9%     0.45 g    19.9 mm3/s
+top_surface                19s     1.7%     0.29 g    12.5 mm3/s
+brim                       12s     1.1%     0.21 g    14.7 mm3/s
+bottom_surface              7s     0.7%     0.10 g    11.8 mm3/s
+                        18m 24s            16.89 g
+```
+
+It answers which feature is eating the time without slicing repeatedly to find out. A `prediction_check` rides along and flags any role where the profile's requested speed got throttled at the flow ceiling.
+
+### Models and the plate
+
+`load_model` (`.stl`, `.obj`, `.3mf`, plus `.step` and `.stp` on fork v2.3.2-mcp.3 and later), `list_objects` with each object's world-space bounding box and an `on_plate` flag, `transform_object`, `duplicate_object`, `delete_object`, `arrange_plate`, `auto_orient`, `check_placement`, `diagnose_plate`, `get_job_status`.
+
+### Plate renders
+
+`render_plate` hands back a PNG, so the assistant can look instead of inferring from coordinates. A rotation reads instantly as a picture and barely at all as three Euler angles. Seven camera angles cover `iso`, `top`, `front`, `left`, `right`, `rear`, and `bottom`. Use `frame="plate"` to stand back for the whole bed, or `frame="object"` to lean in on the part. Requires fork v2.3.2-mcp.4 or later.
+
+| `view="editor"` | `view="preview"` |
+|---|---|
+| ![A press-fit tube connector sitting on the bed](docs/images/conn-editor.png) | ![The same part sliced, toolpaths coloured by feature role](docs/images/conn-preview.png) |
+| Your models on the bed. Answers orientation, plate contact, and first-layer footprint. | Sliced toolpaths coloured by feature role, so support placement is plain to see. |
+
+### Live state and memory
+
+`get_status` and `watch_events` report what the slicer is doing now. `remember` persists machine, user, and project facts for later sessions, as plain local files in `~/.orcaslicer-mcp/notes/`, relocatable with `ORCA_MCP_NOTES_DIR`.
 
 ## What you need
 
@@ -55,62 +108,11 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first, bec
 
 4. Restart your client and ask: *"Load benchy.stl, slice it with the current profile, and tell me the print time."*
 
-## What the assistant can do
-
-- **Plate and models:** `load_model` (`.stl`, `.obj`, `.3mf`, plus `.step` and `.stp` on fork v2.3.2-mcp.3+), `list_objects`, `transform_object`, `duplicate_object`, `delete_object`, `arrange_plate`, `auto_orient`, `check_placement`, `diagnose_plate`, `get_job_status`
-- **Settings:** `get_config`, `set_config`, `find_config_keys`, `describe_setting`, `search_settings`, `compare_settings`, `set_layer_height`, `set_height_range`, `set_object_config` for per-object overrides
-- **Presets:** `list_presets`, `select_preset`, `get_preset_config`, `edit_preset`, `save_preset`, `rename_preset`, `delete_preset`
-- **Slicing:** `slice`, `slice_and_wait`, `apply_and_slice`, `cancel_slice`, `get_slice_status`, `get_slice_warnings`, `get_slice_breakdown` for per-feature time and flow analysis, `get_gcode`
-- **Live state:** `get_status`, `watch_events`
-
-## Seeing the plate
-
-`render_plate` hands back a real PNG, so the assistant looks instead of inferring from coordinates. A rotation reads instantly as a picture and barely at all as three Euler angles.
-
-| `view="editor"` | `view="preview"` |
-|---|---|
-| ![The connector sitting on the bed](docs/images/conn-editor.png) | ![The same part sliced, toolpaths coloured by role](docs/images/conn-preview.png) |
-| Your models on the bed. Answers orientation, plate contact, and first-layer footprint. | Sliced toolpaths coloured by feature role, so support placement is plain to see. |
-
-Seven camera angles cover `iso`, `top`, `front`, `left`, `right`, `rear`, and `bottom`. Use `frame="plate"` to stand back for the whole bed, or `frame="object"` to lean in on the part. Requires fork v2.3.2-mcp.4 or later.
-
-`list_objects` reports the matching numbers, including each object's world-space bounding box and an `on_plate` flag.
-
-### Reading the slice details
-
-OrcaSlicer shows a legend beside the preview with per-feature colours and totals. The render leaves that panel out on purpose, since it is interface chrome sized for a screen. `get_slice_breakdown` returns the same information as numbers instead, which an assistant can compare and act on:
-
-```
-role                    time      share   filament   mean flow
-inner_wall              5m 41s    30.8%     6.43 g    16.0 mm3/s
-outer_wall              3m 19s    18.0%     3.20 g    13.6 mm3/s
-sparse_infill           3m 07s    17.0%     3.57 g    17.0 mm3/s
-internal_solid_infill   2m 01s    11.0%     1.72 g    11.8 mm3/s
-bridge                     52s     4.7%     0.26 g     4.4 mm3/s
-support_interface          36s     3.2%     0.52 g    12.3 mm3/s
-overhang_perimeter         28s     2.5%     0.13 g     3.7 mm3/s
-internal_bridge            21s     1.9%     0.45 g    19.9 mm3/s
-top_surface                19s     1.7%     0.29 g    12.5 mm3/s
-brim                       12s     1.1%     0.21 g    14.7 mm3/s
-bottom_surface              7s     0.7%     0.10 g    11.8 mm3/s
-                        18m 24s            16.89 g
-```
-
-That is the real breakdown for the part above. It answers which feature is eating the time without slicing repeatedly to find out, and it cross-checks the picture: `support_interface` appears with no plain `support` role, which is exactly the interface-only column visible in the render. A `prediction_check` rides along and flags any role where the profile's requested speed got throttled at the flow ceiling.
-
-## Settings intelligence
-
-- **`consult(query)`** composes curated slicing knowledge and your saved notes per topic, symptom, or goal.
-- **`check_profile_physics(changes?)`** is a deterministic sanity gate. It overlays proposed changes on the live config, runs flow, temperature, geometry, and cooling math, then returns `ok`, `warnings`, or `blocked`.
-- **`remember(note, scope)`** persists machine, user, and project facts for later sessions. They are plain local files in `~/.orcaslicer-mcp/notes/`, relocatable with `ORCA_MCP_NOTES_DIR`.
-
-An offline settings reference ships with the package: authoritative label, tooltip, type, range, enum, and default for roughly 800 OrcaSlicer settings.
-
 ## Security
 
 - The control API binds **127.0.0.1 only** by default. LAN access is an explicit opt-in in Preferences.
 - Every request must carry the API token. OrcaSlicer generates it on first run and can regenerate it at any time.
-- The MCP server runs as a local stdio process. No telemetry, no cloud.
+- The MCP server runs as a local stdio process and opens no connection except to OrcaSlicer. No telemetry.
 
 ## Development
 
@@ -125,11 +127,11 @@ Protocol notes, design specs, and verification results live in [`docs/`](docs/).
 
 ## Privacy policy
 
-Everything runs on your own machines. The server talks to OrcaSlicer's local API at the address you configure, localhost by default, and to nothing else. No telemetry, no analytics, no accounts, no cloud calls.
+The server talks to OrcaSlicer's local API at the address you configure, localhost by default, and to nothing else. It has no backend, so there is no service of ours for anything to reach. What leaves your machine is whatever your MCP client sends its model: the conversation, plus any settings or file contents you or the assistant put into it. Their terms govern that traffic, and it is the same traffic any other use of that client produces. A local model removes it entirely.
 
 - **Data collection:** none. The server collects nothing about you or your usage.
-- **Usage and storage:** models, settings, and gcode stay on your computer, held in memory only for the duration of each request. The API token authenticates the server to OrcaSlicer, and your MCP client stores it. Claude Desktop keeps extension settings in the operating system's credential store.
-- **Third-party sharing:** none. Nothing goes to us or to any third party, and there is no server-side "us" to send it to.
+- **Usage and storage:** models, settings, and gcode stay on the computer running OrcaSlicer, held in memory only for the duration of each request. The API token authenticates the server to OrcaSlicer, and your MCP client stores it. Claude Desktop keeps extension settings in the operating system's credential store.
+- **Third-party sharing:** none by this server, which has no analytics and no backend. Traffic between your client and its model provider sits outside this project and falls under their policies.
 - **Data retention:** the only data written to disk is notes you save yourself with `remember`, stored as plain files under `~/.orcaslicer-mcp/notes/`. Read or delete them whenever you like. Delete the folder and nothing remains.
 - **Contact:** questions and concerns go in [an issue](https://github.com/MaxEllis/orcaslicer-mcp/issues).
 

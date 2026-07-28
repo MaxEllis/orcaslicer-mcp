@@ -1,7 +1,7 @@
 from __future__ import annotations
 import asyncio
 import sys
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 from mcp.types import ToolAnnotations
 from .config import load_config
 from .client import OrcaClient
@@ -629,6 +629,31 @@ async def get_gcode() -> dict:
         return _m4a_err(e)
 
 
+@mcp.tool()
+async def render_plate(view: str = "editor", angle: str = "iso",
+                       width: int = 800, height: int = 600):
+    """Render a PNG picture of the current plate so you can SEE it.
+
+    view="editor": the models on the bed BEFORE slicing - use to check
+    orientation, plate contact, and first-layer footprint (an Euler triple is
+    near-unreadable; this is the ground truth). view="preview": the sliced
+    toolpaths colored by feature role AFTER a successful slice - support is
+    visibly distinct, so use it to check where support actually went.
+    angle: iso|top|front|left|right|rear|bottom. [needs plate_render capability,
+    fork v2.3.2-mcp.4+]
+    """
+    try:
+        async with _client() as c:
+            png = await c.get_plate_render(view=view, angle=angle,
+                                           width=width, height=height)
+            return Image(data=png, format="png")
+    except Conflict:
+        return {"error": "no_slice_result",
+                "hint": "slice first, then render view='preview'"}
+    except ApiError as e:
+        return _m4_err(e, "plate_render (fork v2.3.2-mcp.4+)")
+
+
 
 # --- Tool annotations (title + read-only/destructive hints) -----------------
 # The Claude connectors directory requires every tool to carry a title and the
@@ -657,6 +682,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "list_presets": ("List presets", True, False),
     "get_preset_config": ("Get preset config", True, False),
     "get_gcode": ("Download sliced gcode", True, False),
+    "render_plate": ("Render plate image", True, False),
     "set_config": ("Set config values", False, False),
     "slice": ("Start slicing", False, False),
     "slice_and_wait": ("Slice and wait for result", False, False),

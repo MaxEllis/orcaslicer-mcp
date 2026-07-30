@@ -15,7 +15,9 @@ sed -i "s/^version = \".*\"/version = \"$VER\"/" pyproject.toml
 sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VER\"/g" server.json mcpb/manifest.json
 
 # All three MUST agree or the extension/registry ship mismatched metadata.
-mapfile -t found < <(grep -ho '"\?version"\? *[:=] *"[^"]*"' pyproject.toml server.json mcpb/manifest.json \
+# Anchored so fields like manifest_version don't leak in.
+mapfile -t found < <({ grep -ho '^version = "[^"]*"' pyproject.toml; \
+                       grep -ho '^ *"version": "[^"]*"' server.json mcpb/manifest.json; } \
                      | grep -o '[0-9][^"]*' | sort -u)
 if [ "${#found[@]}" -ne 1 ] || [ "${found[0]}" != "$VER" ]; then
   echo "FAIL: version markers disagree: ${found[*]}" >&2; exit 1

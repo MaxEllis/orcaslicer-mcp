@@ -9,7 +9,7 @@ from .errors import ApiError, Validation, NotFound, Conflict, ConfigError
 from .models import summarize_slice
 from . import settings_schema
 from . import placement
-from .knowledge_index import search_knowledge
+from .knowledge_index import load_knowledge, search_knowledge
 from .physics_check import run_checks
 from .breakdown import build_breakdown
 from . import notes as _notes
@@ -456,6 +456,93 @@ def describe_setting(key: str) -> dict:
 def search_settings(query: str, limit: int = 25) -> dict:
     """Search settings by keyword across key/label/tooltip; returns compact matches (key, label, category, short tooltip), ranked key/label first. Offline."""
     return {"results": settings_schema.search(query, limit)}
+
+
+# --- MCP resources: the offline reference data, addressable as context ---
+# All of these read the packaged settings schema / knowledge base, so they
+# work even when OrcaSlicer is not running.
+
+
+@mcp.resource("orca://knowledge", title="Slicing knowledge index",
+              description="Index of the curated slicing knowledge base shipped with this server; each entry lists its orca://knowledge/{slug} URI.")
+def knowledge_index_resource() -> str:
+    lines = ["# Curated slicing knowledge", ""]
+    for c in load_knowledge():
+        slug = c.relpath[:-3].replace("/", "__") if c.relpath.endswith(".md") else c.relpath.replace("/", "__")
+        topics = f" (topics: {', '.join(c.topics)})" if c.topics else ""
+        lines.append(f"- orca://knowledge/{slug} — {c.title}{topics}")
+    return "\n".join(lines)
+
+
+@mcp.resource("orca://knowledge/{slug}", title="Slicing knowledge chunk",
+              description="One knowledge chunk by slug (relpath with '/' as '__', no .md); see orca://knowledge for the index.")
+def knowledge_chunk_resource(slug: str) -> str:
+    for c in load_knowledge():
+        rel = c.relpath[:-3] if c.relpath.endswith(".md") else c.relpath
+        if rel.replace("/", "__") == slug:
+            return c.body
+    raise ValueError(f"unknown knowledge slug: {slug}")
+
+
+@mcp.resource("orca://setting/{key}", title="Setting definition",
+              description="Authoritative definition of one OrcaSlicer setting (label, tooltip, type, unit, range, enum, default), from OrcaSlicer's own source.")
+def setting_resource(key: str) -> str:
+    import json as _json
+    rec = settings_schema.describe(key)
+    if rec is None:
+        raise ValueError(f"unknown setting: {key}")
+    return _json.dumps(rec, indent=2)
+
+
+# --- MCP prompts: guided workflows that encode this server's intended use ---
+
+
+@mcp.prompt(name="slice-a-model", title="Slice a model, safely",
+            description="Guided load -> check -> slice -> read-back workflow for one model file.")
+def prompt_slice_a_model(model_path: str) -> str:
+    return (
+        f"Slice {model_path} in OrcaSlicer via the orcaslicer tools, step by step:\n"
+        "1. get_status — confirm OrcaSlicer is reachable and note the selected presets.\n"
+        "2. list_objects — see what is already on the plate before adding anything.\n"
+        f"3. load_model with path {model_path}, then check_placement; fix placement with "
+        "auto_orient / arrange_plate / transform_object if it reports problems.\n"
+        "4. consult with the model's material and purpose before touching settings.\n"
+        "5. slice_and_wait, then get_slice_warnings and get_slice_breakdown; report "
+        "print time, filament mass, and any warnings. Use render_plate to show the result.\n"
+        "Do not start a print or change temperatures without asking me first."
+    )
+
+
+@mcp.prompt(name="optimize-print-time", title="Optimize print time",
+            description="Data-driven print-time reduction from a real slice breakdown, never adjectives alone.")
+def prompt_optimize_print_time(constraints: str = "") -> str:
+    extra = f"\nMy constraints: {constraints}" if constraints else ""
+    return (
+        "Reduce the print time of the current plate, driven by data:\n"
+        "1. slice_and_wait (if no valid slice), then get_slice_breakdown — identify which "
+        "feature roles actually dominate time.\n"
+        "2. consult with 'print time optimization' plus the dominant roles; only propose "
+        "levers the knowledge base or breakdown supports.\n"
+        "3. Apply candidate changes with set_config, then check_profile_physics — drop "
+        "anything blocked.\n"
+        "4. Re-slice and quantify: present 2-3 options as minutes and grams versus the "
+        "baseline, with the quality trade-off of each. Do not save presets unless I say so."
+        + extra
+    )
+
+
+@mcp.prompt(name="edit-preset-safely", title="Edit a preset, safely",
+            description="Preset change with the physics gate: consult -> set_config -> check_profile_physics -> save_preset.")
+def prompt_edit_preset_safely(change: str) -> str:
+    return (
+        f"I want this preset change: {change}\n"
+        "Follow the safe path — never edit_preset directly for physics-relevant keys:\n"
+        "1. consult and describe_setting for every key involved; confirm units and ranges.\n"
+        "2. Apply with set_config on the live config first.\n"
+        "3. check_profile_physics — if verdict is blocked, stop and show me why; if "
+        "warnings, explain them before proceeding.\n"
+        "4. Only then save_preset, and confirm with get_status that nothing is left dirty."
+    )
 
 
 @mcp.tool()

@@ -3,6 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/orcaslicer-mcp)](https://pypi.org/project/orcaslicer-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/orcaslicer-mcp)](https://pypi.org/project/orcaslicer-mcp/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![MCP Badge](https://lobehub.com/badge/mcp/maxellis-orcaslicer-mcp)](https://lobehub.com/mcp/maxellis-orcaslicer-mcp)
 
 Let Claude drive a real, running OrcaSlicer. It loads models, arranges the plate, tunes settings, slices, and reads the result back. Every change lands in the GUI while you watch.
 

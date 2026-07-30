@@ -49,7 +49,12 @@ gh release create "v$VER" --title "v$VER" --generate-notes \
 
 echo "== 8/8 MCP registry =="
 # The registry JWT expires in minutes, so login+publish must be one step.
-mcp-publisher login github && mcp-publisher publish
+# login is an INTERACTIVE device flow - headless runs stop here, deliberately.
+if command -v mcp-publisher >/dev/null; then
+  mcp-publisher login github && mcp-publisher publish
+else
+  echo "SKIPPED: mcp-publisher not installed - registry still advertises the previous version." >&2
+fi
 
 rm -f "orcaslicer-mcp-$VER.mcpb" "orcaslicer-mcp-$VER.mcpb.sha256"
 echo "DONE: $VER on PyPI, GitHub, and the MCP registry"

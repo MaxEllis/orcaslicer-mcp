@@ -1,0 +1,42 @@
+name: Publish to MCP Registry
+
+# Publishes server.json to the official MCP registry
+# (https://registry.modelcontextprotocol.io) under the io.github.MaxEllis
+# namespace. Authentication is GitHub OIDC: the registry trusts a workflow
+# running in a repo owned by the namespace owner, so no stored secret or
+# interactive device-flow login is needed. Run it by hand (workflow_dispatch)
+# or let it fire automatically whenever a GitHub release is published here.
+
+on:
+  workflow_dispatch: {}
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write   # required so the registry can verify our GitHub OIDC token
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.0/mcp-publisher_linux_amd64.tar.gz" \
+            | tar -xz mcp-publisher
+          ./mcp-publisher --version || true
+
+      - name: Sanity-check server.json version matches pyproject
+        run: |
+          sv=$(python3 -c "import json;print(json.load(open('server.json'))['version'])")
+          pv=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "server.json=$sv  pyproject=$pv"
+          test "$sv" = "$pv" || { echo "version mismatch"; exit 1; }
+
+      - name: Log in to the registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish

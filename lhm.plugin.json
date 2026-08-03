@@ -13,10 +13,7 @@
     "model-context-protocol"
   ],
   "connectionType": "local",
-  "author": {
-    "name": "maxellis",
-    "url": "https://github.com/MaxEllis"
-  },
+  "author": "maxellis",
   "github": {
     "url": "https://github.com/MaxEllis/orcaslicer-mcp",
     "language": "Python",

@@ -1,0 +1,283 @@
+{
+  "identifier": "maxellis-orcaslicer-mcp",
+  "version": "0.1.8",
+  "name": "OrcaSlicer MCP",
+  "description": "Drive a running OrcaSlicer with AI: load models, arrange the plate, tune settings, slice, and analyze results. Talks only to OrcaSlicer on localhost or a host you configure; no cloud calls.",
+  "category": "developer",
+  "tags": [
+    "mcp",
+    "orcaslicer",
+    "3d-printing",
+    "slicer",
+    "claude",
+    "model-context-protocol"
+  ],
+  "connectionType": "local",
+  "author": {
+    "name": "maxellis",
+    "url": "https://github.com/MaxEllis"
+  },
+  "github": {
+    "url": "https://github.com/MaxEllis/orcaslicer-mcp",
+    "language": "Python",
+    "license": "AGPL-3.0"
+  },
+  "artifacts": {
+    "pypi": {
+      "packageName": "orcaslicer-mcp",
+      "version": "0.1.8"
+    }
+  },
+  "deploymentOptions": [
+    {
+      "installationMethod": "uvx",
+      "isRecommended": true,
+      "description": "Run straight from PyPI with uv; no install step.",
+      "connection": {
+        "type": "stdio",
+        "command": "uvx",
+        "args": [
+          "orcaslicer-mcp"
+        ],
+        "configSchema": {
+          "type": "object",
+          "required": [
+            "ORCA_API_TOKEN"
+          ],
+          "properties": {
+            "ORCA_API_TOKEN": {
+              "type": "string",
+              "description": "Remote API token from the OrcaSlicer MCP build (Preferences -> Remote API)"
+            },
+            "ORCA_API_URL": {
+              "type": "string",
+              "default": "http://127.0.0.1:13130",
+              "description": "OrcaSlicer Remote API address"
+            }
+          }
+        }
+      },
+      "installationDetails": {
+        "packageName": "orcaslicer-mcp"
+      },
+      "systemDependencies": []
+    }
+  ],
+  "tools": [
+    {
+      "name": "get_status",
+      "description": "App/project/preset status, dirty keys, slice validity, and whether a slice is running."
+    },
+    {
+      "name": "get_config",
+      "description": "Read merged config values (optionally filtered to `keys`)."
+    },
+    {
+      "name": "set_config",
+      "description": "Apply config changes atomically. Returns {applied, errors}. On any invalid key, nothing is applied."
+    },
+    {
+      "name": "slice",
+      "description": "Start slicing the current plate. Returns started / already_valid / conflict."
+    },
+    {
+      "name": "get_slice_status",
+      "description": "Current/last slice state, stats, and warnings."
+    },
+    {
+      "name": "get_slice_warnings",
+      "description": "Just the warnings/errors from the last (or current) slice, plus validity - the"
+    },
+    {
+      "name": "get_slice_breakdown",
+      "description": "Per-feature breakdown of the last slice + a stateless predicted-vs-observed flow check."
+    },
+    {
+      "name": "cancel_slice",
+      "description": "Abort a running slice, or unwedge a stale 'slicing' state (e.g. after an"
+    },
+    {
+      "name": "slice_and_wait",
+      "description": "Slice (or reuse a valid result) and wait for completion; return final stats + warnings."
+    },
+    {
+      "name": "apply_and_slice",
+      "description": "Apply config changes, then slice and report the resulting stats/warnings."
+    },
+    {
+      "name": "compare_settings",
+      "description": "For each value of `key`, slice and collect stats/warnings; restore the original when done."
+    },
+    {
+      "name": "list_objects",
+      "description": "List objects on the current plate: id (stable), name, size_mm, and transform (offset/rotation/scale). [needs M4b]"
+    },
+    {
+      "name": "set_object_config",
+      "description": "Set per-object config overrides on an object by id, e.g. {\"wall_loops\": 4, \"sparse_infill_density\": \"30%\"}. Atomic (nothing applied if any key is invalid). [needs M4c]"
+    },
+    {
+      "name": "duplicate_object",
+      "description": "Duplicate an object on the plate by id (adds a copy, offset from the original). [needs M4b]"
+    },
+    {
+      "name": "delete_object",
+      "description": "Delete an object from the current plate by its id. [needs M4b]"
+    },
+    {
+      "name": "transform_object",
+      "description": "Move/rotate/scale an object by id. translate=[dx,dy,dz] mm (relative), rotate=[rx,ry,rz] degrees (relative), scale=[sx,sy,sz] absolute factor. Provide at least one. [needs M4b]"
+    },
+    {
+      "name": "arrange_plate",
+      "description": "Auto-arrange all objects on the plate (async job; poll get_job_status until idle). [needs M4b]"
+    },
+    {
+      "name": "auto_orient",
+      "description": "Auto-orient all objects for printing (async job; poll get_job_status until idle). [needs M4b]"
+    },
+    {
+      "name": "get_job_status",
+      "description": "Whether the plate job worker is idle (poll after arrange_plate/auto_orient). [needs M4b]"
+    },
+    {
+      "name": "watch_events",
+      "description": "Collect live events (slice.*/config.changed/project.opened) over a bounded window."
+    },
+    {
+      "name": "find_config_keys",
+      "description": "Find config keys containing `substring` (helps discover among the ~600 keys)."
+    },
+    {
+      "name": "diagnose_plate",
+      "description": "One-call plate diagnosis: app/slice status, objects on the plate, bed + active"
+    },
+    {
+      "name": "check_placement",
+      "description": "Estimate whether every object (plus its skirt/brim ring) fits inside the printable"
+    },
+    {
+      "name": "consult",
+      "description": "Retrieve curated slicing knowledge + saved context notes for a topic,"
+    },
+    {
+      "name": "check_profile_physics",
+      "description": "Deterministic pre-save gate: fetches the live config, overlays optional"
+    },
+    {
+      "name": "remember",
+      "description": "Persist a context fact for future sessions. scope: 'machine:<printer>/<filament>',"
+    },
+    {
+      "name": "describe_setting",
+      "description": "Authoritative definition of one OrcaSlicer setting: label, tooltip, type, unit, range, enum values, default. Offline; works even when OrcaSlicer is not running."
+    },
+    {
+      "name": "search_settings",
+      "description": "Search settings by keyword across key/label/tooltip; returns compact matches (key, label, category, short tooltip), ranked key/label first. Offline."
+    },
+    {
+      "name": "load_model",
+      "description": "Load a model file (path on the OrcaSlicer host) onto the current plate."
+    },
+    {
+      "name": "select_preset",
+      "description": "Select a named preset. type = print|filament|printer. [needs M4a]"
+    },
+    {
+      "name": "save_preset",
+      "description": "Save the currently edited settings as a named user preset (create or update,"
+    },
+    {
+      "name": "list_presets",
+      "description": "List print/filament/printer presets with system/selected/visible flags."
+    },
+    {
+      "name": "set_layer_height",
+      "description": "Variable layer height for one object. mode='adaptive' (quality 0..1, higher = finer"
+    },
+    {
+      "name": "set_height_range",
+      "description": "Set a per-height-band layer height on an object (e.g. 0-5mm at 0.1mm). Same exact"
+    },
+    {
+      "name": "get_preset_config",
+      "description": "Read the full settings of a named preset without selecting it."
+    },
+    {
+      "name": "delete_preset",
+      "description": "Delete a USER preset (system presets and the currently-selected one are refused)."
+    },
+    {
+      "name": "edit_preset",
+      "description": "Edit a named preset's settings and persist them: selects it, applies the"
+    },
+    {
+      "name": "rename_preset",
+      "description": "Rename a USER preset: save a copy under the new name, select it, delete the old."
+    },
+    {
+      "name": "get_gcode",
+      "description": "Retrieve the last successful slice's G-code as text. [needs M4a]"
+    },
+    {
+      "name": "render_plate",
+      "description": "Render a PNG picture of the current plate so you can SEE it."
+    }
+  ],
+  "prompts": [
+    {
+      "name": "slice-a-model",
+      "description": "Guided load -> check -> slice -> read-back workflow for one model file.",
+      "arguments": [
+        {
+          "name": "model_path",
+          "description": "",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "optimize-print-time",
+      "description": "Data-driven print-time reduction from a real slice breakdown, never adjectives alone.",
+      "arguments": [
+        {
+          "name": "constraints",
+          "description": "",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "edit-preset-safely",
+      "description": "Preset change with the physics gate: consult -> set_config -> check_profile_physics -> save_preset.",
+      "arguments": [
+        {
+          "name": "change",
+          "description": "",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "uri": "orca://knowledge",
+      "name": "knowledge_index_resource",
+      "mimeType": "text/plain"
+    },
+    {
+      "uri": "orca://knowledge/{slug}",
+      "name": "Slicing knowledge chunk",
+      "mimeType": "text/markdown"
+    },
+    {
+      "uri": "orca://setting/{key}",
+      "name": "Setting definition",
+      "mimeType": "application/json"
+    }
+  ],
+  "overview": {
+    "summary": "MCP server that lets Claude or any MCP client operate a real, running OrcaSlicer: load models, arrange plates, tune ~800 settings with a physics sanity gate, slice, and read per-feature results back. Requires the OrcaSlicer MCP build (fork with an embedded, token-authenticated local control API)."
+  }
+}

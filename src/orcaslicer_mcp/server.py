@@ -141,7 +141,7 @@ async def get_slice_breakdown() -> dict:
     the time hog' directly instead of by trial slicing.
 
     Degrades to {"available": false, "reason": ...} on fork builds that don't emit the
-    breakdown, or when there is no valid slice. [needs fork breakdown build]"""
+    breakdown, or when there is no valid slice."""
     try:
         async with _client() as c:
             status = await c.slice_status()
@@ -154,7 +154,7 @@ async def get_slice_breakdown() -> dict:
 @mcp.tool()
 async def cancel_slice() -> dict:
     """Abort a running slice, or unwedge a stale 'slicing' state (e.g. after an
-    object outside the bed). Safe when idle. [needs F2 build]"""
+    object outside the bed). Safe when idle."""
     try:
         async with _client() as c:
             return await c.cancel_slice()
@@ -253,7 +253,7 @@ def _m4c_err(e: ApiError) -> dict:
 
 @mcp.tool()
 async def list_objects() -> dict:
-    """List objects on the current plate: id (stable), name, size_mm, and transform (offset/rotation/scale). [needs M4b]"""
+    """List objects on the current plate: id (stable), name, size_mm, and transform (offset/rotation/scale)."""
     try:
         async with _client() as c:
             return await c.get_objects()
@@ -263,7 +263,7 @@ async def list_objects() -> dict:
 
 @mcp.tool()
 async def set_object_config(object_id: int, changes: dict) -> dict:
-    """Set per-object config overrides on an object by id, e.g. {"wall_loops": 4, "sparse_infill_density": "30%"}. Atomic (nothing applied if any key is invalid). [needs M4c]"""
+    """Set per-object config overrides on an object by id, e.g. {"wall_loops": 4, "sparse_infill_density": "30%"}. Atomic (nothing applied if any key is invalid)."""
     try:
         async with _client() as c:
             return await c.set_object_config(object_id, changes)
@@ -273,7 +273,7 @@ async def set_object_config(object_id: int, changes: dict) -> dict:
 
 @mcp.tool()
 async def duplicate_object(object_id: int) -> dict:
-    """Duplicate an object on the plate by id (adds a copy, offset from the original). [needs M4b]"""
+    """Duplicate an object on the plate by id (adds a copy, offset from the original)."""
     try:
         async with _client() as c:
             return await c.duplicate_object(object_id)
@@ -283,7 +283,7 @@ async def duplicate_object(object_id: int) -> dict:
 
 @mcp.tool()
 async def delete_object(object_id: int) -> dict:
-    """Delete an object from the current plate by its id. [needs M4b]"""
+    """Delete an object from the current plate by its id."""
     try:
         async with _client() as c:
             return await c.delete_object(object_id)
@@ -295,7 +295,7 @@ async def delete_object(object_id: int) -> dict:
 async def transform_object(object_id: int, translate: list[float] | None = None,
                            rotate: list[float] | None = None,
                            scale: list[float] | None = None) -> dict:
-    """Move/rotate/scale an object by id. translate=[dx,dy,dz] mm (relative), rotate=[rx,ry,rz] degrees (relative), scale=[sx,sy,sz] absolute factor. Provide at least one. [needs M4b]"""
+    """Move/rotate/scale an object by id. translate=[dx,dy,dz] mm (relative), rotate=[rx,ry,rz] degrees (relative), scale=[sx,sy,sz] absolute factor. Provide at least one."""
     try:
         async with _client() as c:
             return await c.transform_object(object_id, translate, rotate, scale)
@@ -305,7 +305,7 @@ async def transform_object(object_id: int, translate: list[float] | None = None,
 
 @mcp.tool()
 async def arrange_plate() -> dict:
-    """Auto-arrange all objects on the plate (async job; poll get_job_status until idle). [needs M4b]"""
+    """Auto-arrange all objects on the plate (async job; poll get_job_status until idle)."""
     try:
         async with _client() as c:
             return await c.arrange()
@@ -315,7 +315,7 @@ async def arrange_plate() -> dict:
 
 @mcp.tool()
 async def auto_orient() -> dict:
-    """Auto-orient all objects for printing (async job; poll get_job_status until idle). [needs M4b]"""
+    """Auto-orient all objects for printing (async job; poll get_job_status until idle)."""
     try:
         async with _client() as c:
             return await c.orient()
@@ -325,7 +325,7 @@ async def auto_orient() -> dict:
 
 @mcp.tool()
 async def get_job_status() -> dict:
-    """Whether the plate job worker is idle (poll after arrange_plate/auto_orient). [needs M4b]"""
+    """Whether the plate job worker is idle (poll after arrange_plate/auto_orient)."""
     try:
         async with _client() as c:
             return await c.job_status()
@@ -391,7 +391,7 @@ async def check_placement() -> dict:
 
     APPROXIMATE: uses the object footprint from size+offset, not the sliced toolpath (skirt
     arcs, half-line-width, travel/wipe excluded); single-instance objects only. At ~mm
-    margins the true verdict needs get_slice_warnings - this is a fast first-pass. [needs M4b]"""
+    margins the true verdict needs get_slice_warnings - this is a fast first-pass."""
     try:
         async with _client() as c:
             objs = await c.get_objects()
@@ -549,7 +549,7 @@ def prompt_edit_preset_safely(change: str) -> str:
 async def load_model(path: str) -> dict:
     """Load a model file (path on the OrcaSlicer host) onto the current plate.
     Accepts .stl/.obj/.3mf, plus .step/.stp on fork v2.3.2-mcp.3+. Large STEP files
-    can take a minute to tessellate; the call waits. [needs M4a]"""
+    can take a minute to tessellate; the call waits."""
     try:
         async with _client() as c:
             return await c.load_model(path)
@@ -559,7 +559,7 @@ async def load_model(path: str) -> dict:
 
 @mcp.tool()
 async def select_preset(type: str, name: str) -> dict:
-    """Select a named preset. type = print|filament|printer. [needs M4a]"""
+    """Select a named preset. type = print|filament|printer."""
     try:
         async with _client() as c:
             return await c.select_preset(type, name)
@@ -571,7 +571,7 @@ async def select_preset(type: str, name: str) -> dict:
 async def save_preset(type: str, name: str, detach: bool = False) -> dict:
     """Save the currently edited settings as a named user preset (create or update,
     visible in the GUI immediately). type = print|filament|printer. detach=True saves
-    it standalone instead of inheriting the current base preset. [needs preset/save]
+    it standalone instead of inheriting the current base preset.
 
     Run check_profile_physics first; do not save when verdict=blocked."""
     try:
@@ -610,8 +610,7 @@ async def list_presets(type: str | None = None, include_system: bool = False) ->
     F12: by default returns only USER presets plus whatever is currently SELECTED -
     the built-in system presets are ~400 entries of noise. Pass include_system=True
     for the full list, and/or type='print'|'filament'|'printer' to restrict to one
-    category. `hidden_system` reports how many system presets were filtered out.
-    [needs preset/save build]"""
+    category. `hidden_system` reports how many system presets were filtered out."""
     if type is not None and type not in _PRESET_TYPES:
         return {"error": "invalid_type", "type": type, "valid": list(_PRESET_TYPES)}
     try:
@@ -626,7 +625,7 @@ async def list_presets(type: str | None = None, include_system: bool = False) ->
 async def set_layer_height(object_id: int, mode: str, quality: float = 0.5) -> dict:
     """Variable layer height for one object. mode='adaptive' (quality 0..1, higher = finer
     detail) generates an adaptive profile; mode='reset' (aliases: 'default', 'none')
-    restores uniform layers. [needs M4c build]"""
+    restores uniform layers."""
     # F6: the fork only understands adaptive|reset; accept the spellings that
     # were documented for the clear path instead of bouncing them as unknown_mode.
     if mode in ("default", "none"):
@@ -642,7 +641,7 @@ async def set_layer_height(object_id: int, mode: str, quality: float = 0.5) -> d
 async def set_height_range(object_id: int, min_z: float | None = None, max_z: float | None = None,
                            layer_height: float | None = None, clear: bool = False) -> dict:
     """Set a per-height-band layer height on an object (e.g. 0-5mm at 0.1mm). Same exact
-    range again = update; clear=True removes all ranges. [needs M4c build]"""
+    range again = update; clear=True removes all ranges."""
     try:
         async with _client() as c:
             return await c.set_height_range(object_id, min_z, max_z, layer_height, clear)
@@ -653,7 +652,7 @@ async def set_height_range(object_id: int, min_z: float | None = None, max_z: fl
 @mcp.tool()
 async def get_preset_config(type: str, name: str) -> dict:
     """Read the full settings of a named preset without selecting it.
-    type = print|filament|printer. [needs preset-CRUD build]"""
+    type = print|filament|printer."""
     try:
         async with _client() as c:
             return await c.get_preset_config(type, name)
@@ -664,7 +663,7 @@ async def get_preset_config(type: str, name: str) -> dict:
 @mcp.tool()
 async def delete_preset(type: str, name: str) -> dict:
     """Delete a USER preset (system presets and the currently-selected one are refused).
-    type = print|filament|printer. [needs preset-CRUD build]"""
+    type = print|filament|printer."""
     try:
         async with _client() as c:
             return await c.delete_preset(type, name)
@@ -675,10 +674,23 @@ async def delete_preset(type: str, name: str) -> dict:
 @mcp.tool()
 async def edit_preset(type: str, name: str, changes: dict) -> dict:
     """Edit a named preset's settings and persist them: selects it, applies the
-    changes atomically, saves under the same name. [needs preset/save build]"""
+    changes atomically, saves under the same name. Runs the check_profile_physics
+    gate first (F15) and refuses with error=physics_blocked if the changes would
+    INTRODUCE a failing physics check (pre-existing failures do not block
+    unrelated edits)."""
     try:
         async with _client() as c:
             await c.select_preset(type, name)
+            cfg = await c.get_config(None)
+            overlay = dict(cfg) | {k: str(v) for k, v in changes.items()}
+            fails_before = {r.name for r in run_checks(cfg) if r.status == "fail"}
+            fails_after = [r for r in run_checks(overlay) if r.status == "fail"]
+            new_fails = [r for r in fails_after if r.name not in fails_before]
+            if new_fails:
+                return {"error": "physics_blocked", "preset": name,
+                        "fails": [{"name": r.name, "detail": r.detail} for r in new_fails],
+                        "hint": "these changes introduce a physics failure; adjust them or "
+                                "inspect with check_profile_physics(changes)"}
             applied = await c.put_config(changes)
             if applied.get("errors"):
                 return {"error": "invalid_keys", "errors": applied["errors"]}
@@ -690,8 +702,7 @@ async def edit_preset(type: str, name: str, changes: dict) -> dict:
 
 @mcp.tool()
 async def rename_preset(type: str, old_name: str, new_name: str) -> dict:
-    """Rename a USER preset: save a copy under the new name, select it, delete the old.
-    [needs preset-CRUD build]"""
+    """Rename a USER preset: save a copy under the new name, select it, delete the old."""
     try:
         async with _client() as c:
             await c.select_preset(type, old_name)
@@ -705,7 +716,7 @@ async def rename_preset(type: str, old_name: str, new_name: str) -> dict:
 
 @mcp.tool()
 async def get_gcode() -> dict:
-    """Retrieve the last successful slice's G-code as text. [needs M4a]"""
+    """Retrieve the last successful slice's G-code as text."""
     try:
         async with _client() as c:
             data = await c.get_gcode()
@@ -732,7 +743,6 @@ async def render_plate(view: str = "editor", angle: str = "iso",
     "object" zooms in on the model/toolpaths (detail). Defaults to "plate" for
     the editor view and "object" for the preview view; pass it explicitly when
     a side view of a small part would otherwise be a speck on a big bed.
-    [needs plate_render capability, fork v2.3.2-mcp.4+]
     """
     try:
         async with _client() as c:

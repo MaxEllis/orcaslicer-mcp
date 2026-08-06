@@ -2,7 +2,7 @@
   "identifier": "maxellis-orcaslicer-mcp",
   "version": "0.1.8",
   "name": "OrcaSlicer MCP",
-  "description": "Drive a running OrcaSlicer with AI: load models, arrange the plate, tune settings, slice, and analyze results. Talks only to OrcaSlicer on localhost or a host you configure; no cloud calls.",
+  "description": "Work a running OrcaSlicer with AI: load models, arrange the plate, tune settings, slice, and understand the result through slice breakdowns, setting explanations, and physics checks. Talks only to OrcaSlicer on localhost or a host you configure; no cloud calls from this server.",
   "category": "developer",
   "tags": [
     "mcp",

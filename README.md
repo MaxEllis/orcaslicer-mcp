@@ -5,21 +5,21 @@
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![MCP Badge](https://lobehub.com/badge/mcp/maxellis-orcaslicer-mcp)](https://lobehub.com/mcp/maxellis-orcaslicer-mcp)
 
-Let Claude drive a real, running OrcaSlicer. It loads models, arranges the plate, tunes settings, slices, and reads the result back. Every change lands in the GUI while you watch.
+Let Claude work alongside you in a real, running OrcaSlicer. It loads models, arranges the plate, tunes settings, slices, and reads the result back as numbers you can question: which feature ate the print time, what a setting actually does, whether a profile breaks your printer's physics. Every change lands in the GUI while you watch, so the slicer stays yours and you get better at it as you go.
 
 This package is an [MCP](https://modelcontextprotocol.io) server: it bundles no model and talks to nothing but OrcaSlicer, at an address you configure, localhost by default. The model comes from your MCP client. If that client uses a hosted one, your conversation goes there as any chat does; your models, profiles, and gcode stay on the machine running the slicer. Point the client at a local model and nothing leaves at all.
 
 ## What it can do
-
-### Settings
-
-Read and write any of roughly 800 OrcaSlicer settings on the live config, for the whole plate or scoped narrower: `get_config`, `set_config`, `find_config_keys`, `set_layer_height`, `set_height_range` for a band of layers, and `set_object_config` for one object's overrides.
 
 ### Knowing what the settings mean
 
 An offline settings reference ships with the package, carrying the authoritative label, tooltip, type, range, enum, and default for each key, so `describe_setting`, `search_settings`, and `compare_settings` answer from OrcaSlicer's own source instead of guessing. `consult` composes curated slicing knowledge and your saved notes by topic, symptom, or goal.
 
 `check_profile_physics` is a deterministic gate. It overlays proposed changes on the live config, runs flow, temperature, geometry, and cooling math, then returns `ok`, `warnings`, or `blocked`. Accelerations your printer cannot reach and speeds past the flow ceiling get caught before they reach a print.
+
+### Settings
+
+Read and write any of roughly 800 OrcaSlicer settings on the live config, for the whole plate or scoped narrower: `get_config`, `set_config`, `find_config_keys`, `set_layer_height`, `set_height_range` for a band of layers, and `set_object_config` for one object's overrides.
 
 ### Presets
 
@@ -70,10 +70,10 @@ It answers which feature is eating the time without slicing repeatedly to find o
 
 Stock OrcaSlicer ships without a control API, so a matching build does that half of the job.
 
-1. **The OrcaSlicer MCP build.** OrcaSlicer 2.3.2 with an embedded local API, token-authenticated and bound to localhost until you say otherwise. Get it from the [releases page](https://github.com/maxellis/OrcaSlicer/releases). If no binary is up for your platform yet, build the `remote-api` branch from source.
+1. **The OrcaSlicer MCP build.** OrcaSlicer 2.3.2 with an embedded local API, token-authenticated and bound to localhost until you say otherwise. Get it from the [releases page](https://github.com/MaxEllis/OrcaSlicer/releases). If no binary is up for your platform yet, build the `remote-api` branch from source.
 2. **This package (`orcaslicer-mcp`).** The MCP server that connects your AI client to that build.
 
-> **Updating:** take new builds from the [releases page](https://github.com/maxellis/OrcaSlicer/releases), never from inside the app. The in-app updater offers *stock* OrcaSlicer, which drops the control API. Builds mcp.2 and later turn that updater off for you. On an older build, click **Skip this Version** if a "new version available" prompt appears.
+> **Updating:** take new builds from the [releases page](https://github.com/MaxEllis/OrcaSlicer/releases), never from inside the app. The in-app updater offers *stock* OrcaSlicer, which drops the control API. Builds mcp.2 and later turn that updater off for you. On an older build, click **Skip this Version** if a "new version available" prompt appears.
 
 ## Quickstart
 
@@ -83,7 +83,7 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first, bec
 2. Open **Preferences** (Ctrl+P), go to **Remote API**, and tick **Enable Remote API**. Copy the token shown on that page. Access stays localhost-only unless you also switch on "Allow LAN access".
 3. Connect your MCP client.
 
-    **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [releases page](https://github.com/maxellis/orcaslicer-mcp/releases/latest) and open the file. Claude Desktop offers to install it. Open the extension's settings afterwards, paste the token from step 2, and enable it.
+    **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [releases page](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) and open the file. Claude Desktop offers to install it. Open the extension's settings afterwards, paste the token from step 2, and enable it.
 
     > Ignore any guide that tells you to hand-edit `claude_desktop_config.json`. Current Claude Desktop builds rewrite that file themselves and drop added `mcpServers` entries, so the edit will not stick. The extension leaves the file alone and finds `uvx` by itself.
 
@@ -138,7 +138,7 @@ The server talks to OrcaSlicer's local API at the address you configure, localho
 
 ## Status
 
-Early public release, soft launch. The server carries 183 unit tests and gets exercised on real print jobs. Prebuilt OrcaSlicer MCP builds cover Windows, macOS, and Linux on the [releases page](https://github.com/maxellis/OrcaSlicer/releases). Issues and reports are welcome.
+Early public release, soft launch. The server carries 183 unit tests and gets exercised on real print jobs. Prebuilt OrcaSlicer MCP builds cover Windows, macOS, and Linux on the [releases page](https://github.com/MaxEllis/OrcaSlicer/releases). Issues and reports are welcome.
 
 ## License
 

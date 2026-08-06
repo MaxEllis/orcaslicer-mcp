@@ -83,3 +83,31 @@ async def test_set_object_config_needs_m4c(monkeypatch):
     respx.put("http://x:13130/api/v1/objects/9/config").mock(return_value=httpx.Response(404, json={"error": "not_found"}))
     out = await srv.set_object_config(9, {"wall_loops": 4})
     assert "M4c" in out["error"]
+
+
+# F15: edit_preset must run the physics gate and refuse changes that INTRODUCE a fail
+@respx.mock
+async def test_edit_preset_blocks_new_physics_fail(monkeypatch):
+    _env(monkeypatch)
+    respx.put("http://x:13130/api/v1/preset").mock(return_value=httpx.Response(200, json={"selected": True}))
+    respx.get("http://x:13130/api/v1/config").mock(return_value=httpx.Response(
+        200, json={"config": {"layer_height": "0.2", "nozzle_diameter": "0.4"}}))
+    put_cfg = respx.put("http://x:13130/api/v1/config").mock(return_value=httpx.Response(200, json={"applied": ["layer_height"]}))
+    save = respx.post("http://x:13130/api/v1/preset/save").mock(return_value=httpx.Response(200, json={"saved": True}))
+    out = await srv.edit_preset("print", "P", {"layer_height": 0.9})
+    assert out["error"] == "physics_blocked"
+    assert any(f["name"] == "layer_height_ratio" for f in out["fails"])
+    assert put_cfg.call_count == 0 and save.call_count == 0
+
+
+@respx.mock
+async def test_edit_preset_allows_unrelated_change_on_already_failing_preset(monkeypatch):
+    _env(monkeypatch)
+    respx.put("http://x:13130/api/v1/preset").mock(return_value=httpx.Response(200, json={"selected": True}))
+    respx.get("http://x:13130/api/v1/config").mock(return_value=httpx.Response(
+        200, json={"config": {"layer_height": "0.9", "nozzle_diameter": "0.4"}}))
+    respx.put("http://x:13130/api/v1/config").mock(return_value=httpx.Response(200, json={"applied": ["retraction_length"]}))
+    respx.post("http://x:13130/api/v1/preset/save").mock(return_value=httpx.Response(200, json={"saved": True}))
+    out = await srv.edit_preset("print", "P", {"retraction_length": 1})
+    assert out.get("error") is None
+    assert out["saved"] == {"saved": True}

@@ -39,3 +39,22 @@ def test_search_respects_limit():
 
 def test_search_empty_query_returns_nothing():
     assert srv.search_settings("")["results"] == []
+
+
+# F16: multi-word queries must match keys/labels/tooltips per word, not as one substring
+def test_search_multiword_matches_underscored_keys():
+    out = srv.search_settings("plate temp")
+    keys = [r["key"] for r in out["results"]]
+    assert "hot_plate_temp" in keys
+    assert "cool_plate_temp" in keys
+
+
+def test_search_multiword_tooltip_words():
+    out = srv.search_settings("bed temperature limit")
+    keys = [r["key"] for r in out["results"]]
+    assert any(k.endswith("_plate_temp") for k in keys), keys
+
+
+def test_search_phrase_matches_still_outrank_word_matches():
+    out = srv.search_settings("infill")
+    assert "infill" in out["results"][0]["key"]

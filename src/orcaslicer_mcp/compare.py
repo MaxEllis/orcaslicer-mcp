@@ -19,12 +19,16 @@ def _fmt_time(seconds: float | None) -> str:
 
 
 def _signed_time(delta_s: float) -> str:
-    sign = "+" if delta_s >= 0 else "-"
-    return f"{sign}{_fmt_time(abs(delta_s))}"
+    if abs(delta_s) < 30:  # rounds to 0 min; avoid a signed "-0m"
+        return "0m"
+    return f"{'+' if delta_s >= 0 else '-'}{_fmt_time(abs(delta_s))}"
 
 
 def _signed_mass(delta_g: float) -> str:
-    return f"{'+' if delta_g >= 0 else '-'}{abs(round(delta_g, 1)):.1f} g"
+    r = round(delta_g, 1)
+    if r == 0:  # avoid "-0.0 g" when the difference rounds away
+        return "0.0 g"
+    return f"{'+' if r > 0 else '-'}{abs(r):.1f} g"
 
 
 def _pct(value: float, base: float) -> tuple[int, str]:
@@ -138,7 +142,7 @@ def _render_table(rows: list[dict], base_name: str, recommended: str | None) -> 
         star = " ★" if v["name"] == recommended else ""
         label = f"**{v['name']}{star}**" if v["name"] == recommended else v["name"]
         if v.get("error"):
-            lines.append(f"| {label} | — | — | — | {v['_notes']} |")
+            lines.append(f"| {label} | - | - | - | {v['_notes']} |")
         else:
             d = v["delta_vs_baseline"]
             vs = "baseline" if d["time_formatted"] == "baseline" else f"{d['time_formatted']}, {d['filament_formatted']}"
@@ -187,9 +191,9 @@ def compute_comparison(results: list[dict], baseline: str | None, detail: bool) 
     if recommended is None:
         headline = "No variant sliced successfully."
     elif is_dominant:
-        headline = f"Recommended: {recommended} — {reason}."
+        headline = f"Recommended: {recommended} - {reason}."
     else:
-        headline = (f"Recommended: {recommended} — {reason}. "
+        headline = (f"Recommended: {recommended} - {reason}. "
                     f"Trade-off: fastest is {fastest}, lightest is {lightest}.")
 
     table = _render_table(variants, base_name or "?", recommended)

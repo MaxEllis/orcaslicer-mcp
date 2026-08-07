@@ -49,6 +49,20 @@ bottom_surface              7s     0.7%     0.10 g    11.8 mm3/s
 
 It answers which feature is eating the time without slicing repeatedly to find out. A `prediction_check` rides along and flags any role where the profile's requested speed got throttled at the flow ceiling.
 
+`compare_slices` slices the current plate under several named variants and returns one comparison, so "what does layer height actually cost me?" is a single question rather than four manual slices. It applies each variant over your original config, restores it when done, and hands back a verdict plus a table with every delta already worked out:
+
+```
+Recommended: 0.4mm - fastest with no warnings.
+
+variant     time      filament   vs 0.4mm (baseline)
+0.3mm       8h 10m    41.0 g      +1h 30m (+22%), -7.0 g (-15%)
+0.4mm  *    6h 40m    48.0 g      baseline
+0.5mm       5h 20m    53.4 g      -1h 20m (-20%), +5.4 g (+11%)
+0.6mm       4h 35m    57.1 g      -2h 05m (-31%), +9.1 g (+19%)  thin-wall warning
+```
+
+It only crowns a winner when one variant genuinely beats the rest on time, filament, and warnings; when they trade off, it names the fastest, the lightest, and where the warnings landed, and leaves the choice in front of you. Pass `detail=True` for the per-feature split of each variant.
+
 ### Models and the plate
 
 `load_model` (`.stl`, `.obj`, `.3mf`, plus `.step` and `.stp` on fork v2.3.2-mcp.3 and later), `list_objects` with each object's world-space bounding box and an `on_plate` flag, `transform_object`, `duplicate_object`, `delete_object`, `arrange_plate`, `auto_orient`, `check_placement`, `diagnose_plate`, `get_job_status`.

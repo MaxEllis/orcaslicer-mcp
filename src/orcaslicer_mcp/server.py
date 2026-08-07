@@ -12,6 +12,7 @@ from . import placement
 from .knowledge_index import load_knowledge, search_knowledge
 from .physics_check import run_checks
 from .breakdown import build_breakdown
+from .compare import compute_comparison
 from . import notes as _notes
 
 mcp = FastMCP("orcaslicer")
@@ -229,6 +230,96 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
             return result
     except ApiError as e:
         return _err(e)
+
+
+@mcp.tool()
+async def compare_slices(variants: list[dict], baseline: str | None = None,
+                         detail: bool = False, timeout: int = 300) -> dict:
+    """Slice the current plate under several named variants and compare the cost of each.
+
+    Each variant is {"name": str, "changes": {setting: value}}; changes={} means the
+    current config as-is (a natural baseline row). Applies each variant over the ORIGINAL
+    config (resetting between variants, so they don't stack), slices it, then restores your
+    config exactly as it was - nothing is left changed (slice validity is left false, as
+    after any un-resliced edit).
+
+    Returns a ready-to-relay `headline` and `table_markdown`, plus structured `variants`.
+    All deltas and percentages are ALREADY computed and rounded against `baseline`
+    (defaults to the changes={} variant, else the first) - relay them as given rather than
+    recomputing. `recommended` names one pick; `recommended_is_dominant` says whether it
+    beats every variant on every axis (time, filament, warnings) or is only the fastest
+    warning-free option amid a genuine trade-off (`tradeoff` then names the frontier).
+
+    Each variant is a full slice (minutes); capped at 8. Set detail=True only when a
+    per-feature (wall/infill/support) split is wanted - it grows the response ~N x. With
+    more than ~5 variants, lead with the recommendation and the extremes, not all rows.
+    """
+    if not isinstance(variants, list) or len(variants) < 2:
+        return {"error": "need_at_least_two_variants"}
+    if len(variants) > 8:
+        return {"error": "too_many_variants", "max": 8, "given": len(variants)}
+    names = [v.get("name") for v in variants]
+    if any(not n for n in names):
+        return {"error": "each_variant_needs_a_name"}
+    if len(set(names)) != len(names):
+        return {"error": "variant_names_must_be_unique"}
+    if baseline is not None and baseline not in names:
+        return {"error": "unknown_baseline", "baseline": baseline, "names": names}
+
+    try:
+        async with _client() as c:
+            union = sorted({k for v in variants for k in (v.get("changes") or {})})
+            snapshot = await c.get_config(union) if union else {}
+            results: list[dict] = []
+            restore_error = None
+            try:
+                for v in variants:
+                    changes = v.get("changes") or {}
+                    r = {"name": v["name"], "changes": changes, "time_s": None,
+                         "filament_g": None, "warnings": [], "valid": False,
+                         "error": None, "roles": None}
+                    try:
+                        if snapshot:
+                            await c.put_config(snapshot)  # reset to baseline so variants don't stack
+                        if changes:
+                            applied = await c.put_config(changes)
+                            if applied.get("errors"):
+                                r["error"] = "invalid_keys"
+                                r["errors"] = applied["errors"]
+                                results.append(r)
+                                continue
+                        started = await _start_slice(c)
+                        if not started.get("already_valid"):
+                            await _wait_for_slice(c, timeout)
+                        st = await c.slice_status()
+                        s = summarize_slice(st)
+                        stats = s.get("stats") or {}
+                        status = await c.get_status()
+                        r["time_s"] = stats.get("estimated_time_seconds")
+                        r["filament_g"] = stats.get("filament_used_g")
+                        r["warnings"] = s.get("warnings") or []
+                        r["valid"] = bool(status.get("slice_result_valid"))
+                        if s.get("state") == "error" or r["time_s"] is None:
+                            r["error"] = r["error"] or (s.get("message") or "slice_failed")
+                        if detail:
+                            r["roles"] = build_breakdown(st, await c.get_config(None)).get("roles")
+                    except ApiError as e:
+                        r["error"] = str(e)
+                    results.append(r)
+            finally:
+                if snapshot:
+                    try:
+                        await c.put_config(snapshot)
+                    except ApiError as e:
+                        restore_error = str(e)
+    except ApiError as e:
+        return _err(e)
+
+    out = compute_comparison(results, baseline, detail)
+    out["restored"] = restore_error is None
+    if restore_error is not None:
+        out["restore_error"] = restore_error
+    return out
 
 
 def _m4_err(e: ApiError, milestone: str) -> dict:
@@ -771,6 +862,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "get_slice_warnings": ("Get slice warnings", True, False),
     "get_slice_breakdown": ("Get slice time/flow breakdown", True, False),
     "compare_settings": ("Compare settings", True, False),
+    "compare_slices": ("Compare slice variants", True, False),
     "list_objects": ("List plate objects", True, False),
     "get_job_status": ("Get background job status", True, False),
     "watch_events": ("Watch OrcaSlicer events", True, False),

@@ -132,3 +132,16 @@ def test_errored_variant_shown_but_excluded_from_recommendation():
     assert out["recommended"] == "A"         # only sliceable variants considered
     bad = next(v for v in out["variants"] if v["name"] == "bad")
     assert bad["error"] == "slice_failed"
+
+
+def test_signed_mass_avoids_negative_zero():
+    assert compare._signed_mass(-0.04) == "0.0 g"
+    assert compare._signed_mass(0.0) == "0.0 g"
+    assert compare._signed_mass(5.4) == "+5.4 g"
+    assert compare._signed_mass(-7.0) == "-7.0 g"
+
+
+def test_signed_time_avoids_negative_zero():
+    assert compare._signed_time(-10) == "0m"
+    assert compare._signed_time(-1200) == "-20m"
+    assert compare._signed_time(330) == "+6m"

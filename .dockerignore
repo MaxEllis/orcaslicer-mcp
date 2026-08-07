@@ -1,0 +1,23 @@
+# Keep secrets, VCS, virtualenvs, and test/build cruft out of the Docker build
+# context. The image only needs pyproject.toml, README.md, LICENSE, and the
+# src/ package; a local build must never copy .env (holds the PyPI token) into
+# an image layer.
+.env
+.env.*
+.git
+.gitignore
+.github
+.venv
+**/__pycache__/
+*.pyc
+.pytest_cache
+.mypy_cache
+dist
+build
+*.egg-info
+*.mcpb
+tests
+docs
+scripts
+mcpb
+.superpowers

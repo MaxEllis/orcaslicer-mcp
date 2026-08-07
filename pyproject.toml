@@ -1,6 +1,6 @@
 [project]
 name = "orcaslicer-mcp"
-version = "0.1.8"
+version = "0.1.9"
 description = "Work a running OrcaSlicer from Claude or any MCP client: load models, tune settings, slice, and understand the result through per-feature breakdowns, setting explanations, and physics checks"
 readme = "README.md"
 license = { text = "AGPL-3.0-only" }

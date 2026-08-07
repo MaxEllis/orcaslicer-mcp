@@ -28,7 +28,7 @@ compare_slices(
 - Each variant is `{"name": ..., "changes": {...}}`. `changes = {}` is allowed and means
   "the current config as-is" — the natural baseline row.
 - `baseline` default: the variant whose `changes == {}` if one exists, else the first
-  variant in the list.
+  variant in the list. An explicit `baseline` naming no variant returns an error before slicing.
 - Cap: at most 8 variants (each is a full slice = minutes; an accidental 20-variant call
   is a multi-hour wedge). Over the cap returns an error and slices nothing.
 - Annotations: readOnlyHint (does not persist config — see restore), idempotentHint,
@@ -67,7 +67,10 @@ accuracy, so the tool hands over `"-31%"`, never raw floats to subtract.
 Structured fields:
 - `headline`: one BLUF sentence naming the recommended variant and the one-clause reason.
 - `baseline`: the variant name deltas are anchored to (always explicit).
-- `recommended`: variant name, or `null` when no variant dominates (see rules).
+- `recommended`: always a variant name (never null) — the single pick for a reader who
+  just wants one answer.
+- `recommended_is_dominant`: true when it beats every other variant on every axis; false
+  when it is only the satisficing pick under the house rule (a genuine trade-off exists).
 - `recommendation_reason`: required whenever `recommended` is set; states the rule.
 - `tradeoff`: when nothing dominates, the non-dominated set each tagged by what it wins
   (fastest / lightest / fewest-warnings).
@@ -81,10 +84,12 @@ Structured fields:
 
 - Variant A *dominates* B if A is no worse on time, filament, and warnings-presence, and
   strictly better on at least one. Treat "has any warning/error" as a binary-worse axis.
-- If exactly one variant dominates all others -> `recommended` = it; reason states why.
-- Else `recommended` = a satisficing default under a STATED house rule ("fastest variant
-  with no warnings"; if all have warnings, "fastest"), and `tradeoff` names the frontier.
-  Never force a false single winner; always disclose the rule (guards against the
+- If exactly one variant dominates all others -> `recommended` = it, `recommended_is_dominant`
+  = true; reason states the dominance.
+- Else `recommended` = a satisficing default under a STATED house rule ("fastest variant with
+  no warnings"; if all have warnings, "fastest"), `recommended_is_dominant` = false, and
+  `tradeoff` names the frontier. `recommended` is never null, but a false single winner is
+  never implied: the flag + reason + `tradeoff` disclose the trade-off (guards against the
   decoy/asymmetric-dominance effect).
 
 ### Precision (false-precision guard)

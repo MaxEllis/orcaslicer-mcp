@@ -1,0 +1,36 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+#
+# orcaslicer-mcp is a LOCAL stdio server: it runs on the user's own machine (via
+# uvx) and talks to a localhost OrcaSlicer MCP build. It is not a hosted HTTP
+# service, so it is published on Smithery via this repo config, not a server URL.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - orcaApiToken
+    properties:
+      orcaApiToken:
+        type: string
+        description: "API token from OrcaSlicer Preferences > Remote API; authenticates to the local slicer API."
+      orcaApiUrl:
+        type: string
+        default: "http://127.0.0.1:13130"
+        description: "URL of the OrcaSlicer MCP build's local API. Change only for a non-default port, or a slicer on another LAN host."
+      orcaMcpNotesDir:
+        type: string
+        description: "Optional directory for notes saved via the remember tool. Defaults to ~/.orcaslicer-mcp/notes/."
+  commandFunction: |-
+    (config) => ({
+      command: 'uvx',
+      args: ['orcaslicer-mcp'],
+      env: Object.assign(
+        {
+          ORCA_API_TOKEN: config.orcaApiToken,
+          ORCA_API_URL: config.orcaApiUrl || 'http://127.0.0.1:13130'
+        },
+        config.orcaMcpNotesDir ? { ORCA_MCP_NOTES_DIR: config.orcaMcpNotesDir } : {}
+      )
+    })
+build:
+  dockerBuildPath: .

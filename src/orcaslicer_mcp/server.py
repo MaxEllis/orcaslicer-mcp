@@ -1,7 +1,9 @@
 from __future__ import annotations
 import asyncio
 import sys
+from typing import Annotated
 from mcp.server.fastmcp import FastMCP, Image
+from pydantic import Field
 from mcp.types import ToolAnnotations
 from .config import load_config
 from .client import OrcaClient
@@ -82,8 +84,21 @@ async def get_config(keys: list[str] | None = None) -> dict:
 
 
 @mcp.tool()
-async def set_config(changes: dict) -> dict:
-    """Apply config changes atomically. Returns {applied, errors}. On any invalid key, nothing is applied."""
+async def set_config(
+    changes: Annotated[dict, Field(description=(
+        "Map of OrcaSlicer config key to new value, e.g. "
+        "{'layer_height': 0.2, 'sparse_infill_density': '15%'}. Values must match each "
+        "setting's type; percent settings take strings like '15%'. Discover valid keys "
+        "with search_settings, find_config_keys, or describe_setting."))],
+) -> dict:
+    """Apply config changes to the active project as unsaved overrides, atomically: if any
+    key is invalid the whole batch is rejected and nothing changes. Returns {applied, errors}.
+
+    Overrides show as modified in get_status, are not written to any preset file, and revert
+    if the preset is reselected; call save_preset to persist them. Each apply invalidates the
+    last slice, so re-slice afterwards. It does not run the physics gate, so for temperature,
+    speed, acceleration, or flow keys run check_profile_physics before trusting the result. To
+    edit a stored preset rather than the live project, use edit_preset."""
     try:
         async with _client() as c:
             return await c.put_config(changes)
@@ -373,8 +388,16 @@ async def duplicate_object(object_id: int) -> dict:
 
 
 @mcp.tool()
-async def delete_object(object_id: int) -> dict:
-    """Delete an object from the current plate by its id."""
+async def delete_object(
+    object_id: Annotated[int, Field(description=(
+        "Integer id of the object to remove, taken from the 'id' field of list_objects "
+        "(not the array index or the file name)."))],
+) -> dict:
+    """Remove one object from the current plate by id. This is permanent within the session
+    and cannot be undone through the API; the other objects keep their ids.
+
+    Call list_objects first to get the id. Deleting leaves the last slice invalid, so re-slice
+    afterwards. To drop just one copy made with duplicate_object, pass that copy's id."""
     try:
         async with _client() as c:
             return await c.delete_object(object_id)
@@ -649,8 +672,20 @@ async def load_model(path: str) -> dict:
 
 
 @mcp.tool()
-async def select_preset(type: str, name: str) -> dict:
-    """Select a named preset. type = print|filament|printer."""
+async def select_preset(
+    type: Annotated[str, Field(description=(
+        "Which preset group to switch: 'print' (process/quality), 'filament' (material), "
+        "or 'printer' (machine)."))],
+    name: Annotated[str, Field(description=(
+        "Exact name of an existing preset in that group, as returned by list_presets "
+        "(e.g. '0.20mm Standard'). Unknown names are rejected."))],
+) -> dict:
+    """Make the named preset the active one for its group (print, filament, or printer).
+
+    Selecting a preset discards unsaved set_config overrides and reverts settings to the
+    preset's stored values, so it is also the canonical way to reset dirty config; it leaves
+    the last slice invalid, so re-slice afterwards. Use list_presets for valid names, and
+    save_preset first if unsaved edits should survive the switch."""
     try:
         async with _client() as c:
             return await c.select_preset(type, name)

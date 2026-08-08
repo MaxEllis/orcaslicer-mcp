@@ -65,7 +65,12 @@ def _err(e: ApiError) -> dict:
 
 @mcp.tool()
 async def get_status() -> dict:
-    """App/project/preset status, dirty keys, slice validity, and whether a slice is running."""
+    """Snapshot of the current OrcaSlicer session: app and project info, the active
+    print/filament/printer presets with which of their keys are modified (dirty), whether the
+    last slice is still valid, and whether a slice is running. Read-only.
+
+    Call it first to orient before slicing or editing, to see which settings drift from their
+    preset, or to check slice_result_valid before trusting earlier stats."""
     try:
         async with _client() as c:
             return await c.get_status()
@@ -108,7 +113,12 @@ async def set_config(
 
 @mcp.tool()
 async def slice() -> dict:
-    """Start slicing the current plate. Returns started / already_valid / conflict."""
+    """Start slicing the current plate in the background and return immediately, without waiting
+    for the result. The reply is 'started' (a slice began), 'already_valid' (the plate is
+    unchanged and the last result still holds), or a conflict if a slice is already running.
+
+    Fire-and-forget: poll get_slice_status for progress and stats, or cancel_slice to stop it.
+    Prefer slice_and_wait when you want the finished stats back in one call."""
     try:
         async with _client() as c:
             return await c.slice()
@@ -118,7 +128,12 @@ async def slice() -> dict:
 
 @mcp.tool()
 async def get_slice_status() -> dict:
-    """Current/last slice state, stats, and warnings."""
+    """State of the current or most recent slice: state (slicing, done, error, or idle), stats
+    (print time and filament use when done), and any warnings or errors. Read-only.
+
+    Poll this after slice to follow progress and read the result; 'idle' means no slice has run
+    or it was cancelled. For only the pass/fail warnings use get_slice_warnings; for a
+    per-feature time and filament breakdown use get_slice_breakdown."""
     try:
         async with _client() as c:
             return summarize_slice(await c.slice_status())
@@ -179,8 +194,18 @@ async def cancel_slice() -> dict:
 
 
 @mcp.tool()
-async def slice_and_wait(timeout: int = 300) -> dict:
-    """Slice (or reuse a valid result) and wait for completion; return final stats + warnings."""
+async def slice_and_wait(
+    timeout: Annotated[int, Field(description=(
+        "Maximum seconds to wait for the slice to finish before returning the last known "
+        "state. Default 300; raise it for large or textured plates that slice slowly."))] = 300,
+) -> dict:
+    """Slice the current plate and block until it finishes, then return the final stats and
+    warnings in one call. If the plate is already sliced and unchanged, it returns the existing
+    result without re-slicing.
+
+    This is the usual way to slice when you want the outcome immediately. For a non-blocking
+    start, use slice then poll get_slice_status; to sweep one setting across values, use
+    compare_settings."""
     try:
         async with _client() as c:
             started = await _start_slice(c)
@@ -192,8 +217,18 @@ async def slice_and_wait(timeout: int = 300) -> dict:
 
 
 @mcp.tool()
-async def apply_and_slice(changes: dict) -> dict:
-    """Apply config changes, then slice and report the resulting stats/warnings."""
+async def apply_and_slice(
+    changes: Annotated[dict, Field(description=(
+        "Map of OrcaSlicer config key to new value to apply before slicing, e.g. "
+        "{'layer_height': 0.2}. Same format and validation as set_config; discover keys with "
+        "search_settings or find_config_keys."))],
+) -> dict:
+    """Apply config overrides and then slice in one step, returning {applied, errors, result}
+    with the resulting stats and warnings. The changes are atomic (any invalid key rejects the
+    whole batch) and unsaved, exactly like set_config, so they revert if the preset is reselected.
+
+    Use this to test the effect of a tweak in a single call. Use set_config then slice_and_wait
+    to keep the steps separate, or compare_settings to try several values of one key."""
     try:
         async with _client() as c:
             applied = await c.put_config(changes)
@@ -439,7 +474,11 @@ async def auto_orient() -> dict:
 
 @mcp.tool()
 async def get_job_status() -> dict:
-    """Whether the plate job worker is idle (poll after arrange_plate/auto_orient)."""
+    """Whether the plate's background job worker is idle or still running. Read-only.
+
+    arrange_plate and auto_orient start async jobs; poll this until it reports idle before you
+    read object positions or slice, so you act on the settled layout rather than a mid-move
+    state."""
     try:
         async with _client() as c:
             return await c.job_status()
@@ -558,8 +597,17 @@ async def remember(note: str, scope: str) -> dict:
 
 
 @mcp.tool()
-def describe_setting(key: str) -> dict:
-    """Authoritative definition of one OrcaSlicer setting: label, tooltip, type, unit, range, enum values, default. Offline; works even when OrcaSlicer is not running."""
+def describe_setting(
+    key: Annotated[str, Field(description=(
+        "Exact OrcaSlicer config key, e.g. 'layer_height' or 'sparse_infill_density'. Find keys "
+        "with search_settings or find_config_keys. Unknown keys return an error."))],
+) -> dict:
+    """Authoritative definition of one OrcaSlicer setting: label, tooltip, type, unit, valid
+    range, enum values, and default. Read-only and offline, so it works even when OrcaSlicer is
+    not running.
+
+    Use it to learn a setting's exact type and allowed values before writing it with set_config
+    or edit_preset. To find candidate keys by keyword first, use search_settings."""
     rec = settings_schema.describe(key)
     if rec is None:
         return {"error": "unknown_setting", "key": key}
@@ -764,10 +812,19 @@ async def set_layer_height(object_id: int, mode: str, quality: float = 0.5) -> d
 
 
 @mcp.tool()
-async def set_height_range(object_id: int, min_z: float | None = None, max_z: float | None = None,
-                           layer_height: float | None = None, clear: bool = False) -> dict:
-    """Set a per-height-band layer height on an object (e.g. 0-5mm at 0.1mm). Same exact
-    range again = update; clear=True removes all ranges."""
+async def set_height_range(
+    object_id: Annotated[int, Field(description="Integer id of the target object, from list_objects.")],
+    min_z: Annotated[float | None, Field(description="Lower Z bound of the band in mm (object-relative). Required unless clear=True.")] = None,
+    max_z: Annotated[float | None, Field(description="Upper Z bound of the band in mm. Required unless clear=True.")] = None,
+    layer_height: Annotated[float | None, Field(description="Layer height in mm to use within the band, e.g. 0.1. Required unless clear=True.")] = None,
+    clear: Annotated[bool, Field(description="If True, remove all height-range overrides on the object and ignore the z and layer_height args.")] = False,
+) -> dict:
+    """Override the layer height over a Z band of one object (e.g. 0 to 5 mm printed at 0.1 mm
+    for finer detail near the base). Passing the same min_z and max_z again updates that band's
+    height; clear=True removes every band on the object.
+
+    Bands are per-object and invalidate the last slice, so re-slice afterwards. For a single
+    height across the whole object use set_layer_height instead. Get the id from list_objects."""
     try:
         async with _client() as c:
             return await c.set_height_range(object_id, min_z, max_z, layer_height, clear)
@@ -827,8 +884,17 @@ async def edit_preset(type: str, name: str, changes: dict) -> dict:
 
 
 @mcp.tool()
-async def rename_preset(type: str, old_name: str, new_name: str) -> dict:
-    """Rename a USER preset: save a copy under the new name, select it, delete the old."""
+async def rename_preset(
+    type: Annotated[str, Field(description="Preset group: 'print', 'filament', or 'printer'.")],
+    old_name: Annotated[str, Field(description="Current name of the user preset to rename, as shown by list_presets.")],
+    new_name: Annotated[str, Field(description="New name for the preset. Should not collide with an existing preset of the same type.")],
+) -> dict:
+    """Rename a user preset by copying it to new_name, selecting the copy, and deleting the
+    original. Only user presets can be renamed; system presets are read-only.
+
+    Because it selects the renamed preset, this leaves it active and discards unsaved config
+    overrides, the same as select_preset, and leaves the last slice invalid, so re-slice
+    afterwards."""
     try:
         async with _client() as c:
             await c.select_preset(type, old_name)

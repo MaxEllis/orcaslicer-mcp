@@ -106,6 +106,10 @@
       "description": "For each value of `key`, slice and collect stats/warnings; restore the original when done."
     },
     {
+      "name": "compare_slices",
+      "description": "Slice the current plate under several named variants and compare the cost of each."
+    },
+    {
       "name": "list_objects",
       "description": "List objects on the current plate: id (stable), name, size_mm, and transform (offset/rotation/scale). [needs M4b]"
     },

@@ -4,6 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/orcaslicer-mcp)](https://pypi.org/project/orcaslicer-mcp/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![MCP Badge](https://lobehub.com/badge/mcp/maxellis-orcaslicer-mcp)](https://lobehub.com/mcp/maxellis-orcaslicer-mcp)
+[![Buy Me a Coffee](https://img.shields.io/badge/support-buy%20me%20a%20coffee-ffdd00)](https://buymeacoffee.com/maxellis)
 
 Let Claude work alongside you in a real, running OrcaSlicer. It loads models, arranges the plate, tunes settings, slices, and reads the result back as numbers you can question: which feature ate the print time, what a setting actually does, whether a profile breaks your printer's physics. Every change lands in the GUI while you watch, so the slicer stays yours and you get better at it as you go.
 
@@ -153,6 +154,10 @@ The server talks to OrcaSlicer's local API at the address you configure, localho
 ## Status
 
 Early public release, soft launch. The server carries 183 unit tests and gets exercised on real print jobs. Prebuilt OrcaSlicer MCP builds cover Windows, macOS, and Linux on the [releases page](https://github.com/MaxEllis/OrcaSlicer/releases). Issues and reports are welcome.
+
+## Support
+
+The project is free and stays that way. If it saves you time and you feel like saying thanks, you can [buy me a coffee](https://buymeacoffee.com/maxellis).
 
 ## License
 

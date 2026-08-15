@@ -157,7 +157,9 @@ Early public release, soft launch. The server carries 183 unit tests and gets ex
 
 ## Support
 
-The project is free and stays that way. If it saves you time and you feel like saying thanks, you can [buy me a coffee](https://buymeacoffee.com/maxellis).
+The project is free and stays that way. If it saves you time and you feel like saying thanks, you can buy me a coffee.
+
+<a href="https://buymeacoffee.com/maxellis"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="50"></a>
 
 ## License
 

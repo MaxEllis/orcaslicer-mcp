@@ -24,3 +24,7 @@ node_modules/
 !src/orcaslicer_mcp/data/
 !src/orcaslicer_mcp/data/*.json
 .superpowers/
+*.safe-backup
+*.db
+*.sqlite
+*.sqlite3

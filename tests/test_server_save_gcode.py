@@ -53,3 +53,41 @@ async def test_save_gcode_not_sliced(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     respx.get(f"{B}/api/v1/gcode").mock(return_value=httpx.Response(409, json={"error": "not_sliced"}))
     assert (await srv.save_gcode("x.gcode"))["error"] == "not_sliced"
+
+
+@respx.mock
+async def test_save_gcode_unicode_only_name_falls_back_to_print_prefix(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    out = await srv.save_gcode("日本語.gcode")
+    assert out["filename"].startswith("print_")
+
+
+@respx.mock
+async def test_save_gcode_degrades_when_store_write_fails(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    oc.connect(create=True).close()
+
+    def _boom(*args, **kwargs):
+        raise __import__("sqlite3").OperationalError("database is locked")
+
+    monkeypatch.setattr(srv._outcomes, "record_slice", _boom)
+    out = await srv.save_gcode("locked.gcode")
+    assert (tmp_path / "gcode" / "locked.gcode").exists()
+    assert out["outcome_recorded"] is False
+    assert out["outcome_row_id"] is None
+    assert "locked" in out["outcome_error"]
+
+
+@respx.mock
+async def test_save_gcode_never_overwrites_existing_file(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    out1 = await srv.save_gcode("dup.gcode")
+    assert out1["filename"] == "dup.gcode"
+
+    respx.get(f"{B}/api/v1/gcode").mock(return_value=httpx.Response(200, content=b"G28\nG1 X2\n"))
+    out2 = await srv.save_gcode("dup.gcode")
+    assert out2["filename"] == "dup-2.gcode"
+
+    gdir = tmp_path / "gcode"
+    assert (gdir / "dup.gcode").read_bytes() == b"G28\nG1 X1\n"
+    assert (gdir / "dup-2.gcode").read_bytes() == b"G28\nG1 X2\n"

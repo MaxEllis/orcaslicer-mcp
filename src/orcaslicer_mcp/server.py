@@ -1,6 +1,9 @@
 from __future__ import annotations
 import asyncio
+import re
+import datetime
 import sys
+from pathlib import Path
 from typing import Annotated
 from mcp.server.fastmcp import FastMCP, Image
 from pydantic import Field
@@ -16,6 +19,7 @@ from .physics_check import run_checks
 from .breakdown import build_breakdown
 from .compare import compute_comparison
 from . import notes as _notes
+from . import outcomes as _outcomes
 
 mcp = FastMCP("orcaslicer")
 
@@ -919,6 +923,42 @@ async def get_gcode() -> dict:
         return _m4a_err(e)
 
 
+def _safe_gcode_name(name: str) -> str:
+    base = Path(name).name
+    base = re.sub(r"[^A-Za-z0-9._-]", "_", base)
+    base = re.sub(r"\.\.+", "_", base).strip("._") or "print"
+    return base if base.lower().endswith(".gcode") else base + ".gcode"
+
+
+@mcp.tool()
+async def save_gcode(filename: str | None = None) -> dict:
+    """Save the last successful slice's G-code to the shared print-outcomes folder and record the
+    slice (model, geometry, full settings snapshot) under that filename, so that when klipper-mcp
+    later prints this exact file the real outcome joins back to these settings. Returns the saved
+    path; hand it to klipper-mcp's start_print. Default filename: <object>_<timestamp>.gcode.
+    If the shared outcome store is not present, the file is still saved and nothing else happens."""
+    try:
+        async with _client() as c:
+            data = await c.get_gcode()
+            objs = (await c.get_objects()).get("objects") or []
+            cfg = await c.get_config(None)
+    except Conflict:
+        return {"error": "not_sliced"}
+    except ApiError as e:
+        return _m4a_err(e)
+    model_name = objs[0]["name"] if objs else "plate"
+    fname = _safe_gcode_name(filename or f"{model_name}_{datetime.datetime.now():%Y%m%d-%H%M}")
+    out_dir = _outcomes.store_dir() / "gcode"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / fname
+    path.write_bytes(data)
+    row_id = None
+    if _outcomes.is_available():
+        row_id = _outcomes.record_slice(fname, model_name, _outcomes.geometry_hash_for(objs), cfg)
+    return {"path": str(path), "filename": fname, "bytes": len(data), "model_name": model_name,
+            "outcome_recorded": row_id is not None, "outcome_row_id": row_id}
+
+
 @mcp.tool()
 async def render_plate(view: str = "editor", angle: str = "iso",
                        width: int = 800, height: int = 600,
@@ -977,6 +1017,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "list_presets": ("List presets", True, False),
     "get_preset_config": ("Get preset config", True, False),
     "get_gcode": ("Download sliced gcode", True, False),
+    "save_gcode": ("Save G-code and record the slice", False, False),
     "render_plate": ("Render plate image", True, False),
     "set_config": ("Set config values", False, False),
     "slice": ("Start slicing", False, False),

@@ -2,7 +2,9 @@ from __future__ import annotations
 import asyncio
 import re
 import datetime
+import sqlite3
 import sys
+import uuid
 from pathlib import Path
 from typing import Annotated
 from mcp.server.fastmcp import FastMCP, Image
@@ -926,8 +928,25 @@ async def get_gcode() -> dict:
 def _safe_gcode_name(name: str) -> str:
     base = Path(name).name
     base = re.sub(r"[^A-Za-z0-9._-]", "_", base)
-    base = re.sub(r"\.\.+", "_", base).strip("._") or "print"
+    base = re.sub(r"\.\.+", "_", base).strip("._")
+    if not base or base == "gcode":
+        base = f"print_{datetime.datetime.now():%Y%m%d-%H%M%S}"
     return base if base.lower().endswith(".gcode") else base + ".gcode"
+
+
+def _unique_gcode_path(out_dir: Path, fname: str) -> tuple[Path, str]:
+    """Never overwrite an existing file: append -2, -3, ... (then a uuid4 suffix as a last resort)."""
+    path = out_dir / fname
+    if not path.exists():
+        return path, fname
+    stem, suffix = fname[: -len(".gcode")], ".gcode"
+    for n in range(2, 1000):
+        candidate = f"{stem}-{n}{suffix}"
+        path = out_dir / candidate
+        if not path.exists():
+            return path, candidate
+    candidate = f"{stem}-{uuid.uuid4().hex[:6]}{suffix}"
+    return out_dir / candidate, candidate
 
 
 @mcp.tool()
@@ -936,7 +955,10 @@ async def save_gcode(filename: str | None = None) -> dict:
     slice (model, geometry, full settings snapshot) under that filename, so that when klipper-mcp
     later prints this exact file the real outcome joins back to these settings. Returns the saved
     path; hand it to klipper-mcp's start_print. Default filename: <object>_<timestamp>.gcode.
-    If the shared outcome store is not present, the file is still saved and nothing else happens."""
+    Never overwrites an existing file — a name collision gets a -2, -3, ... suffix. Creates the
+    gcode folder under the outcome directory (default ~/projects/_shared/print-outcomes, override
+    PRINT_OUTCOMES_DIR) if it does not exist. If the shared outcome store is not present, or the
+    store write fails, the file is still saved and outcome_recorded is False."""
     try:
         async with _client() as c:
             data = await c.get_gcode()
@@ -947,16 +969,23 @@ async def save_gcode(filename: str | None = None) -> dict:
     except ApiError as e:
         return _m4a_err(e)
     model_name = objs[0]["name"] if objs else "plate"
-    fname = _safe_gcode_name(filename or f"{model_name}_{datetime.datetime.now():%Y%m%d-%H%M}")
+    fname = _safe_gcode_name(filename or f"{model_name}_{datetime.datetime.now():%Y%m%d-%H%M%S}")
     out_dir = _outcomes.store_dir() / "gcode"
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / fname
+    path, fname = _unique_gcode_path(out_dir, fname)
     path.write_bytes(data)
     row_id = None
+    outcome_error = None
     if _outcomes.is_available():
-        row_id = _outcomes.record_slice(fname, model_name, _outcomes.geometry_hash_for(objs), cfg)
-    return {"path": str(path), "filename": fname, "bytes": len(data), "model_name": model_name,
-            "outcome_recorded": row_id is not None, "outcome_row_id": row_id}
+        try:
+            row_id = _outcomes.record_slice(fname, model_name, _outcomes.geometry_hash_for(objs), cfg)
+        except sqlite3.Error as e:
+            outcome_error = str(e)
+    result = {"path": str(path), "filename": fname, "bytes": len(data), "model_name": model_name,
+              "outcome_recorded": row_id is not None, "outcome_row_id": row_id}
+    if outcome_error is not None:
+        result["outcome_error"] = outcome_error
+    return result
 
 
 @mcp.tool()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import os
 import re
 import datetime
 import sqlite3
@@ -955,16 +956,27 @@ def _unique_gcode_path(out_dir: Path, fname: str) -> tuple[Path, str]:
     return out_dir / candidate, candidate
 
 
+def _gcode_base_dir() -> Path:
+    """Where save_gcode writes: PRINT_OUTCOMES_DIR if set, else the shared print-outcomes
+    folder if it already exists (so recall_prints/klipper-mcp find it), else
+    ~/.orcaslicer-mcp (the folder `remember` already owns) when no shared store exists yet."""
+    shared = _outcomes.store_dir()
+    if os.environ.get("PRINT_OUTCOMES_DIR") or shared.exists():
+        return shared
+    return Path.home() / ".orcaslicer-mcp"
+
+
 @mcp.tool()
 async def save_gcode(filename: str | None = None) -> dict:
-    """Save the last successful slice's G-code to the shared print-outcomes folder and record the
-    slice (model, geometry, full settings snapshot) under that filename, so that when klipper-mcp
-    later prints this exact file the real outcome joins back to these settings. Returns the saved
-    path; hand it to klipper-mcp's start_print. Default filename: <object>_<timestamp>.gcode.
-    Never overwrites an existing file — a name collision gets a -2, -3, ... suffix. Creates the
-    gcode folder under the outcome directory (default ~/projects/_shared/print-outcomes, override
-    PRINT_OUTCOMES_DIR) if it does not exist. If the shared outcome store is not present, or the
-    store write fails, the file is still saved and outcome_recorded is False."""
+    """Save the last successful slice's G-code and record the slice (model, geometry, full
+    settings snapshot) under that filename, so that when klipper-mcp later prints this exact
+    file the real outcome joins back to these settings. Returns the saved path; hand it to
+    klipper-mcp's start_print. Default filename: <object>_<timestamp>.gcode. Never overwrites
+    an existing file — a name collision gets a -2, -3, ... suffix. Writes into a gcode folder
+    under PRINT_OUTCOMES_DIR if set, else under the shared print-outcomes folder
+    (~/projects/_shared/print-outcomes) if it already exists, else under ~/.orcaslicer-mcp;
+    the gcode folder itself is created if missing. If the shared outcome store is not present,
+    or the store write fails, the file is still saved and outcome_recorded is False."""
     try:
         async with _client() as c:
             data = await c.get_gcode()
@@ -976,10 +988,13 @@ async def save_gcode(filename: str | None = None) -> dict:
         return _m4a_err(e)
     model_name = objs[0]["name"] if objs else "plate"
     fname = _safe_gcode_name(filename or f"{model_name}_{datetime.datetime.now():%Y%m%d-%H%M%S}")
-    out_dir = _outcomes.store_dir() / "gcode"
+    out_dir = _gcode_base_dir() / "gcode"
     out_dir.mkdir(parents=True, exist_ok=True)
     path, fname = _unique_gcode_path(out_dir, fname)
-    path.write_bytes(data)
+    try:
+        path.write_bytes(data)
+    except OSError as e:
+        return {"error": "write_failed", "detail": str(e), "path": str(path)}
     row_id = None
     outcome_error = None
     if _outcomes.is_available():
@@ -1003,8 +1018,12 @@ def _recall_summary(rows: list[dict], subject: str) -> str:
         k = r.get("result") or "unprinted"
         counts[k] = counts.get(k, 0) + 1
     parts = ", ".join(f"{v} {k}" for k, v in counts.items())
-    verdicts = [r["human_verdict"] for r in rows if r.get("human_verdict")]
-    tail = f" ({len(verdicts)} marked {', '.join(sorted(set(verdicts)))})" if verdicts else ""
+    verdict_counts: dict[str, int] = {}
+    for r in rows:
+        v = r.get("human_verdict")
+        if v:
+            verdict_counts[v] = verdict_counts.get(v, 0) + 1
+    tail = f" ({', '.join(f'{c} marked {v}' for v, c in sorted(verdict_counts.items()))})" if verdict_counts else ""
     head = f"{n} recent print{'s' if n != 1 else ''}" if subject == "recent" else f"{n} past print{'s' if n != 1 else ''} of {subject}"
     return f"{head}: {parts}{tail}"
 
@@ -1015,7 +1034,9 @@ async def recall_prints(model_name: str | None = None, limit: int = 5) -> dict:
     (or by model_name if given / the slicer is offline), returning each past print's result
     (success/cancelled/error), your recorded verdict (e.g. 'warped'), and the settings it was sliced
     with. Call this BEFORE slicing and tell the user anything relevant (a past warp, a failed layer
-    height). Read-only. Returns available=false and nothing else when no outcome store exists."""
+    height). Read-only. Returns available=false and nothing else when no outcome store exists.
+    If neither geometry nor name matches, it returns the most recent prints of ANY model with
+    matched_by='recent'; never attribute those to the current model."""
     if not _outcomes.is_available():
         return {"available": False, "matched_by": None, "prints": [], "summary": "no outcome store"}
     objs: list[dict] = []

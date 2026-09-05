@@ -79,6 +79,46 @@ async def test_save_gcode_degrades_when_store_write_fails(monkeypatch, tmp_path)
 
 
 @respx.mock
+async def test_save_gcode_falls_back_to_home_dotfolder_when_no_shared_store(monkeypatch, tmp_path):
+    # outcomes.DEFAULT_DIR is a module-level constant fixed at import time, not re-read from
+    # HOME per call - patch it directly (rather than relying on HOME alone) so this test can't
+    # ever land on the real shared store regardless of import order in the test session.
+    monkeypatch.delenv("PRINT_OUTCOMES_DIR", raising=False)
+    fake_shared = tmp_path / "would_be_shared" / "print-outcomes"
+    monkeypatch.setattr(oc, "DEFAULT_DIR", fake_shared)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("ORCA_API_TOKEN", "tok"); monkeypatch.setenv("ORCA_API_URL", B)
+    respx.get(f"{B}/api/v1/gcode").mock(return_value=httpx.Response(200, content=b"G28\nG1 X1\n"))
+    respx.get(f"{B}/api/v1/objects").mock(return_value=httpx.Response(200, json=OBJS))
+    respx.get(url__regex=rf"{B}/api/v1/config.*").mock(return_value=httpx.Response(200, json=CFG))
+    assert not fake_shared.exists()
+
+    out = await srv.save_gcode("a.gcode")
+
+    assert out["outcome_recorded"] is False
+    assert (tmp_path / ".orcaslicer-mcp" / "gcode" / "a.gcode").exists()
+    assert not fake_shared.exists()
+
+
+@respx.mock
+async def test_save_gcode_uses_shared_store_when_it_already_exists(monkeypatch, tmp_path):
+    monkeypatch.delenv("PRINT_OUTCOMES_DIR", raising=False)
+    fake_shared = tmp_path / "would_be_shared" / "print-outcomes"
+    fake_shared.mkdir(parents=True)
+    monkeypatch.setattr(oc, "DEFAULT_DIR", fake_shared)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("ORCA_API_TOKEN", "tok"); monkeypatch.setenv("ORCA_API_URL", B)
+    respx.get(f"{B}/api/v1/gcode").mock(return_value=httpx.Response(200, content=b"G28\nG1 X1\n"))
+    respx.get(f"{B}/api/v1/objects").mock(return_value=httpx.Response(200, json=OBJS))
+    respx.get(url__regex=rf"{B}/api/v1/config.*").mock(return_value=httpx.Response(200, json=CFG))
+
+    out = await srv.save_gcode("a.gcode")
+
+    assert (fake_shared / "gcode" / "a.gcode").exists()
+    assert not (tmp_path / ".orcaslicer-mcp").exists()
+
+
+@respx.mock
 async def test_save_gcode_never_overwrites_existing_file(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     out1 = await srv.save_gcode("dup.gcode")

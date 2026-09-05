@@ -1,5 +1,5 @@
-import hashlib
 from pathlib import Path
+import pytest
 from orcaslicer_mcp import outcomes as oc
 
 KLIPPER_COPY = Path("/home/max/projects/klipper-mcp/src/klipper_mcp/outcomes.py")
@@ -13,7 +13,7 @@ def _body(p: Path) -> str:
 
 def test_vendored_copy_matches_owner_when_owner_present():
     if not KLIPPER_COPY.exists():
-        return  # dev box without the sibling repo: nothing to compare against
+        pytest.skip("klipper-mcp checkout not present")
     assert _body(Path(oc.__file__)) == _body(KLIPPER_COPY), "outcomes.py drifted from klipper-mcp; re-copy it"
 
 

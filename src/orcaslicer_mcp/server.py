@@ -988,6 +988,53 @@ async def save_gcode(filename: str | None = None) -> dict:
     return result
 
 
+def _recall_summary(rows: list[dict], subject: str) -> str:
+    n = len(rows)
+    if n == 0:
+        return f"no past prints of {subject}" if subject != "recent" else "no recorded prints"
+    counts: dict[str, int] = {}
+    for r in rows:
+        k = r.get("result") or "unprinted"
+        counts[k] = counts.get(k, 0) + 1
+    parts = ", ".join(f"{v} {k}" for k, v in counts.items())
+    verdicts = [r["human_verdict"] for r in rows if r.get("human_verdict")]
+    tail = f" ({len(verdicts)} marked {', '.join(sorted(set(verdicts)))})" if verdicts else ""
+    head = f"{n} recent print{'s' if n != 1 else ''}" if subject == "recent" else f"{n} past print{'s' if n != 1 else ''} of {subject}"
+    return f"{head}: {parts}{tail}"
+
+
+@mcp.tool()
+async def recall_prints(model_name: str | None = None, limit: int = 5) -> dict:
+    """How did past prints of THIS model actually turn out? Matches the current plate by geometry
+    (or by model_name if given / the slicer is offline), returning each past print's result
+    (success/cancelled/error), your recorded verdict (e.g. 'warped'), and the settings it was sliced
+    with. Call this BEFORE slicing and tell the user anything relevant (a past warp, a failed layer
+    height). Read-only. Returns available=false and nothing else when no outcome store exists."""
+    if not _outcomes.is_available():
+        return {"available": False, "matched_by": None, "prints": [], "summary": "no outcome store"}
+    objs: list[dict] = []
+    try:
+        async with _client() as c:
+            objs = (await c.get_objects()).get("objects") or []
+    except ApiError:
+        pass
+    limit = max(1, min(limit, 50))
+    if objs:
+        h = _outcomes.geometry_hash_for(objs)
+        rows = _outcomes.recall(geometry_hash=h, limit=limit)
+        if rows:
+            return {"available": True, "matched_by": "geometry", "prints": rows,
+                    "summary": _recall_summary(rows, objs[0]["name"])}
+        model_name = model_name or objs[0]["name"]
+    if model_name:
+        rows = _outcomes.recall(model_name=model_name, limit=limit)
+        if rows:
+            return {"available": True, "matched_by": "name", "prints": rows,
+                    "summary": _recall_summary(rows, model_name)}
+    rows = _outcomes.recall(limit=limit)
+    return {"available": True, "matched_by": "recent", "prints": rows, "summary": _recall_summary(rows, "recent")}
+
+
 @mcp.tool()
 async def render_plate(view: str = "editor", angle: str = "iso",
                        width: int = 800, height: int = 600,
@@ -1047,6 +1094,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "get_preset_config": ("Get preset config", True, False),
     "get_gcode": ("Download sliced gcode", True, False),
     "save_gcode": ("Save G-code and record the slice", False, False),
+    "recall_prints": ("Recall past prints of this model", True, False),
     "render_plate": ("Render plate image", True, False),
     "set_config": ("Set config values", False, False),
     "slice": ("Start slicing", False, False),

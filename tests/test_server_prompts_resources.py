@@ -52,3 +52,11 @@ def test_setting_resource_real_and_unknown():
     assert '"layer_height"' in body or "layer_height" in body
     with pytest.raises(Exception):
         _read("orca://setting/definitely_not_a_setting")
+
+
+def test_slicing_prompts_consult_outcome_memory():
+    a = srv.prompt_slice_a_model("/tmp/x.stl")
+    assert "recall_prints" in a and "save_gcode" in a
+    assert a.index("recall_prints") < a.index("slice_and_wait")
+    b = srv.prompt_optimize_print_time("cube")
+    assert "recall_prints" in b

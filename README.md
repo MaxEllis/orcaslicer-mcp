@@ -81,6 +81,12 @@ It only crowns a winner when one variant genuinely beats the rest on time, filam
 
 `get_status` and `watch_events` report what the slicer is doing now. `remember` persists machine, user, and project facts for later sessions, as plain local files in `~/.orcaslicer-mcp/notes/`, relocatable with `ORCA_MCP_NOTES_DIR`.
 
+### Learning from real prints
+
+`save_gcode` saves the last successful slice's G-code into a shared print-outcomes folder (default `~/projects/_shared/print-outcomes/`, relocatable with `PRINT_OUTCOMES_DIR`) and records the model, geometry, and full settings snapshot that produced it. `recall_prints` reads that same folder before you slice, so the assistant can say how past prints of this model actually went: success, cancelled, or the verdict you gave it, and the settings used.
+
+Recording and recall both depend on a companion service, [klipper-mcp](https://github.com/MaxEllis/klipper-mcp), whose `klipper-mcp-capture` process writes the real print result into the same store once your printer finishes the job, and whose `start_print` tool uploads the file `save_gcode` saved under the same filename. Without that companion, `save_gcode` still writes the G-code file (the folder is created on first use even so) but records nothing, and `recall_prints` returns `available: false` and does nothing else. Neither tool makes the server contact you on its own; the assistant only sees new outcomes when it calls `recall_prints` again in a later session.
+
 ## What you need
 
 Stock OrcaSlicer ships without a control API, so a matching build does that half of the job.
@@ -148,7 +154,7 @@ The server talks to OrcaSlicer's local API at the address you configure, localho
 - **Data collection:** none. The server collects nothing about you or your usage.
 - **Usage and storage:** models, settings, and gcode stay on the computer running OrcaSlicer, held in memory only for the duration of each request. The API token authenticates the server to OrcaSlicer, and your MCP client stores it. Claude Desktop keeps extension settings in the operating system's credential store.
 - **Third-party sharing:** none by this server, which has no analytics and no backend. Traffic between your client and its model provider sits outside this project and falls under their policies.
-- **Data retention:** the only data written to disk is notes you save yourself with `remember`, stored as plain files under `~/.orcaslicer-mcp/notes/`. Read or delete them whenever you like. Delete the folder and nothing remains.
+- **Data retention:** the only data written to disk is notes you save yourself with `remember`, stored as plain files under `~/.orcaslicer-mcp/notes/`, and the G-code plus slice records that `save_gcode` writes under `~/projects/_shared/print-outcomes/` (relocatable with `PRINT_OUTCOMES_DIR`), read back by `recall_prints` and joined with real print results by the separate klipper-mcp project. Read or delete either folder whenever you like. Delete them and nothing remains.
 - **Contact:** questions and concerns go in [an issue](https://github.com/MaxEllis/orcaslicer-mcp/issues).
 
 ## Status

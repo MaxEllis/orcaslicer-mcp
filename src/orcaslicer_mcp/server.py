@@ -674,9 +674,13 @@ def prompt_slice_a_model(model_path: str) -> str:
         "2. list_objects — see what is already on the plate before adding anything.\n"
         f"3. load_model with path {model_path}, then check_placement; fix placement with "
         "auto_orient / arrange_plate / transform_object if it reports problems.\n"
-        "4. consult with the model's material and purpose before touching settings.\n"
-        "5. slice_and_wait, then get_slice_warnings and get_slice_breakdown; report "
+        "4. recall_prints — if this model (or one like it) was printed before, say how it went "
+        "(result, any verdict such as warped or stringing, and the settings used) BEFORE proposing changes.\n"
+        "5. consult with the model's material and purpose before touching settings.\n"
+        "6. slice_and_wait, then get_slice_warnings and get_slice_breakdown; report "
         "print time, filament mass, and any warnings. Use render_plate to show the result.\n"
+        "7. If the user wants to print it, save_gcode (this records the slice so the real outcome "
+        "can be learned from later) and hand the returned path to the printer tools.\n"
         "Do not start a print or change temperatures without asking me first."
     )
 
@@ -687,13 +691,15 @@ def prompt_optimize_print_time(constraints: str = "") -> str:
     extra = f"\nMy constraints: {constraints}" if constraints else ""
     return (
         "Reduce the print time of the current plate, driven by data:\n"
-        "1. slice_and_wait (if no valid slice), then get_slice_breakdown — identify which "
+        "1. recall_prints — check whether faster settings for this model already failed or "
+        "warped before; do not re-propose a known failure.\n"
+        "2. slice_and_wait (if no valid slice), then get_slice_breakdown — identify which "
         "feature roles actually dominate time.\n"
-        "2. consult with 'print time optimization' plus the dominant roles; only propose "
+        "3. consult with 'print time optimization' plus the dominant roles; only propose "
         "levers the knowledge base or breakdown supports.\n"
-        "3. Apply candidate changes with set_config, then check_profile_physics — drop "
+        "4. Apply candidate changes with set_config, then check_profile_physics — drop "
         "anything blocked.\n"
-        "4. Re-slice and quantify: present 2-3 options as minutes and grams versus the "
+        "5. Re-slice and quantify: present 2-3 options as minutes and grams versus the "
         "baseline, with the quality trade-off of each. Do not save presets unless I say so."
         + extra
     )

@@ -224,6 +224,14 @@
     {
       "name": "render_plate",
       "description": "Render a PNG picture of the current plate so you can SEE it."
+    },
+    {
+      "name": "save_gcode",
+      "description": "Save the last slice's G-code and record the slice (model, geometry, settings) so a later real print result can be joined back to it."
+    },
+    {
+      "name": "recall_prints",
+      "description": "How past prints of the current model actually turned out: result, your verdict, and the settings used. Inert without the shared outcome store."
     }
   ],
   "prompts": [

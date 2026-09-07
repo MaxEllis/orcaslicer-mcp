@@ -455,14 +455,28 @@ def summarize_object(d: dict) -> str:
     parts = [f"{head} {_CLASS_PHRASE[d['orientation']['class']]}: first-layer contact is {ratio_pct}% of its "
              f"widest layer, {island_txt}."]
 
-    heavy = [b for b in d["overhang"]["bands"] if b["share"] > OVERHANG_BAND_NOTE]
+    bands = d["overhang"]["bands"]
+    heavy_idx = [i for i, b in enumerate(bands) if b["share"] > OVERHANG_BAND_NOTE]
     if d["overhang"]["total_mm"] == 0:
         parts.append("No overhang extrusions.")
-    elif heavy:
-        parts.append(f"Overhang extrusions concentrate at Z {heavy[0]['z0']} to {heavy[-1]['z1']} mm.")
+    elif heavy_idx:
+        runs: list[list[int]] = []
+        for i in heavy_idx:
+            if runs and i == runs[-1][-1] + 1:
+                runs[-1].append(i)
+            else:
+                runs.append([i])
+        run_txt = " and ".join(f"Z {bands[r[0]]['z0']} to {bands[r[-1]]['z1']} mm" for r in runs)
+        parts.append(f"Overhang extrusions concentrate at {run_txt}.")
     else:
-        parts.append("Overhang extrusions are present but spread thinly (no band above "
-                     f"{int(OVERHANG_BAND_NOTE * 100)}% of wall length).")
+        sentence = ("Overhang extrusions are present but spread thinly (no band above "
+                   f"{int(OVERHANG_BAND_NOTE * 100)}% of wall length)")
+        biggest = max(bands, key=lambda b: b["overhang_mm"], default=None)
+        if biggest is not None and biggest["overhang_mm"] >= 500:
+            sentence += f"; the most is at Z {biggest['z0']} to {biggest['z1']} mm."
+        else:
+            sentence += "."
+        parts.append(sentence)
 
     s = d["support"]
     if s["present"]:

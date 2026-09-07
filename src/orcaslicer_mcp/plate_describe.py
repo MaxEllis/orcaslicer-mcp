@@ -238,6 +238,35 @@ def islands(cells: set[tuple[int, int]], min_cells: int = ISLAND_MIN_CELLS) -> l
     return out
 
 
+def filled_area(cells: set[tuple[int, int]]) -> int:
+    """Total area of `cells` with every island's interior holes filled in: for each 8-connected
+    island, fill each row between its min and max occupied x. A sparsely-infilled layer (only wall
+    + infill-line centrelines rasterised, not the solid area between them) undercounts area against
+    a densely-filled one; this gives a comparable denominator for contact_ratio."""
+    seen: set[tuple[int, int]] = set()
+    total = 0
+    for start in cells:
+        if start in seen:
+            continue
+        stack = [start]
+        seen.add(start)
+        comp: list[tuple[int, int]] = []
+        while stack:
+            c = stack.pop()
+            comp.append(c)
+            for dx, dy in _NEIGHBOURS:
+                q = (c[0] + dx, c[1] + dy)
+                if q in cells and q not in seen:
+                    seen.add(q)
+                    stack.append(q)
+        rows: dict[int, list[int]] = {}
+        for cx, cy in comp:
+            rows.setdefault(cy, []).append(cx)
+        for xs in rows.values():
+            total += max(xs) - min(xs) + 1
+    return total
+
+
 def contact_class(ratio: float) -> str:
     if ratio < CONTACT_EDGE_MAX:
         return "edge_or_corner"
@@ -248,9 +277,9 @@ def contact_class(ratio: float) -> str:
 
 def contact(obj: ObjectAcc) -> dict:
     """First-layer footprint versus the object's widest layer. Copy-agnostic: both sum over copies."""
-    first = len(obj.layers[0].cells) if 0 in obj.layers else 0
-    widest = max((len(a.cells) for a in obj.layers.values()), default=0)
-    ratio = round(first / widest, 2) if widest else 0.0
+    first = filled_area(obj.layers[0].cells) if 0 in obj.layers else 0
+    widest = max((filled_area(a.cells) for a in obj.layers.values()), default=0)
+    ratio = min(round(first / widest, 2), 1.0) if widest else 0.0
     return {"footprint_area_mm2": first, "max_layer_area_mm2": widest,
             "contact_ratio": ratio, "class": contact_class(ratio)}
 

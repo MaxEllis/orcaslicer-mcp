@@ -287,42 +287,29 @@ def _seam_side_for_position(configured: str | None) -> str | None:
 
 def support(obj: ObjectAcc, layers: list[tuple[float, float]]) -> dict:
     """Where support stands (first-layer islands), how tall it is, and where its interface layers
-    touch the part. Interface zones are XY islands of interface cells, merged across consecutive
-    layers when their bboxes overlap, so one contact patch is one zone with a Z span."""
+    touch the part. Interface zones are XY islands of the UNION of interface cells across every
+    layer (so a straggler cell or the same patch split across layers collapses into one zone);
+    each zone's Z span is the min/max Z over the layers that actually have an interface cell
+    inside its bbox."""
     sup_layers = sorted(i for i, a in obj.layers.items() if a.support_cells and i < len(layers))
     if not sup_layers:
         return {"present": False, "z_range": None, "islands": [], "interface_zones": []}
     z_lo = layers[sup_layers[0]][0]
     z_hi = layers[sup_layers[-1]][0]
     base = islands(obj.layers[sup_layers[0]].support_cells)
-    zones: list[dict] = []
+
+    union: set[tuple[int, int]] = set()
     for idx in sup_layers:
-        acc = obj.layers[idx]
-        if not acc.interface_cells:
-            continue
-        z = layers[idx][0]
-        for isl in islands(acc.interface_cells, min_cells=1):
-            merged = False
-            for zone in zones:
-                if _bbox_overlap(zone["bbox"], isl["bbox"]) and _prev_layer_z(layers, idx) <= zone["z1"] + 1e-6:
-                    zone["bbox"] = [min(zone["bbox"][0], isl["bbox"][0]), min(zone["bbox"][1], isl["bbox"][1]),
-                                    max(zone["bbox"][2], isl["bbox"][2]), max(zone["bbox"][3], isl["bbox"][3])]
-                    zone["z1"] = z
-                    zone["area_mm2"] = max(zone["area_mm2"], isl["area_mm2"])
-                    merged = True
-                    break
-            if not merged:
-                zones.append({"bbox": list(isl["bbox"]), "z0": z, "z1": z, "area_mm2": isl["area_mm2"]})
+        union |= obj.layers[idx].interface_cells
+    zones = islands(union)
+    for zone in zones:
+        x0, y0, x1, y1 = zone["bbox"]
+        zs = [layers[idx][0] for idx in sup_layers
+              if any(x0 <= c[0] < x1 and y0 <= c[1] < y1 for c in obj.layers[idx].interface_cells)]
+        zone["z0"] = round(min(zs), 1)
+        zone["z1"] = round(max(zs), 1)
     zones.sort(key=lambda zn: (zn["z0"], zn["bbox"]))
     return {"present": True, "z_range": [round(z_lo, 1), round(z_hi, 1)], "islands": base, "interface_zones": zones}
-
-
-def _bbox_overlap(a: list, b: list) -> bool:
-    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
-
-
-def _prev_layer_z(layers: list[tuple[float, float]], idx: int) -> float:
-    return layers[idx - 1][0] if idx > 0 else layers[idx][0]
 
 
 def _centroid(cells: set[tuple[int, int]]) -> tuple[float, float]:

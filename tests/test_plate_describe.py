@@ -182,6 +182,19 @@ def test_interface_zones_merge_adjacent_layers_over_the_same_spot():
     assert zones == [{"bbox": [0, 0, 3, 3], "z0": 0.4, "z1": 1.6, "area_mm2": 9}]
 
 
+def test_interface_zones_ignore_stragglers_and_merge_across_gap_layers():
+    o = pd.ObjectAcc("t")
+    layers = [(0.4, 0.4), (1.0, 0.6), (1.6, 0.6)]
+    o.layer(0).support_cells = _square(0, 0, 4)
+    o.layer(0).interface_cells = _square(0, 0, 4)
+    o.layer(1).support_cells = _square(0, 0, 4) | {(30, 30)}    # support only here, plus a lone interface straggler
+    o.layer(1).interface_cells = {(30, 30)}
+    o.layer(2).support_cells = _square(0, 0, 4)
+    o.layer(2).interface_cells = _square(0, 0, 4)
+    zones = pd.support(o, layers)["interface_zones"]
+    assert zones == [{"bbox": [0, 0, 4, 4], "z0": 0.4, "z1": 1.6, "area_mm2": 16}]
+
+
 def test_seam_sides_relative_to_layer_centroid():
     o = pd.ObjectAcc("t")
     o.layer(0).cells = _square(0, 0, 20)          # centroid at (10, 10)
@@ -213,7 +226,8 @@ def test_real_fixture_support_and_seams(gcode_fixture):
     obj = body.objects["Body4.stl"]
     sup = pd.support(obj, body.layers)
     assert sup["present"] is True and sup["z_range"][0] < 1.0 and sup["z_range"][1] > 50.0
-    assert len(sup["islands"]) >= 3 and len(sup["interface_zones"]) >= 3
+    assert len(sup["islands"]) >= 3 and 3 <= len(sup["interface_zones"]) <= 40
+    assert all(z["area_mm2"] >= 3 for z in sup["interface_zones"])
     s = pd.seam(obj, body.config.get("seam_position"))
     assert s["count"] > 50 and s["dominant"] == "+Y" and s["alignment"] >= 0.7 and s["agrees"] is True
 

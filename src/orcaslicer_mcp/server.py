@@ -23,6 +23,9 @@ from .breakdown import build_breakdown
 from .compare import compute_comparison
 from . import notes as _notes
 from . import outcomes as _outcomes
+import hashlib
+import time
+from . import plate_describe as _plate
 
 try:
     import importlib.metadata as _md
@@ -938,6 +941,51 @@ async def get_gcode() -> dict:
         return _m4a_err(e)
 
 
+_DESCRIBE_CACHE: dict[str, dict] = {}   # single entry in practice: the current slice
+
+
+def _gcode_cache_key(data: bytes) -> str:
+    h = hashlib.sha1()
+    h.update(data[:65536])
+    h.update(data[-65536:])
+    return f"{len(data)}:{h.hexdigest()}"
+
+
+@mcp.tool()
+async def describe_plate() -> dict:
+    """Machine-readable plate facts from the last slice's G-code, per object, so you can answer
+    orientation and placement questions instead of guessing from Euler angles or a picture:
+    how the part stands (flat / tilted / on an edge or corner, from first-layer contact versus its
+    widest layer), the first-layer footprint as islands, where overhang extrusions concentrate by
+    10 mm height band, where support stands and where its interface touches the part, and which
+    side the outer-wall seams sit on (checked against seam_position). Each object gets a
+    server-written summary sentence; relay it rather than recomputing. Read-only. Needs a valid
+    slice; returns {"error": "not_sliced"} otherwise. Copies of one object are aggregated (Orca
+    labels every copy 0); footprint islands still show per-copy contact. Cached per slice."""
+    try:
+        async with _client() as c:
+            data = await c.get_gcode()
+            try:
+                objs = (await c.get_objects()).get("objects", [])
+            except ApiError:
+                objs = []
+    except Conflict:
+        return {"error": "not_sliced"}
+    except ApiError as e:
+        return _m4a_err(e)
+    key = _gcode_cache_key(data)
+    hit = _DESCRIBE_CACHE.get(key)
+    if hit is not None:
+        return {**hit, "cached": True}
+    t0 = time.perf_counter()
+    parsed = _plate.parse_gcode(data.decode("utf-8", errors="replace"))
+    out = _plate.describe(parsed, objs)
+    out["parse_seconds"] = round(time.perf_counter() - t0, 2)
+    _DESCRIBE_CACHE.clear()
+    _DESCRIBE_CACHE[key] = out
+    return {**out, "cached": False}
+
+
 def _safe_gcode_name(name: str) -> str:
     base = Path(name).name
     base = re.sub(r"[^A-Za-z0-9._-]", "_", base)
@@ -1126,6 +1174,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "list_presets": ("List presets", True, False),
     "get_preset_config": ("Get preset config", True, False),
     "get_gcode": ("Download sliced gcode", True, False),
+    "describe_plate": ("Describe plate placement from G-code", True, False),
     "save_gcode": ("Save G-code and record the slice", False, False),
     "recall_prints": ("Recall past prints of this model", True, False),
     "render_plate": ("Render plate image", True, False),

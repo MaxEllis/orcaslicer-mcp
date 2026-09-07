@@ -74,8 +74,13 @@ robust to Orca splitting a wall loop across travel moves and needs no geometry l
 1. **Footprint (layer 0)**: occupied cells of the first layer -> `footprint_area_mm2`, `footprint_bbox`,
    and `islands`: connected components (8-neighbour) with area and bbox each. Three copies give three
    islands; a corner-standing copy gives a small island.
-2. **Contact ratio**: `footprint_area_mm2 / max_layer_area_mm2` where the denominator is the largest
-   per-layer occupied area for that object. Classes: `< 0.15` "standing on an edge or corner",
+2. **Contact ratio**: `footprint_area_mm2 / max_layer_area_mm2`, where both terms are FILLED areas,
+   not raw rasterised-cell counts: for each 8-connected island of occupied cells, every row is filled
+   between that row's min and max occupied x, so a sparsely infilled layer (only wall and infill-line
+   centrelines rasterised) is not undercounted against a solid one. `footprint_area_mm2` is the filled
+   area of layer 0; `max_layer_area_mm2` is the largest filled area over the object's layers. The
+   ratio is clamped to at most 1.0 (a solid first layer against a hollow-looking mid-body layer can
+   otherwise read as more than 100% contact). Classes: `< 0.15` "standing on an edge or corner",
    `0.15..0.60` "tilted", `> 0.60` "flat". Copy-agnostic because both terms sum over copies.
 3. **Overhang bands**: per 10 mm Z band, `overhang_wall_mm / total_wall_mm` (Overhang wall over
    Overhang + Outer + Inner wall length). Bands over 0.10 are named in the summary
@@ -122,7 +127,16 @@ Written server-side so the wording is stable and the model relays instead of com
 - Objects on other plates or unsliced objects: not in the G-code, not described; `objects_meta` names
   that are absent from the G-code are listed under `not_in_gcode`.
 - G-code over 60 MB: still parsed, but the tool reports `parse_seconds` so slowness is visible.
-  Measured: 4.1 MB in 0.3 s with a naive Python pass, so 40 MB is about 3 s.
+  Measured 0.18 s per MB of G-code with about ten times the file size resident in memory (4.1 MB ->
+  0.7 to 1.0 s, ~42 MB); the parse runs on a worker thread so the server loop stays responsive.
+
+## Deviations accepted in review
+
+- Support towers come from the lowest support layer rather than literally layer 0.
+- `overhang_bands` also returns `overhang_mm` per band, not only `share`.
+- `plate` carries `layer_height`.
+- The summariser is `summarize_object`.
+- Interface zones are XY islands of all interface cells (union) with Z span from contributing layers.
 
 ## Testing
 

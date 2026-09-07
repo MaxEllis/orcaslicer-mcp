@@ -101,6 +101,39 @@ def test_islands_are_8_connected():
     assert len(pd.islands(cells, min_cells=1)) == 1
 
 
+def test_filled_area_fills_row_spans_inside_islands():
+    ring = set()
+    for i in range(10):
+        ring.add((i, 0)); ring.add((i, 9))
+        ring.add((0, i)); ring.add((9, i))
+    assert pd.filled_area(ring) == 100
+    two_squares = _square(0, 0, 3) | _square(20, 20, 3)
+    assert pd.filled_area(two_squares) == 18
+    diagonal = {(i, i) for i in range(5)}
+    assert pd.filled_area(diagonal) == 5
+
+
+def test_contact_uses_filled_area():
+    o = pd.ObjectAcc("t")
+    o.layer(0).cells = _square(0, 0, 20)          # solid 20x20 = 400
+    ring22 = set()
+    for i in range(22):
+        ring22.add((i, 0)); ring22.add((i, 21))
+        ring22.add((0, i)); ring22.add((21, i))
+    o.layer(5).cells = ring22                     # hollow ring, filled area 22x22 = 484
+    c = pd.contact(o)
+    assert c["footprint_area_mm2"] == 400 and c["max_layer_area_mm2"] == 484
+    assert c["contact_ratio"] == 0.83 and c["class"] == "flat"
+    assert c["contact_ratio"] <= 1.0
+    ring10 = set()
+    for i in range(10):
+        ring10.add((i, 0)); ring10.add((i, 9))
+        ring10.add((0, i)); ring10.add((9, i))
+    o.layer(5).cells = ring10
+    c = pd.contact(o)
+    assert c["contact_ratio"] == 1.0
+
+
 def test_contact_classes():
     o = pd.ObjectAcc("t")
     o.layer(0).cells = _square(0, 0, 4)          # 16 cells on the plate

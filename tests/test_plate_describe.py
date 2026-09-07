@@ -145,3 +145,74 @@ def test_real_fixture_grid_facts(gcode_fixture):
     c = pd.contact(body)
     assert c["class"] == "edge_or_corner" and 0.05 <= c["contact_ratio"] <= 0.15
     assert len(pd.islands(body.layer(0).cells)) == 3       # three copies, stragglers filtered
+
+
+def test_support_absent():
+    o = pd.ObjectAcc("t")
+    o.layer(0).cells = _square(0, 0, 5)
+    out = pd.support(o, [(0.4, 0.4)])
+    assert out == {"present": False, "z_range": None, "islands": [], "interface_zones": []}
+
+
+def test_support_towers_and_interface_zones():
+    o = pd.ObjectAcc("t")
+    layers = [(0.4, 0.4), (1.0, 0.6), (1.6, 0.6), (2.2, 0.6)]
+    o.layer(0).support_cells = _square(0, 0, 4) | _square(30, 30, 4)   # two towers stand here
+    o.layer(1).support_cells = _square(0, 0, 4) | _square(30, 30, 4)
+    o.layer(2).support_cells = _square(0, 0, 4)
+    o.layer(2).interface_cells = _square(0, 0, 4)                        # interface touches the part at Z 1.6
+    o.layer(3).support_cells = _square(30, 30, 4)
+    o.layer(3).interface_cells = _square(30, 30, 4)
+    out = pd.support(o, layers)
+    assert out["present"] is True and out["z_range"] == [0.4, 2.2]
+    assert [i["area_mm2"] for i in out["islands"]] == [16, 16]
+    zones = out["interface_zones"]
+    assert len(zones) == 2
+    assert {"bbox": [0, 0, 4, 4], "z0": 1.6, "z1": 1.6, "area_mm2": 16} in zones
+    assert {"bbox": [30, 30, 34, 34], "z0": 2.2, "z1": 2.2, "area_mm2": 16} in zones
+
+
+def test_interface_zones_merge_adjacent_layers_over_the_same_spot():
+    o = pd.ObjectAcc("t")
+    layers = [(0.4, 0.4), (1.0, 0.6), (1.6, 0.6)]
+    for i in range(3):
+        o.layer(i).support_cells = _square(0, 0, 3)
+        o.layer(i).interface_cells = _square(0, 0, 3)
+    zones = pd.support(o, layers)["interface_zones"]
+    assert zones == [{"bbox": [0, 0, 3, 3], "z0": 0.4, "z1": 1.6, "area_mm2": 9}]
+
+
+def test_seam_sides_relative_to_layer_centroid():
+    o = pd.ObjectAcc("t")
+    o.layer(0).cells = _square(0, 0, 20)          # centroid at (10, 10)
+    o.seams = [(0, 10.0, 19.5), (0, 10.0, 19.0), (0, 19.5, 10.0)]   # two on +Y, one on +X
+    out = pd.seam(o, "back")
+    assert out["count"] == 3
+    assert out["sides"] == {"+X": 0.33, "-X": 0.0, "+Y": 0.67, "-Y": 0.0}
+    assert out["dominant"] == "+Y" and out["alignment"] == 0.67
+    assert out["configured"] == "back" and out["agrees"] is True
+
+
+def test_seam_scattered_and_unknown_config():
+    o = pd.ObjectAcc("t")
+    o.layer(0).cells = _square(0, 0, 20)
+    o.seams = [(0, 10.0, 19.5), (0, 19.5, 10.0), (0, 0.5, 10.0), (0, 10.0, 0.5)]
+    out = pd.seam(o, "random")
+    assert out["alignment"] == 0.25 and out["dominant"] in ("+X", "-X", "+Y", "-Y")
+    assert out["configured"] == "random" and out["agrees"] is None   # random/aligned/nearest have no side
+    assert pd.seam(pd.ObjectAcc("empty"), "back") == {"count": 0, "sides": {"+X": 0.0, "-X": 0.0, "+Y": 0.0, "-Y": 0.0},
+                                                       "dominant": None, "alignment": 0.0, "configured": "back", "agrees": None}
+
+
+def test_real_fixture_support_and_seams(gcode_fixture):
+    cube = pd.parse_gcode(gcode_fixture("cube20_flat"))
+    s = pd.seam(cube.objects["cube20.stl"], cube.config.get("seam_position"))
+    assert s["dominant"] == "+Y" and s["agrees"] is True
+    assert pd.support(cube.objects["cube20.stl"], cube.layers)["present"] is False
+    body = pd.parse_gcode(gcode_fixture("body4_corner_x3_support"))
+    obj = body.objects["Body4.stl"]
+    sup = pd.support(obj, body.layers)
+    assert sup["present"] is True and sup["z_range"][0] < 1.0 and sup["z_range"][1] > 50.0
+    assert len(sup["islands"]) >= 3 and len(sup["interface_zones"]) >= 3
+    s = pd.seam(obj, body.config.get("seam_position"))
+    assert s["count"] > 50 and s["dominant"] == "+Y" and s["alignment"] >= 0.7 and s["agrees"] is True

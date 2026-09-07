@@ -275,3 +275,99 @@ def overhang_bands(obj: ObjectAcc, layers: list[tuple[float, float]], band_mm: f
         bands.append({"z0": int(b * band_mm), "z1": int((b + 1) * band_mm),
                       "share": round(o / w, 2) if w else 0.0, "overhang_mm": round(o, 1)})
     return {"bands": bands, "total_mm": round(sum(over.values()), 1)}
+
+
+SEAM_ALIGNED_MIN = 0.70
+_SIDE_FOR_POSITION = {"back": "+Y", "rear": "+Y", "front": "-Y", "left": "-X", "right": "+X"}
+
+
+def _seam_side_for_position(configured: str | None) -> str | None:
+    return _SIDE_FOR_POSITION.get((configured or "").strip().lower())
+
+
+def support(obj: ObjectAcc, layers: list[tuple[float, float]]) -> dict:
+    """Where support stands (first-layer islands), how tall it is, and where its interface layers
+    touch the part. Interface zones are XY islands of interface cells, merged across consecutive
+    layers when their bboxes overlap, so one contact patch is one zone with a Z span."""
+    sup_layers = sorted(i for i, a in obj.layers.items() if a.support_cells and i < len(layers))
+    if not sup_layers:
+        return {"present": False, "z_range": None, "islands": [], "interface_zones": []}
+    z_lo = layers[sup_layers[0]][0]
+    z_hi = layers[sup_layers[-1]][0]
+    base = islands(obj.layers[sup_layers[0]].support_cells)
+    zones: list[dict] = []
+    for idx in sup_layers:
+        acc = obj.layers[idx]
+        if not acc.interface_cells:
+            continue
+        z = layers[idx][0]
+        for isl in islands(acc.interface_cells, min_cells=1):
+            merged = False
+            for zone in zones:
+                if _bbox_overlap(zone["bbox"], isl["bbox"]) and _prev_layer_z(layers, idx) <= zone["z1"] + 1e-6:
+                    zone["bbox"] = [min(zone["bbox"][0], isl["bbox"][0]), min(zone["bbox"][1], isl["bbox"][1]),
+                                    max(zone["bbox"][2], isl["bbox"][2]), max(zone["bbox"][3], isl["bbox"][3])]
+                    zone["z1"] = z
+                    zone["area_mm2"] = max(zone["area_mm2"], isl["area_mm2"])
+                    merged = True
+                    break
+            if not merged:
+                zones.append({"bbox": list(isl["bbox"]), "z0": z, "z1": z, "area_mm2": isl["area_mm2"]})
+    zones.sort(key=lambda zn: (zn["z0"], zn["bbox"]))
+    return {"present": True, "z_range": [round(z_lo, 1), round(z_hi, 1)], "islands": base, "interface_zones": zones}
+
+
+def _bbox_overlap(a: list, b: list) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _prev_layer_z(layers: list[tuple[float, float]], idx: int) -> float:
+    return layers[idx - 1][0] if idx > 0 else layers[idx][0]
+
+
+def _centroid(cells: set[tuple[int, int]]) -> tuple[float, float]:
+    n = len(cells)
+    return (sum(c[0] for c in cells) / n + 0.5, sum(c[1] for c in cells) / n + 0.5)
+
+
+def _side(dx: float, dy: float) -> str:
+    ang = math.degrees(math.atan2(dy, dx))
+    if -45 <= ang < 45:
+        return "+X"
+    if 45 <= ang < 135:
+        return "+Y"
+    if -135 <= ang < -45:
+        return "-Y"
+    return "-X"
+
+
+def seam(obj: ObjectAcc, configured: str | None) -> dict:
+    """Which side of the part the outer-wall seams sit on, judged per seam against the centroid of
+    the nearest footprint island on that layer (so copies do not pull the centroid to the middle
+    of the plate). alignment = share on the dominant side."""
+    counts = {"+X": 0, "-X": 0, "+Y": 0, "-Y": 0}
+    for layer_idx, sx, sy in obj.seams:
+        acc = obj.layers.get(layer_idx)
+        if not acc or not acc.cells:
+            continue
+        isl = islands(acc.cells, min_cells=1)
+        if not isl:
+            continue
+        # nearest island by bbox centre, then its cell centroid
+        def _dist(i):
+            bx = (i["bbox"][0] + i["bbox"][2]) / 2
+            by = (i["bbox"][1] + i["bbox"][3]) / 2
+            return (bx - sx) ** 2 + (by - sy) ** 2
+        near = min(isl, key=_dist)
+        members = {c for c in acc.cells
+                   if near["bbox"][0] <= c[0] < near["bbox"][2] and near["bbox"][1] <= c[1] < near["bbox"][3]}
+        cx, cy = _centroid(members or acc.cells)
+        counts[_side(sx - cx, sy - cy)] += 1
+    total = sum(counts.values())
+    sides = {k: (round(v / total, 2) if total else 0.0) for k, v in counts.items()}
+    dominant = max(counts, key=counts.get) if total else None
+    alignment = sides[dominant] if dominant else 0.0
+    expected = _seam_side_for_position(configured)
+    agrees = (dominant == expected) if (dominant and expected) else None
+    return {"count": total, "sides": sides, "dominant": dominant, "alignment": alignment,
+            "configured": configured, "agrees": agrees}

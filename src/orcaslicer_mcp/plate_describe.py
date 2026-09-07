@@ -200,3 +200,78 @@ def parse_gcode(text: str) -> ParsedPlate:
         del plate.objects["plate"]
     plate.printable_area = _parse_printable_area(plate.config.get("printable_area", ""))
     return plate
+
+
+CONTACT_EDGE_MAX = 0.15    # contact ratio below this: standing on an edge or corner
+CONTACT_FLAT_MIN = 0.60    # at or above this: flat
+OVERHANG_BAND_NOTE = 0.10  # a band with more than this share of overhang wall is named in the summary
+ISLAND_MIN_CELLS = 3
+
+_NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)]
+
+
+def islands(cells: set[tuple[int, int]], min_cells: int = ISLAND_MIN_CELLS) -> list[dict]:
+    """8-connected components of occupied cells, largest first. Components smaller than
+    min_cells are dropped (a lone cell is a sampling artefact, not a footprint)."""
+    seen: set[tuple[int, int]] = set()
+    out: list[dict] = []
+    for start in cells:
+        if start in seen:
+            continue
+        stack = [start]
+        seen.add(start)
+        comp: list[tuple[int, int]] = []
+        while stack:
+            c = stack.pop()
+            comp.append(c)
+            for dx, dy in _NEIGHBOURS:
+                q = (c[0] + dx, c[1] + dy)
+                if q in cells and q not in seen:
+                    seen.add(q)
+                    stack.append(q)
+        if len(comp) >= min_cells:
+            xs = [c[0] for c in comp]
+            ys = [c[1] for c in comp]
+            out.append({"area_mm2": len(comp),
+                        "bbox": [min(xs), min(ys), max(xs) + 1, max(ys) + 1]})
+    out.sort(key=lambda i: (-i["area_mm2"], i["bbox"]))
+    return out
+
+
+def contact_class(ratio: float) -> str:
+    if ratio < CONTACT_EDGE_MAX:
+        return "edge_or_corner"
+    if ratio < CONTACT_FLAT_MIN:
+        return "tilted"
+    return "flat"
+
+
+def contact(obj: ObjectAcc) -> dict:
+    """First-layer footprint versus the object's widest layer. Copy-agnostic: both sum over copies."""
+    first = len(obj.layers[0].cells) if 0 in obj.layers else 0
+    widest = max((len(a.cells) for a in obj.layers.values()), default=0)
+    ratio = round(first / widest, 2) if widest else 0.0
+    return {"footprint_area_mm2": first, "max_layer_area_mm2": widest,
+            "contact_ratio": ratio, "class": contact_class(ratio)}
+
+
+def overhang_bands(obj: ObjectAcc, layers: list[tuple[float, float]], band_mm: float = 10.0) -> dict:
+    """Overhang-wall length as a share of all wall length, per band_mm of Z. Bands run from 0 up to
+    the highest layer that has any wall; empty intermediate bands are reported with share 0."""
+    wall: dict[int, float] = {}
+    over: dict[int, float] = {}
+    top = -1
+    for idx, acc in obj.layers.items():
+        if idx >= len(layers) or acc.wall_mm == 0:
+            continue
+        b = int(layers[idx][0] // band_mm)
+        wall[b] = wall.get(b, 0.0) + acc.wall_mm
+        over[b] = over.get(b, 0.0) + acc.overhang_mm
+        top = max(top, b)
+    bands = []
+    for b in range(top + 1):
+        w = wall.get(b, 0.0)
+        o = over.get(b, 0.0)
+        bands.append({"z0": int(b * band_mm), "z1": int((b + 1) * band_mm),
+                      "share": round(o / w, 2) if w else 0.0, "overhang_mm": round(o, 1)})
+    return {"bands": bands, "total_mm": round(sum(over.values()), 1)}

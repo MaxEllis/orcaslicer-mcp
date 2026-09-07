@@ -82,3 +82,66 @@ def test_seam_recorded_on_named_object_not_plate_when_markers_present():
     assert p.objects["A.stl"].seams[0] == (0, 10.0, 10.0)
     # "plate" should have no seams (only layers from the Inner wall section after the marker)
     assert len(p.objects["plate"].seams) == 0
+
+
+def _square(x0, y0, n):
+    return {(x0 + i, y0 + j) for i in range(n) for j in range(n)}
+
+
+def test_islands_splits_components_and_drops_stragglers():
+    cells = _square(0, 0, 10) | _square(20, 20, 5) | {(40, 40)}
+    out = pd.islands(cells)
+    assert [i["area_mm2"] for i in out] == [100, 25]           # the 1-cell straggler is dropped (min_cells=3)
+    assert out[0]["bbox"] == [0, 0, 10, 10]                      # bbox is in mm: cell max + 1
+    assert pd.islands(cells, min_cells=1)[-1] == {"area_mm2": 1, "bbox": [40, 40, 41, 41]}
+
+
+def test_islands_are_8_connected():
+    cells = {(0, 0), (1, 1), (2, 2)}                            # diagonal chain
+    assert len(pd.islands(cells, min_cells=1)) == 1
+
+
+def test_contact_classes():
+    o = pd.ObjectAcc("t")
+    o.layer(0).cells = _square(0, 0, 4)          # 16 cells on the plate
+    o.layer(5).cells = _square(0, 0, 20)         # widest layer 400 cells
+    c = pd.contact(o)
+    assert c["footprint_area_mm2"] == 16 and c["max_layer_area_mm2"] == 400
+    assert c["contact_ratio"] == 0.04 and c["class"] == "edge_or_corner"
+    o.layer(0).cells = _square(0, 0, 12)         # 144/400 = 0.36
+    assert pd.contact(o)["class"] == "tilted"
+    o.layer(0).cells = _square(0, 0, 20)
+    assert pd.contact(o)["class"] == "flat" and pd.contact(o)["contact_ratio"] == 1.0
+
+
+def test_contact_with_no_first_layer_is_zero_not_error():
+    o = pd.ObjectAcc("t")
+    o.layer(3).cells = _square(0, 0, 5)
+    c = pd.contact(o)
+    assert c["footprint_area_mm2"] == 0 and c["contact_ratio"] == 0.0 and c["class"] == "edge_or_corner"
+
+
+def test_overhang_bands_by_z():
+    o = pd.ObjectAcc("t")
+    layers = [(0.4, 0.4), (5.0, 0.6), (12.0, 0.6), (25.0, 0.6)]
+    o.layer(0).wall_mm, o.layer(0).overhang_mm = 100.0, 30.0
+    o.layer(1).wall_mm, o.layer(1).overhang_mm = 100.0, 0.0
+    o.layer(2).wall_mm, o.layer(2).overhang_mm = 50.0, 10.0
+    o.layer(3).wall_mm, o.layer(3).overhang_mm = 50.0, 0.0
+    out = pd.overhang_bands(o, layers)
+    assert out["total_mm"] == 40.0
+    assert out["bands"] == [{"z0": 0, "z1": 10, "share": 0.15, "overhang_mm": 30.0},
+                            {"z0": 10, "z1": 20, "share": 0.2, "overhang_mm": 10.0},
+                            {"z0": 20, "z1": 30, "share": 0.0, "overhang_mm": 0.0}]
+
+
+def test_real_fixture_grid_facts(gcode_fixture):
+    cube = pd.parse_gcode(gcode_fixture("cube20_flat")).objects["cube20.stl"]
+    c = pd.contact(cube)
+    assert c["class"] == "flat" and c["contact_ratio"] == 1.0
+    assert 380 <= c["footprint_area_mm2"] <= 420
+    assert len(pd.islands(cube.layer(0).cells)) == 1
+    body = pd.parse_gcode(gcode_fixture("body4_corner_x3_support")).objects["Body4.stl"]
+    c = pd.contact(body)
+    assert c["class"] == "edge_or_corner" and 0.05 <= c["contact_ratio"] <= 0.15
+    assert len(pd.islands(body.layer(0).cells)) == 3       # three copies, stragglers filtered

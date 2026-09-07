@@ -77,6 +77,8 @@ It only crowns a winner when one variant genuinely beats the rest on time, filam
 | ![A press-fit tube connector sitting on the bed](docs/images/conn-editor.png) | ![The same part sliced, toolpaths coloured by feature role](docs/images/conn-preview.png) |
 | Your models on the bed. Answers orientation, plate contact, and first-layer footprint. | Sliced toolpaths coloured by feature role, so support placement is plain to see. |
 
+`describe_plate` answers the same questions as numbers and one sentence per object, computed from the sliced G-code: how the part stands (flat, tilted, or on an edge or corner, from first-layer contact against its widest layer), the first-layer footprint as islands, where overhang extrusions concentrate by height band, where support stands and where it touches the part, and which side the seams sit on, checked against `seam_position`. It exists because an assistant reads a sentence more reliably than a picture. Copies of an object are aggregated; the islands still show each copy's contact patch.
+
 ### Live state and memory
 
 `get_status` and `watch_events` report what the slicer is doing now. `remember` persists machine, user, and project facts for later sessions, as plain local files in `~/.orcaslicer-mcp/notes/`, relocatable with `ORCA_MCP_NOTES_DIR`.

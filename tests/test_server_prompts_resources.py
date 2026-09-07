@@ -60,3 +60,10 @@ def test_slicing_prompts_consult_outcome_memory():
     assert a.index("recall_prints") < a.index("slice_and_wait")
     b = srv.prompt_optimize_print_time("cube")
     assert "recall_prints" in b
+
+
+def test_slice_prompt_calls_describe_plate_after_slicing():
+    msgs = anyio.run(lambda: srv.mcp.get_prompt("slice-a-model", {"model_path": "/tmp/cube.stl"}))
+    text = msgs.messages[0].content.text
+    assert "describe_plate" in text
+    assert text.index("slice_and_wait") < text.index("describe_plate")

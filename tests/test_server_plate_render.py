@@ -1,5 +1,5 @@
 import httpx, respx
-from mcp.server.fastmcp import Image
+from mcp.server.mcpserver import Image
 import orcaslicer_mcp.server as srv
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32

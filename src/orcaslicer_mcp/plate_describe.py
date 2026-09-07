@@ -130,7 +130,7 @@ def parse_gcode(text: str) -> ParsedPlate:
             elif ln.startswith(";TYPE:"):
                 role = ln[6:].strip()
             elif ln.startswith(";WIPE_START"):
-                if role == "Outer wall" and x is not None and layer >= 0 and obj_name != "plate":
+                if role == "Outer wall" and x is not None and layer >= 0 and not (saw_marker and obj_name == "plate"):
                     plate.objects[obj_name].seams.append((layer, x, y))
             elif ln.startswith("; printing object "):
                 saw_marker = True

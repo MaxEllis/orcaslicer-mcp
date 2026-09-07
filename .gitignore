@@ -28,3 +28,6 @@ node_modules/
 *.db
 *.sqlite
 *.sqlite3
+
+# raw G-code never enters the repo (rule 4); fixtures are stored as .gcode.xz
+tests/fixtures/*.gcode

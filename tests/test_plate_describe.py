@@ -216,3 +216,66 @@ def test_real_fixture_support_and_seams(gcode_fixture):
     assert len(sup["islands"]) >= 3 and len(sup["interface_zones"]) >= 3
     s = pd.seam(obj, body.config.get("seam_position"))
     assert s["count"] > 50 and s["dominant"] == "+Y" and s["alignment"] >= 0.7 and s["agrees"] is True
+
+
+def test_describe_assembles_objects_copies_and_not_in_gcode(gcode_fixture):
+    parsed = pd.parse_gcode(gcode_fixture("body4_corner_x3_support"))
+    meta = [{"name": "Body4.stl", "instances": 3}, {"name": "ghost.stl", "instances": 1}]
+    out = pd.describe(parsed, meta)
+    assert out["per_object"] is True and out["not_in_gcode"] == ["ghost.stl"]
+    assert out["plate"]["layer_count"] == 194 and out["plate"]["printable_area"][2] == [300.0, 300.0]
+    assert out["plate"]["layer_height"] == "0.6" and 55 < out["plate"]["height_mm"] < 62
+    (o,) = out["objects"]
+    assert o["name"] == "Body4.stl" and o["copies"] == 3
+    assert o["orientation"]["class"] == "edge_or_corner"
+    assert len(o["footprint"]["islands"]) == 3 and o["footprint"]["bbox"][0] < o["footprint"]["bbox"][2]
+    assert o["support"]["present"] is True and o["seam"]["dominant"] == "+Y"
+    assert o["summary"] == out["summary"]          # one object -> the plate summary is its sentence
+
+
+def test_describe_without_meta_defaults_copies_to_one_and_whole_plate_when_unlabelled():
+    parsed = pd.parse_gcode(MINI)
+    out = pd.describe(parsed, None)
+    assert out["per_object"] is False
+    (o,) = out["objects"]
+    assert o["name"] == "plate" and o["copies"] == 1
+    assert "label objects is off" in o["summary"]
+
+
+def test_summarize_wording_edge_case_with_support_and_aligned_seam():
+    desc = {"name": "Body4.stl", "copies": 3,
+            "orientation": {"class": "edge_or_corner", "contact_ratio": 0.1},
+            "footprint": {"area_mm2": 151, "max_layer_area_mm2": 1553, "bbox": [0, 0, 1, 1],
+                          "islands": [{"area_mm2": 62, "bbox": []}, {"area_mm2": 44, "bbox": []}, {"area_mm2": 43, "bbox": []}]},
+            "overhang": {"bands": [{"z0": 0, "z1": 10, "share": 0.31, "overhang_mm": 1500.0},
+                                   {"z0": 10, "z1": 20, "share": 0.12, "overhang_mm": 500.0},
+                                   {"z0": 20, "z1": 30, "share": 0.01, "overhang_mm": 10.0}], "total_mm": 2010.0},
+            "support": {"present": True, "z_range": [0.4, 56.8], "islands": [{}] * 5,
+                        "interface_zones": [{}] * 6},
+            "seam": {"count": 90, "sides": {"+Y": 0.84, "-Y": 0.1, "+X": 0.02, "-X": 0.03}, "dominant": "+Y",
+                     "alignment": 0.84, "configured": "back", "agrees": True}}
+    s = pd.summarize_object(desc)
+    assert s == ("Body4.stl (3 copies) stands on an edge or corner: first-layer contact is 10% of its widest "
+                 "layer, in 3 islands of about 50 mm2 each. Overhang extrusions concentrate at Z 0 to 20 mm. "
+                 "Support is present from Z 0.4 to 56.8 mm, standing in 5 places and touching the part in 6 zones. "
+                 "Seams align on the +Y side (84%), matching seam_position=back.")
+
+
+def test_summarize_wording_flat_no_support_scattered_seam_disagrees():
+    desc = {"name": "cube20.stl", "copies": 1,
+            "orientation": {"class": "flat", "contact_ratio": 1.0},
+            "footprint": {"area_mm2": 400, "max_layer_area_mm2": 400, "bbox": [], "islands": [{"area_mm2": 400, "bbox": []}]},
+            "overhang": {"bands": [{"z0": 0, "z1": 10, "share": 0.0, "overhang_mm": 0.0}], "total_mm": 0.0},
+            "support": {"present": False, "z_range": None, "islands": [], "interface_zones": []},
+            "seam": {"count": 33, "sides": {"+Y": 0.3, "-Y": 0.3, "+X": 0.2, "-X": 0.2}, "dominant": "+Y",
+                     "alignment": 0.3, "configured": "back", "agrees": True}}
+    s = pd.summarize_object(desc)
+    assert s == ("cube20.stl lies flat: first-layer contact is 100% of its widest layer, in 1 island of about "
+                 "400 mm2. No overhang extrusions. No support. Seams are scattered (largest share 30% on the +Y side), "
+                 "although seam_position=back asks for one side.")
+    desc["seam"] = {"count": 33, "sides": {"+Y": 0.1, "-Y": 0.8, "+X": 0.05, "-X": 0.05}, "dominant": "-Y",
+                    "alignment": 0.8, "configured": "back", "agrees": False}
+    assert pd.summarize_object(desc).endswith("Seams align on the -Y side (80%), which disagrees with seam_position=back.")
+    desc["seam"] = {"count": 0, "sides": {"+Y": 0.0, "-Y": 0.0, "+X": 0.0, "-X": 0.0}, "dominant": None,
+                    "alignment": 0.0, "configured": "back", "agrees": None}
+    assert pd.summarize_object(desc).endswith("No seam points found.")

@@ -55,6 +55,21 @@ def test_layer_with_no_extrusion_and_move_before_any_layer_are_harmless():
     assert len(p.objects["plate"].layers[0].cells) > 0
 
 
+MINI_ABS = MINI.replace("M83", "M82").replace(
+    "G1 X20 Y10 E1\nG1 X20 Y20 E1\nG1 X10 Y20 E1\nG1 X10 Y10 E1\n;LAYER_CHANGE",
+    "G1 X20 Y10 E1\nG1 X20 Y20 E2\nG1 X10 Y20 E3\nG1 X10 Y10 E4\nG1 E3.5\nG92 E0\n;LAYER_CHANGE",
+)
+
+
+def test_absolute_e_extrusion_and_g92_reset():
+    p_rel = pd.parse_gcode(MINI)
+    p_abs = pd.parse_gcode(MINI_ABS)
+    assert p_abs.config["seam_position"] == "back"          # sanity: parse still reaches the config block
+    assert len(p_abs.objects["plate"].layer(0).cells) == len(p_rel.objects["plate"].layer(0).cells)
+    assert 1 in p_abs.objects["plate"].layers                # G1 X12 Y12 E0.5 after G92 E0 still counts as extrusion
+    assert len(p_abs.objects["plate"].layer(1).cells) > 0
+
+
 def test_real_fixtures_parse(gcode_fixture):
     cube = pd.parse_gcode(gcode_fixture("cube20_flat"))
     assert len(cube.layers) == 34 and cube.per_object is True and list(cube.objects) == ["cube20.stl"]

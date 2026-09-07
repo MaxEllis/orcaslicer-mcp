@@ -223,7 +223,7 @@
     },
     {
       "name": "describe_plate",
-      "description": "Machine-readable plate facts from the last slice's G-code, per object, so you can answer"
+      "description": "Machine-readable plate facts from the last slice's G-code, per object: orientation, footprint, overhang, support, and seam side, with a summary sentence."
     },
     {
       "name": "render_plate",

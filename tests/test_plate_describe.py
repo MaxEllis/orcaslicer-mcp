@@ -62,3 +62,23 @@ def test_real_fixtures_parse(gcode_fixture):
     assert len(body.layers) == 194 and list(body.objects) == ["Body4.stl"]
     assert body.copy_labels == {"Body4.stl": {0}}  # Orca labels every duplicate copy 0 (spec: per-copy limitation)
     assert body.config["support_type"] == "tree(auto)" and body.config["seam_position"] == "back"
+
+
+def test_seam_recorded_on_unlabelled_plate_when_no_markers():
+    """When no object markers are present, seams are recorded on the "plate" object."""
+    text = MINI.replace("G1 X10 Y10 E1\n;LAYER_CHANGE", "G1 X10 Y10 E1\n;WIPE_START\n;LAYER_CHANGE")
+    p = pd.parse_gcode(text)
+    assert len(p.objects["plate"].seams) == 1
+    assert p.objects["plate"].seams[0] == (0, 10.0, 10.0)
+
+
+def test_seam_recorded_on_named_object_not_plate_when_markers_present():
+    """When object markers are present, seams are recorded on the named object, not the transient "plate"."""
+    text = MINI.replace(";TYPE:Outer wall\n", "; printing object A.stl id:0 copy 0\n;TYPE:Outer wall\n") \
+               .replace(";TYPE:Inner wall\n", "; stop printing object A.stl id:0 copy 0\n;TYPE:Inner wall\n") \
+               .replace("G1 X10 Y10 E1\n;LAYER_CHANGE", "G1 X10 Y10 E1\n;WIPE_START\n;LAYER_CHANGE")
+    p = pd.parse_gcode(text)
+    assert len(p.objects["A.stl"].seams) == 1
+    assert p.objects["A.stl"].seams[0] == (0, 10.0, 10.0)
+    # "plate" should have no seams (only layers from the Inner wall section after the marker)
+    assert len(p.objects["plate"].seams) == 0

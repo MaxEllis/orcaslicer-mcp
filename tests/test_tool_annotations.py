@@ -15,18 +15,18 @@ def test_every_tool_has_title_and_hints():
         ann = tool.annotations
         assert ann is not None, name
         assert ann.title, name
-        assert ann.readOnlyHint in (True, False), name
-        if ann.readOnlyHint:
-            assert ann.destructiveHint is None, name
+        assert ann.read_only_hint in (True, False), name
+        if ann.read_only_hint:
+            assert ann.destructive_hint is None, name
         else:
-            assert ann.destructiveHint in (True, False), name
+            assert ann.destructive_hint in (True, False), name
 
 
 def test_annotations_surface_in_list_tools():
     tools = anyio.run(srv.mcp.list_tools)
     by_name = {t.name: t for t in tools}
-    assert by_name["get_status"].annotations.readOnlyHint is True
-    assert by_name["delete_preset"].annotations.readOnlyHint is False
-    assert by_name["delete_preset"].annotations.destructiveHint is True
-    assert by_name["load_model"].annotations.destructiveHint is False
+    assert by_name["get_status"].annotations.read_only_hint is True
+    assert by_name["delete_preset"].annotations.read_only_hint is False
+    assert by_name["delete_preset"].annotations.destructive_hint is True
+    assert by_name["load_model"].annotations.destructive_hint is False
     assert all(t.annotations and t.annotations.title for t in tools)

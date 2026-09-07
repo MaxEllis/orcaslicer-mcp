@@ -8,7 +8,7 @@ import sys
 import uuid
 from pathlib import Path
 from typing import Annotated
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.mcpserver import MCPServer, Image
 from pydantic import Field
 from mcp.types import ToolAnnotations
 from .config import load_config
@@ -24,7 +24,13 @@ from .compare import compute_comparison
 from . import notes as _notes
 from . import outcomes as _outcomes
 
-mcp = FastMCP("orcaslicer")
+try:
+    import importlib.metadata as _md
+    _VERSION = _md.version("orcaslicer-mcp")
+except Exception:  # source checkout without an installed dist
+    _VERSION = "0.0.0"
+
+mcp = MCPServer("orcaslicer", version=_VERSION)
 
 
 def _client() -> OrcaClient:

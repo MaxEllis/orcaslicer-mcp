@@ -1,4 +1,5 @@
 from __future__ import annotations
+import anyio
 import asyncio
 import os
 import re
@@ -962,7 +963,9 @@ async def describe_plate() -> dict:
     side the outer-wall seams sit on (checked against seam_position). Each object gets a
     server-written summary sentence; relay it rather than recomputing. Read-only. Needs a valid
     slice; returns {"error": "not_sliced"} otherwise. Copies of one object are aggregated (Orca
-    labels every copy 0); footprint islands still show per-copy contact. Cached per slice."""
+    labels every copy 0); footprint islands still show per-copy contact. The parsed result is
+    cached per slice (the G-code itself is still downloaded each call to detect a new slice).
+    All bboxes are [x0, y0, x1, y1] in plate millimetres."""
     try:
         async with _client() as c:
             data = await c.get_gcode()
@@ -978,10 +981,14 @@ async def describe_plate() -> dict:
     hit = _DESCRIBE_CACHE.get(key)
     if hit is not None:
         return {**hit, "cached": True}
-    t0 = time.perf_counter()
-    parsed = _plate.parse_gcode(data.decode("utf-8", errors="replace"))
-    out = _plate.describe(parsed, objs)
-    out["parse_seconds"] = round(time.perf_counter() - t0, 2)
+    text = data.decode("utf-8", errors="replace")
+    try:
+        t0 = time.perf_counter()
+        parsed = await anyio.to_thread.run_sync(_plate.parse_gcode, text)
+        out = _plate.describe(parsed, objs)
+        out["parse_seconds"] = round(time.perf_counter() - t0, 2)
+    except Exception as e:
+        return {"error": "parse_failed", "detail": str(e)[:200]}
     _DESCRIBE_CACHE.clear()
     _DESCRIBE_CACHE[key] = out
     return {**out, "cached": False}

@@ -357,24 +357,30 @@ def _side(dx: float, dy: float) -> str:
     return "-X"
 
 
+def _nearest_island(isl: list[dict], sx: float, sy: float) -> dict:
+    def _dist(i):
+        bx = (i["bbox"][0] + i["bbox"][2]) / 2
+        by = (i["bbox"][1] + i["bbox"][3]) / 2
+        return (bx - sx) ** 2 + (by - sy) ** 2
+    return min(isl, key=_dist)
+
+
 def seam(obj: ObjectAcc, configured: str | None) -> dict:
     """Which side of the part the outer-wall seams sit on, judged per seam against the centroid of
     the nearest footprint island on that layer (so copies do not pull the centroid to the middle
     of the plate). alignment = share on the dominant side."""
     counts = {"+X": 0, "-X": 0, "+Y": 0, "-Y": 0}
+    islands_by_layer: dict[int, list[dict]] = {}
     for layer_idx, sx, sy in obj.seams:
         acc = obj.layers.get(layer_idx)
         if not acc or not acc.cells:
             continue
-        isl = islands(acc.cells, min_cells=1)
+        isl = islands_by_layer.get(layer_idx)
+        if isl is None:
+            isl = islands_by_layer[layer_idx] = islands(acc.cells, min_cells=1)
         if not isl:
             continue
-        # nearest island by bbox centre, then its cell centroid
-        def _dist(i):
-            bx = (i["bbox"][0] + i["bbox"][2]) / 2
-            by = (i["bbox"][1] + i["bbox"][3]) / 2
-            return (bx - sx) ** 2 + (by - sy) ** 2
-        near = min(isl, key=_dist)
+        near = _nearest_island(isl, sx, sy)
         members = {c for c in acc.cells
                    if near["bbox"][0] <= c[0] < near["bbox"][2] and near["bbox"][1] <= c[1] < near["bbox"][3]}
         cx, cy = _centroid(members or acc.cells)

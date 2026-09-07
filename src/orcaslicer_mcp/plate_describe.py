@@ -371,3 +371,105 @@ def seam(obj: ObjectAcc, configured: str | None) -> dict:
     agrees = (dominant == expected) if (dominant and expected) else None
     return {"count": total, "sides": sides, "dominant": dominant, "alignment": alignment,
             "configured": configured, "agrees": agrees}
+
+
+_CLASS_PHRASE = {"edge_or_corner": "stands on an edge or corner", "tilted": "stands tilted", "flat": "lies flat"}
+
+
+def _footprint_bbox(cells: set[tuple[int, int]]) -> list[int]:
+    if not cells:
+        return []
+    xs = [c[0] for c in cells]
+    ys = [c[1] for c in cells]
+    return [min(xs), min(ys), max(xs) + 1, max(ys) + 1]
+
+
+def describe(parsed: ParsedPlate, objects_meta: list[dict] | None) -> dict:
+    meta_by_name = {m.get("name"): m for m in (objects_meta or []) if m.get("name")}
+    objs = []
+    for name, obj in parsed.objects.items():
+        if not obj.layers:
+            continue
+        first_cells = obj.layers[0].cells if 0 in obj.layers else set()
+        c = contact(obj)
+        d = {
+            "name": name,
+            "copies": int(meta_by_name.get(name, {}).get("instances") or 1),
+            "orientation": {"class": c["class"], "contact_ratio": c["contact_ratio"]},
+            "footprint": {"area_mm2": c["footprint_area_mm2"], "max_layer_area_mm2": c["max_layer_area_mm2"],
+                          "bbox": _footprint_bbox(first_cells), "islands": islands(first_cells)},
+            "overhang": overhang_bands(obj, parsed.layers),
+            "support": support(obj, parsed.layers),
+            "seam": seam(obj, parsed.config.get("seam_position")),
+        }
+        d["summary"] = summarize_object(d)
+        if not parsed.per_object:
+            d["summary"] = "label objects is off, so this describes the whole plate. " + d["summary"]
+        objs.append(d)
+    not_in_gcode = sorted(n for n in meta_by_name if n not in parsed.objects)
+    height = max((z for z, _ in parsed.layers), default=0.0)
+    return {
+        "per_object": parsed.per_object,
+        "objects": objs,
+        "not_in_gcode": not_in_gcode,
+        "plate": {"printable_area": [[x, y] for x, y in parsed.printable_area],
+                  "layer_count": len(parsed.layers), "height_mm": round(height, 1),
+                  "layer_height": parsed.config.get("layer_height")},
+        "summary": "\n".join(o["summary"] for o in objs),
+    }
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def summarize_object(d: dict) -> str:
+    name = d["name"]
+    copies = d.get("copies", 1)
+    head = f"{name} ({copies} copies)" if copies > 1 else name
+    ratio_pct = int(round(d["orientation"]["contact_ratio"] * 100))
+    isl = d["footprint"]["islands"]
+    if isl:
+        mean = sum(i["area_mm2"] for i in isl) / len(isl)
+        mean_txt = f"about {int(round(mean / 10.0) * 10) if mean >= 20 else int(round(mean))} mm2"
+        island_txt = (f"in 1 island of {mean_txt}" if len(isl) == 1
+                      else f"in {len(isl)} islands of {mean_txt} each")
+    else:
+        island_txt = "with no first-layer footprint found"
+    parts = [f"{head} {_CLASS_PHRASE[d['orientation']['class']]}: first-layer contact is {ratio_pct}% of its "
+             f"widest layer, {island_txt}."]
+
+    heavy = [b for b in d["overhang"]["bands"] if b["share"] > OVERHANG_BAND_NOTE]
+    if d["overhang"]["total_mm"] == 0:
+        parts.append("No overhang extrusions.")
+    elif heavy:
+        parts.append(f"Overhang extrusions concentrate at Z {heavy[0]['z0']} to {heavy[-1]['z1']} mm.")
+    else:
+        parts.append("Overhang extrusions are present but spread thinly (no band above "
+                     f"{int(OVERHANG_BAND_NOTE * 100)}% of wall length).")
+
+    s = d["support"]
+    if s["present"]:
+        parts.append(f"Support is present from Z {s['z_range'][0]} to {s['z_range'][1]} mm, standing in "
+                     f"{_plural(len(s['islands']), 'place')} and touching the part in {_plural(len(s['interface_zones']), 'zone')}.")
+    else:
+        parts.append("No support.")
+
+    sm = d["seam"]
+    cfg = sm.get("configured")
+    cfg_side = _seam_side_for_position(cfg)
+    if sm["count"] == 0:
+        parts.append("No seam points found.")
+    elif sm["alignment"] >= SEAM_ALIGNED_MIN:
+        pct = int(round(sm["alignment"] * 100))
+        if sm["agrees"] is True:
+            parts.append(f"Seams align on the {sm['dominant']} side ({pct}%), matching seam_position={cfg}.")
+        elif sm["agrees"] is False:
+            parts.append(f"Seams align on the {sm['dominant']} side ({pct}%), which disagrees with seam_position={cfg}.")
+        else:
+            parts.append(f"Seams align on the {sm['dominant']} side ({pct}%).")
+    else:
+        pct = int(round(sm["alignment"] * 100))
+        tail = f", although seam_position={cfg} asks for one side." if cfg_side else "."
+        parts.append(f"Seams are scattered (largest share {pct}% on the {sm['dominant']} side){tail}")
+    return " ".join(parts)

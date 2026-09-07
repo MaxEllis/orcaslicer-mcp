@@ -289,6 +289,35 @@ def test_describe_without_meta_defaults_copies_to_one_and_whole_plate_when_unlab
     assert "label objects is off" in o["summary"]
 
 
+def test_summarize_overhang_names_contiguous_runs_only():
+    desc = {"name": "Body4.stl", "copies": 1,
+            "orientation": {"class": "flat", "contact_ratio": 1.0},
+            "footprint": {"area_mm2": 400, "max_layer_area_mm2": 400, "bbox": [], "islands": [{"area_mm2": 400, "bbox": []}]},
+            "overhang": {"bands": [{"z0": 0, "z1": 10, "share": 0.30, "overhang_mm": 300.0},
+                                   {"z0": 10, "z1": 20, "share": 0.00, "overhang_mm": 0.0},
+                                   {"z0": 20, "z1": 30, "share": 0.00, "overhang_mm": 0.0},
+                                   {"z0": 30, "z1": 40, "share": 0.40, "overhang_mm": 400.0}], "total_mm": 700.0},
+            "support": {"present": False, "z_range": None, "islands": [], "interface_zones": []},
+            "seam": {"count": 0, "sides": {"+Y": 0.0, "-Y": 0.0, "+X": 0.0, "-X": 0.0}, "dominant": None,
+                     "alignment": 0.0, "configured": None, "agrees": None}}
+    s = pd.summarize_object(desc)
+    assert "Overhang extrusions concentrate at Z 0 to 10 mm and Z 30 to 40 mm." in s
+
+
+def test_summarize_overhang_thin_spread_mentions_largest_band():
+    desc = {"name": "t", "copies": 1,
+            "orientation": {"class": "flat", "contact_ratio": 1.0},
+            "footprint": {"area_mm2": 400, "max_layer_area_mm2": 400, "bbox": [], "islands": [{"area_mm2": 400, "bbox": []}]},
+            "overhang": {"bands": [{"z0": 0, "z1": 10, "share": 0.05, "overhang_mm": 20.0},
+                                   {"z0": 10, "z1": 20, "share": 0.08, "overhang_mm": 600.0}], "total_mm": 620.0},
+            "support": {"present": False, "z_range": None, "islands": [], "interface_zones": []},
+            "seam": {"count": 0, "sides": {"+Y": 0.0, "-Y": 0.0, "+X": 0.0, "-X": 0.0}, "dominant": None,
+                     "alignment": 0.0, "configured": None, "agrees": None}}
+    s = pd.summarize_object(desc)
+    assert ("Overhang extrusions are present but spread thinly (no band above 10% of wall length); "
+            "the most is at Z 10 to 20 mm.") in s
+
+
 def test_summarize_wording_edge_case_with_support_and_aligned_seam():
     desc = {"name": "Body4.stl", "copies": 3,
             "orientation": {"class": "edge_or_corner", "contact_ratio": 0.1},

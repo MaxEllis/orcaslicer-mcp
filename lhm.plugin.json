@@ -222,6 +222,10 @@
       "description": "Retrieve the last successful slice's G-code as text. [needs M4a]"
     },
     {
+      "name": "describe_plate",
+      "description": "Machine-readable plate facts from the last slice's G-code, per object, so you can answer"
+    },
+    {
       "name": "render_plate",
       "description": "Render a PNG picture of the current plate so you can SEE it."
     },

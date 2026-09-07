@@ -58,6 +58,20 @@ def test_gcode_cache_key_is_stable_and_length_sensitive():
     assert k3.startswith(f"{len(data) + 1}:")
 
 
+@respx.mock
+async def test_describe_plate_parse_failure_is_a_structured_error(monkeypatch):
+    _env(monkeypatch)
+    respx.get(f"{B}/api/v1/gcode").mock(return_value=httpx.Response(200, content=CUBE))
+    respx.get(url__regex=rf"{B}/api/v1/objects.*").mock(return_value=httpx.Response(200, json=OBJECTS))
+
+    def _boom(text):
+        raise ValueError("bad gcode")
+
+    monkeypatch.setattr(srv._plate, "parse_gcode", _boom)
+    out = await srv.describe_plate()
+    assert out["error"] == "parse_failed" and "bad gcode" in out["detail"]
+
+
 def test_describe_plate_is_annotated_read_only():
     tool = srv.mcp._tool_manager._tools["describe_plate"]
     assert tool.annotations.read_only_hint is True and tool.annotations.destructive_hint is None

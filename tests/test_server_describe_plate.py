@@ -47,6 +47,17 @@ async def test_describe_plate_objects_endpoint_missing_still_describes(monkeypat
     assert out["objects"][0]["copies"] == 1 and out["not_in_gcode"] == []
 
 
+def test_gcode_cache_key_is_stable_and_length_sensitive():
+    data = b"same bytes " * 100
+    k1 = srv._gcode_cache_key(data)
+    k2 = srv._gcode_cache_key(data)
+    assert k1 == k2
+    assert k1.startswith(f"{len(data)}:")
+    k3 = srv._gcode_cache_key(data + b"!")
+    assert k3 != k1
+    assert k3.startswith(f"{len(data) + 1}:")
+
+
 def test_describe_plate_is_annotated_read_only():
     tool = srv.mcp._tool_manager._tools["describe_plate"]
     assert tool.annotations.read_only_hint is True and tool.annotations.destructive_hint is None

@@ -1,5 +1,4 @@
 from __future__ import annotations
-import anyio
 import asyncio
 import os
 import re
@@ -984,7 +983,7 @@ async def describe_plate() -> dict:
     text = data.decode("utf-8", errors="replace")
     try:
         t0 = time.perf_counter()
-        parsed = await anyio.to_thread.run_sync(_plate.parse_gcode, text)
+        parsed = await asyncio.to_thread(_plate.parse_gcode, text)
         out = _plate.describe(parsed, objs)
         out["parse_seconds"] = round(time.perf_counter() - t0, 2)
     except Exception as e:

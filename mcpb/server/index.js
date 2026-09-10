@@ -62,11 +62,24 @@ if (!uvx) {
 // stripped one: uv's own dir plus the system dirs its launcher shims rely on.
 const pathParts = [process.env.PATH, path.dirname(uvx)];
 if (!WIN) pathParts.push("/usr/bin", "/bin", "/usr/sbin", "/sbin");
+// Pipe stdio through this process instead of inheriting it. With "inherit",
+// libuv on Windows skips CREATE_NO_WINDOW, so uvx (a console app) is given a
+// fresh, merely hidden console under the console-less Claude Desktop parent.
+// Issue #3 reported the Python server starting with sys.stdin = None on that
+// path (Windows 11); it did not reproduce on Windows 10, with or without
+// Windows Terminal as the default terminal. Pipes sidestep the question: the
+// child gets plain anonymous-pipe handles and no console is created at all.
 const child = spawn(uvx, ["orcaslicer-mcp"], {
-  stdio: "inherit", // hand the MCP stdio pipes straight to the Python server
+  stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,
   env: { ...process.env, PATH: pathParts.filter(Boolean).join(path.delimiter) },
 });
+process.stdin.pipe(child.stdin);
+child.stdout.pipe(process.stdout);
+child.stderr.pipe(process.stderr);
+// The MCP host signals shutdown by closing our stdin; forward that so the
+// Python server sees EOF and exits instead of lingering.
+process.stdin.on("end", () => { try { child.stdin.end(); } catch {} });
 
 child.on("error", (err) => {
   process.stderr.write("orcaslicer-mcp: failed to start via " + uvx + ": " + err.message + "\n");

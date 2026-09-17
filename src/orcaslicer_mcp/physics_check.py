@@ -80,6 +80,23 @@ def predicted_flows(cfg: dict) -> dict[str, float]:
         out[speed_k.removesuffix("_speed")] = sp * cross_section(w, lh)
     return out
 
+# Which preset layers feed each check. edit_preset uses this so an edit to ONE
+# preset is only blocked by checks it can be responsible for: a filament preset is
+# meant to pair with many print presets, so a check that mixes filament inputs with
+# the currently selected print preset's speeds is reported as a cross-layer warning
+# rather than a block. Print-preset edits ARE blocked by those same checks, since a
+# print preset is tuned for the filament that is selected while editing it.
+CHECK_LAYERS: dict[str, frozenset[str]] = {
+    "flow_ceiling":       frozenset({"print", "filament", "printer"}),  # speeds/widths/layer x filament ceiling
+    "temp_vs_flow":       frozenset({"print", "filament", "printer"}),  # demand from print speeds vs filament temp
+    "layer_height_ratio": frozenset({"print", "printer"}),
+    "line_width_ratio":   frozenset({"print", "printer"}),
+    "retraction_range":   frozenset({"printer"}),                       # retraction_length / use_firmware_retraction
+    "cooling_sanity":     frozenset({"filament"}),                      # fan_min/max, slow_down_layer_time
+    "first_layer_height": frozenset({"print", "printer"}),
+    "initial_layer_temp": frozenset({"filament"}),
+}
+
 def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
     out: list[CheckResult] = []
     lh, nd = _f(cfg, "layer_height"), _f(cfg, "nozzle_diameter")

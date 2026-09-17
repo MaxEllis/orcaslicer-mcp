@@ -18,7 +18,7 @@ from .models import summarize_slice
 from . import settings_schema
 from . import placement
 from .knowledge_index import load_knowledge, search_knowledge
-from .physics_check import run_checks
+from .physics_check import run_checks, CHECK_LAYERS
 from .breakdown import build_breakdown
 from .compare import compute_comparison
 from . import notes as _notes
@@ -768,7 +768,9 @@ async def select_preset(
 async def save_preset(type: str, name: str, detach: bool = False) -> dict:
     """Save the currently edited settings as a named user preset (create or update,
     visible in the GUI immediately). type = print|filament|printer. detach=True saves
-    it standalone instead of inheriting the current base preset.
+    it standalone instead of inheriting the current base preset; use it when creating a
+    filament preset for a DIFFERENT material than the one selected, otherwise the new
+    preset inherits the base's filament_type and temperatures.
 
     Run check_profile_physics first; do not save when verdict=blocked."""
     try:
@@ -883,7 +885,9 @@ async def edit_preset(type: str, name: str, changes: dict) -> dict:
     changes atomically, saves under the same name. Runs the check_profile_physics
     gate first (F15) and refuses with error=physics_blocked if the changes would
     INTRODUCE a failing physics check (pre-existing failures do not block
-    unrelated edits)."""
+    unrelated edits). For type='filament', checks that also depend on the currently
+    selected PRINT preset (flow_ceiling, temp_vs_flow) do not block; they come back
+    as cross_layer_warnings, because a filament preset pairs with many print presets."""
     try:
         async with _client() as c:
             await c.select_preset(type, name)
@@ -892,16 +896,36 @@ async def edit_preset(type: str, name: str, changes: dict) -> dict:
             fails_before = {r.name for r in run_checks(cfg) if r.status == "fail"}
             fails_after = [r for r in run_checks(overlay) if r.status == "fail"]
             new_fails = [r for r in fails_after if r.name not in fails_before]
-            if new_fails:
+            # A filament preset pairs with many print presets, so a check that mixes
+            # its inputs with the currently selected print preset's speeds cannot
+            # fairly block the filament edit; it is reported instead. (Print-preset
+            # edits are still blocked by those checks: they are tuned for the
+            # filament selected at the time.)
+            blocking, cross_layer = [], []
+            for r in new_fails:
+                layers = CHECK_LAYERS.get(r.name, frozenset({"print", "filament", "printer"}))
+                if type == "filament" and not layers <= {"filament", "printer"}:
+                    cross_layer.append(r)
+                else:
+                    blocking.append(r)
+            if blocking:
                 return {"error": "physics_blocked", "preset": name,
-                        "fails": [{"name": r.name, "detail": r.detail} for r in new_fails],
+                        "fails": [{"name": r.name, "detail": r.detail} for r in blocking],
                         "hint": "these changes introduce a physics failure; adjust them or "
                                 "inspect with check_profile_physics(changes)"}
             applied = await c.put_config(changes)
             if applied.get("errors"):
                 return {"error": "invalid_keys", "errors": applied["errors"]}
             saved = await c.save_preset(type, name)
-            return {"preset": name, "applied": applied.get("applied", []), "saved": saved}
+            out = {"preset": name, "applied": applied.get("applied", []), "saved": saved}
+            if cross_layer:
+                out["cross_layer_warnings"] = [
+                    {"name": r.name, "detail": r.detail,
+                     "hint": "judged against the currently selected print preset's speeds; this "
+                             "filament preset was saved anyway. Pair it with a slower print preset, "
+                             "or re-run check_profile_physics with the print preset you intend to use."}
+                    for r in cross_layer]
+            return out
     except ApiError as e:
         return _m4a_err(e)
 

@@ -144,3 +144,11 @@ def test_predicted_flows_per_feature():
 def test_predicted_flows_skips_unparseable():
     cfg = {"layer_height": "0.5", "nozzle_diameter": "0.8", "outer_wall_speed": ""}
     assert predicted_flows(cfg) == {}
+
+
+def test_every_check_declares_its_preset_layers():
+    from orcaslicer_mcp.physics_check import run_checks, CHECK_LAYERS
+    names = {r.name for r in run_checks({})}
+    assert names, "run_checks({}) should still emit one result per check"
+    assert names <= set(CHECK_LAYERS), names - set(CHECK_LAYERS)
+    assert all(v <= {"print", "filament", "printer"} and v for v in CHECK_LAYERS.values())

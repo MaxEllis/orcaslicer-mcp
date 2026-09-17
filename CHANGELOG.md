@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-09-17
+
 ### Fixed
 - `edit_preset` on a filament preset is no longer blocked by the print preset that happens to be selected. The physics gate now knows which preset layers feed each check: for filament edits, checks that mix filament inputs with print speeds (`flow_ceiling`, `temp_vs_flow`) are returned as `cross_layer_warnings` instead of `physics_blocked`, while filament-only checks (fan range, first-layer temperature) still block. Print-preset edits are unchanged and still block on the flow ceiling of the selected filament. Reported via a fork by shadow-fight.
 - `save_preset` docstring now says when `detach=True` is needed (creating a filament preset for a different material than the selected one).

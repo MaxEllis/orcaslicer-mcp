@@ -128,6 +128,15 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first, bec
 
     `ORCA_API_URL` defaults to `http://127.0.0.1:13130`. Set it only if you changed the port, or if OrcaSlicer runs on another machine with LAN access enabled there.
 
+    > **Windows note:** if `uvx orcaslicer-mcp` fails with *"The process cannot access the file because it is being used by another process"* while installing `pywin32`, Windows Search or Defender grabbed a freshly written file mid-install (uv does not retry). Use a pip-based fallback, which does retry, and point `"command"` at the resulting exe:
+    >
+    > ```powershell
+    > python -m venv "$env:USERPROFILE\.venvs\orcaslicer-mcp"
+    > & "$env:USERPROFILE\.venvs\orcaslicer-mcp\Scripts\python" -m pip install orcaslicer-mcp
+    > ```
+    >
+    > Then set `"command"` to `C:\Users\<you>\.venvs\orcaslicer-mcp\Scripts\orcaslicer-mcp.exe` with no `args`. Upgrade later with the same pip command plus `-U`.
+
     > **macOS note for GUI clients other than Claude Desktop:** apps launched from the Dock do not inherit your terminal's PATH, so `"command": "uvx"` can fail silently. Run `which uvx` in Terminal, then paste the full path it prints into `"command"`. It is usually `~/.local/bin/uvx`.
 
 4. Restart your client and ask: *"Load benchy.stl, slice it with the current profile, and tell me the print time."*

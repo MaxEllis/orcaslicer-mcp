@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Documentation
+- README: Windows fallback for `uvx` failing on `pywin32` with a sharing violation (pip venv, which retries). Findings in `docs/windows-install-findings-2026-09-22.md`, including the upstream 2.4.x "Profile syncing change" dialog and the fork's startup `remove_all` crash on a locked AppData datadir.
+
 ## [0.1.13] - 2026-09-17
 
 ### Fixed

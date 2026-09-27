@@ -6,6 +6,7 @@ import httpx
 import websockets
 from .config import Config
 from .errors import error_from_status, NotReachable, ApiError, UiTimeout
+from .guard import BlockedKey, sensitive_keys, unchanged, redact_secrets
 
 
 class OrcaClient:
@@ -69,7 +70,21 @@ class OrcaClient:
     async def duplicate_object(self, obj_id: int) -> dict:
         return await self._request("POST", f"/api/v1/objects/{obj_id}/duplicate")
 
+    async def _guard_config(self, changes: dict) -> None:
+        """Refuse writes that would change a sensitive key (see guard.py). Writing a key
+        back to its current value is allowed so snapshot/restore paths keep working."""
+        hits = sensitive_keys(changes or {})
+        if not hits:
+            return
+        current = await self.get_config(hits)
+        changed = [k for k in hits if not unchanged(changes[k], current.get(k))]
+        if changed:
+            raise BlockedKey(changed)
+
     async def set_object_config(self, obj_id: int, changes: dict) -> dict:
+        hits = sensitive_keys(changes or {})
+        if hits:
+            raise BlockedKey(hits)
         return await self._request("PUT", f"/api/v1/objects/{obj_id}/config", json=changes)
 
     async def transform_object(self, obj_id: int, translate=None, rotate=None, scale=None) -> dict:
@@ -103,6 +118,7 @@ class OrcaClient:
         return cfg
 
     async def put_config(self, changes: dict) -> dict:
+        await self._guard_config(changes)
         return await self._request("PUT", "/api/v1/config", json=changes)
 
     async def slice(self) -> dict:
@@ -131,7 +147,9 @@ class OrcaClient:
         return await self._request("GET", "/api/v1/presets")
 
     async def get_preset_config(self, ptype: str, name: str) -> dict:
-        return await self._request("POST", "/api/v1/preset/config", json={"type": ptype, "name": name})
+        # The fork returns this unfiltered (printhost_apikey/user/password included).
+        return redact_secrets(await self._request(
+            "POST", "/api/v1/preset/config", json={"type": ptype, "name": name}))
 
     async def delete_preset(self, ptype: str, name: str) -> dict:
         return await self._request("DELETE", "/api/v1/preset", json={"type": ptype, "name": name})

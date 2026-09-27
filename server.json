@@ -30,6 +30,11 @@
           "description": "OrcaSlicer Remote API address; defaults to http://127.0.0.1:13130",
           "isRequired": false,
           "default": "http://127.0.0.1:13130"
+        },
+        {
+          "name": "ORCA_MCP_ALLOW_KEYS",
+          "description": "Optional comma-separated config keys the MCP may change even though they run code or drive the printer directly (post_process, *_gcode, print host settings). Blank by default.",
+          "isRequired": false
         }
       ]
     }

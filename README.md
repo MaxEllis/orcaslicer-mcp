@@ -146,6 +146,8 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first, bec
 - The control API binds **127.0.0.1 only** by default. LAN access is an explicit opt-in in Preferences.
 - Every request must carry the API token. OrcaSlicer generates it on first run and can regenerate it at any time.
 - The MCP server runs as a local stdio process and opens no connection except to OrcaSlicer. No telemetry.
+- The MCP server refuses to change config keys that run code or drive the printer directly: `post_process`, every `*_gcode` template, `print_host` / `printhost_*` / `host_type`, `printer_model`, `printer_technology` and `filename_format` (see `src/orcaslicer_mcp/guard.py`). Writing a key back to the value it already has is allowed, so restores keep working. An assistant holding the API token can be steered by text it reads (model names, G-code, web pages), and `post_process` runs shell commands after export, so these stay a human decision in the OrcaSlicer GUI. To let the MCP write specific keys anyway, list them in `ORCA_MCP_ALLOW_KEYS` (comma separated; the Claude Desktop extension exposes it as a setting).
+- `get_preset_config` redacts `printhost_apikey`, `printhost_user` and `printhost_password` before they reach the model.
 
 ## Development
 

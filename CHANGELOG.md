@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Security
+- Config writes that would change `post_process`, a `*_gcode` template, the print host or its credentials (`print_host`, `print_host_webui`, `printhost_*`, `host_type`, `bbl_use_printhost`), `printer_model`, `printer_technology` or `filename_format` are refused with `blocked_by_local_policy` before reaching OrcaSlicer. Applies to `set_config`, `apply_and_slice`, `edit_preset`, `compare_settings`, `compare_slices` and `set_object_config`. The fork's `PUT /config` accepts any preset key, and `post_process` runs through the shell after export, so a token-holding assistant steered by injected text could otherwise persist a command in a user preset. Write-backs of an unchanged value pass, so snapshot/restore paths are unaffected. Opt specific keys back in with `ORCA_MCP_ALLOW_KEYS` (also a Claude Desktop extension setting).
+- `get_preset_config` redacts `printhost_apikey`, `printhost_user` and `printhost_password`; the fork returns preset config unfiltered, unlike `GET /config`.
+
 ### Documentation
 - README: Windows fallback for `uvx` failing on `pywin32` with a sharing violation (pip venv, which retries). Findings in `docs/windows-install-findings-2026-09-22.md`, including the upstream 2.4.x "Profile syncing change" dialog and the fork's startup `remove_all` crash on a locked AppData datadir.
 

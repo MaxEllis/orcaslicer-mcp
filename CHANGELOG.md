@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-10-02
+
 ### Security
 - Config writes that would change a key able to run code or drive the printer are refused with `blocked_by_local_policy` before they reach OrcaSlicer. They are `post_process`, every `*_gcode` template, `printer_model`, `printer_technology`, `filename_format`, and the printer connection settings (`print_host`, `print_host_webui`, `printhost_*`, `host_type`, `bbl_use_printhost`, `printer_agent`, `flashforge_serial_number`). This covers `set_config`, `apply_and_slice`, `edit_preset`, `compare_settings`, `compare_slices` and `set_object_config`. The fork's `PUT /config` accepts any preset key and `post_process` runs through the shell after export, so an assistant steered by injected text could otherwise save a command into a user preset. Thanks to @ferpa for the original change.
 - Writing back an unchanged value passes, compared the way the fork serializes it (`true` is `1`). The host address and credentials are always refused, because OrcaSlicer never reports their current value.

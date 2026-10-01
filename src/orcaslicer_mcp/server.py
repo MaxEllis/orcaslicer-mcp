@@ -21,6 +21,7 @@ from .knowledge_index import load_knowledge, search_knowledge
 from .physics_check import run_checks, CHECK_LAYERS
 from .breakdown import build_breakdown
 from .compare import compute_comparison
+from .guard import allow_override_warnings
 from . import notes as _notes
 from . import outcomes as _outcomes
 import hashlib
@@ -76,6 +77,10 @@ def _err(e: ApiError) -> dict:
     out = {"error": str(e)}
     if isinstance(e, Validation):
         out["errors"] = e.errors
+        if "blocked_by_remote_api_policy" in (e.errors or {}).values():
+            out["hint"] = ("OrcaSlicer itself refused these keys: Preferences > Remote API > "
+                           "'Allow script, G-code and connection edits' is off. They stay a "
+                           "change for the user to make in the OrcaSlicer GUI.")
     return out
 
 
@@ -287,7 +292,7 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
             finally:
                 if originals:
                     try:
-                        await c.put_config(originals)
+                        await c.restore_config(originals)
                     except ApiError as e:
                         restore_error = str(e)  # preserve collected rows even if restore fails
             result = {"key": key, "rows": rows}
@@ -346,7 +351,7 @@ async def compare_slices(variants: list[dict], baseline: str | None = None,
                          "error": None, "roles": None}
                     try:
                         if snapshot:
-                            await c.put_config(snapshot)  # reset to baseline so variants don't stack
+                            await c.restore_config(snapshot)  # reset to baseline so variants don't stack
                         if changes:
                             applied = await c.put_config(changes)
                             if applied.get("errors"):
@@ -375,7 +380,7 @@ async def compare_slices(variants: list[dict], baseline: str | None = None,
             finally:
                 if snapshot:
                     try:
-                        await c.put_config(snapshot)
+                        await c.restore_config(snapshot)
                     except ApiError as e:
                         restore_error = str(e)
     except ApiError as e:
@@ -890,6 +895,7 @@ async def edit_preset(type: str, name: str, changes: dict) -> dict:
     as cross_layer_warnings, because a filament preset pairs with many print presets."""
     try:
         async with _client() as c:
+            await c.guard_preset_edit(type, name, changes)  # refuse before selecting anything
             await c.select_preset(type, name)
             cfg = await c.get_config(None)
             overlay = dict(cfg) | {k: str(v) for k, v in changes.items()}
@@ -1271,6 +1277,8 @@ def _hide_windows_console() -> None:
 
 def main() -> None:
     _hide_windows_console()
+    for w in allow_override_warnings():
+        print(w, file=sys.stderr)  # stdout carries the MCP protocol; stderr reaches the client log
     mcp.run()
 
 

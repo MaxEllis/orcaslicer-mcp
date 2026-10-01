@@ -6,7 +6,8 @@ import httpx
 import websockets
 from .config import Config
 from .errors import error_from_status, NotReachable, ApiError, UiTimeout
-from .guard import BlockedKey, sensitive_keys, unchanged, redact_secrets
+from .guard import (BlockedKey, sensitive_keys, changed_keys, check_placeholders,
+                    redact_secrets)
 
 
 class OrcaClient:
@@ -72,16 +73,32 @@ class OrcaClient:
 
     async def _guard_config(self, changes: dict) -> None:
         """Refuse writes that would change a sensitive key (see guard.py). Writing a key
-        back to its current value is allowed so snapshot/restore paths keep working."""
+        back to its current value is allowed."""
+        check_placeholders(changes)
         hits = sensitive_keys(changes or {})
         if not hits:
             return
         current = await self.get_config(hits)
-        changed = [k for k in hits if not unchanged(changes[k], current.get(k))]
+        changed = changed_keys(changes, hits, current)
+        if changed:
+            raise BlockedKey(changed)
+
+    async def guard_preset_edit(self, ptype: str, name: str, changes: dict) -> None:
+        """The same refusal for edit_preset, judged against the named preset's stored values
+        and BEFORE anything is selected: selecting a preset discards the user's unsaved
+        overrides, so a refusal must not come after it."""
+        check_placeholders(changes)
+        hits = sensitive_keys(changes or {})
+        if not hits:
+            return
+        stored = (await self._request("POST", "/api/v1/preset/config",
+                                      json={"type": ptype, "name": name})).get("config", {})
+        changed = changed_keys(changes, hits, stored)
         if changed:
             raise BlockedKey(changed)
 
     async def set_object_config(self, obj_id: int, changes: dict) -> dict:
+        check_placeholders(changes)
         hits = sensitive_keys(changes or {})
         if hits:
             raise BlockedKey(hits)
@@ -120,6 +137,12 @@ class OrcaClient:
     async def put_config(self, changes: dict) -> dict:
         await self._guard_config(changes)
         return await self._request("PUT", "/api/v1/config", json=changes)
+
+    async def restore_config(self, snapshot: dict) -> dict:
+        """Write back values read with get_config earlier in the same call (compare_*
+        resets and restores). They are the slicer's own current values, so the guard has
+        nothing to judge, and skipping it keeps a restore from depending on one more GET."""
+        return await self._request("PUT", "/api/v1/config", json=snapshot)
 
     async def slice(self) -> dict:
         return await self._request("POST", "/api/v1/slice")

@@ -33,7 +33,7 @@
         },
         {
           "name": "ORCA_MCP_ALLOW_KEYS",
-          "description": "Optional comma-separated config keys the MCP may change even though they run code or drive the printer directly (post_process, *_gcode, print host settings). Blank by default.",
+          "description": "Optional comma-separated config keys the MCP may change even though they run code or drive the printer directly (post_process, *_gcode, print host settings). Wildcards allowed. Blank by default.",
           "isRequired": false
         }
       ]

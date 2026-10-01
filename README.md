@@ -146,6 +146,11 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first, bec
 - The control API binds **127.0.0.1 only** by default. LAN access is an explicit opt-in in Preferences.
 - Every request must carry the API token. OrcaSlicer generates it on first run and can regenerate it at any time.
 - The MCP server runs as a local stdio process and opens no connection except to OrcaSlicer. No telemetry.
+- The MCP server refuses to change config keys that run code or drive the printer directly. They are `post_process`, every `*_gcode` template, `printer_model`, `printer_technology`, `filename_format`, and the printer connection settings (`print_host`, `printhost_*`, `host_type`, `printer_agent` and the rest of OrcaSlicer's physical-printer keys). The list lives in `src/orcaslicer_mcp/guard.py`. An assistant holding the API token can be steered by text it reads, such as model names, G-code or web pages. Since `post_process` runs shell commands after export, these stay a human decision in the OrcaSlicer GUI.
+- Writing a key back to the value it already has is allowed, so restores keep working. The host address and its credentials are the exception. OrcaSlicer never reports their current value, so any write to them is refused. `edit_preset` runs the check before it selects the preset, which means a refused edit leaves your unsaved changes alone.
+- To let the MCP write specific keys anyway, list them in `ORCA_MCP_ALLOW_KEYS`, comma separated. Wildcards work, for example `*_gcode`. The Claude Desktop extension exposes it as a setting. At startup the server logs any name that matches no protected key, which is usually a typo.
+- This check covers the MCP server's own tools only. An assistant that can also run shell commands could read the token and call OrcaSlicer directly. OrcaSlicer MCP v2.4.2-mcp.10 and later apply the same rule inside the slicer, and it stays on until you tick **Allow script, G-code and connection edits** in Preferences → Remote API. On those builds the assistant needs both: that box ticked and the keys listed in `ORCA_MCP_ALLOW_KEYS`.
+- `get_preset_config` hides `printhost_apikey`, `printhost_user` and `printhost_password`. It also removes any `user:password@` from `print_host` and `print_host_webui` before the model sees them. A value carrying the `<redacted>` placeholder is never written back.
 
 ## Development
 

@@ -11,6 +11,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `set_config` warns against echoing a `get_config` value back for a per-filament setting (`hot_plate_temp`, `fan_min_speed`, `nozzle_temperature_initial_layer`, ...). `get_config` reports those merged across every loaded filament, while the write lands in the one filament preset open in the Filament tab, so the merged string corrupted that preset's list. Reported by @RoyPorter (orcaslicer-mcp#9); OrcaSlicer MCP v2.4.2-mcp.12 rejects the merged shape instead of storing it.
 - `select_preset` says that it discards unsaved overrides in every preset group, not only the one being switched, and that newer slicer builds list the affected groups as `discarded_changes`. Reported by @RoyPorter (orcaslicer-mcp#10).
 
+### Known issues
+- `compare_settings` and `compare_slices` snapshot with `get_config` and restore with `set_config`, so for a per-filament key on a multi-filament setup the restore writes back the merged list. That never actually restored the original - it corrupted the filament preset the same way a manual write did. On OrcaSlicer MCP v2.4.2-mcp.12 and later the restore now fails loudly with `per_filament_length_mismatch` instead of corrupting silently; re-select the filament preset to recover. Making the snapshot/restore path per-filament aware is still to do.
+
 ## [0.1.14] - 2026-10-02
 
 ### Security

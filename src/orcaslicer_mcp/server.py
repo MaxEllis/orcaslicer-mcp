@@ -115,7 +115,11 @@ async def set_config(
         "Map of OrcaSlicer config key to new value, e.g. "
         "{'layer_height': 0.2, 'sparse_infill_density': '15%'}. Values must match each "
         "setting's type; percent settings take strings like '15%'. Discover valid keys "
-        "with search_settings, find_config_keys, or describe_setting."))],
+        "with search_settings, find_config_keys, or describe_setting. Do NOT echo back a "
+        "get_config value for a per-filament setting (hot_plate_temp, fan_min_speed, "
+        "nozzle_temperature_initial_layer, ...): get_config reports those merged across "
+        "every loaded filament ('70,100,70,70,35'), while this writes the one filament "
+        "preset open in the Filament tab, so pass that preset's single value instead."))],
 ) -> dict:
     """Apply config changes to the active project as unsaved overrides, atomically: if any
     key is invalid the whole batch is rejected and nothing changes. Returns {applied, errors}.
@@ -758,10 +762,15 @@ async def select_preset(
 ) -> dict:
     """Make the named preset the active one for its group (print, filament, or printer).
 
-    Selecting a preset discards unsaved set_config overrides and reverts settings to the
-    preset's stored values, so it is also the canonical way to reset dirty config; it leaves
-    the last slice invalid, so re-slice afterwards. Use list_presets for valid names, and
-    save_preset first if unsaved edits should survive the switch."""
+    Discards unsaved overrides in EVERY preset group, not just the one being switched: a
+    filament switch also drops unsaved print and printer edits, including ones made by hand
+    in the OrcaSlicer window. That is deliberate (OrcaSlicer consults the other groups when
+    switching, and any unsaved one would open a modal dialog nothing can dismiss remotely),
+    so call save_preset first if any unsaved edit should survive. Newer slicer builds report
+    which groups were affected as 'discarded_changes' in the reply.
+
+    This also makes it the canonical way to reset dirty config. It leaves the last slice
+    invalid, so re-slice afterwards. Use list_presets for valid names."""
     try:
         async with _client() as c:
             return await c.select_preset(type, name)

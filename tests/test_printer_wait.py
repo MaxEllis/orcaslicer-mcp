@@ -20,13 +20,17 @@ def snap(state="idle", nozzle=(25, 0), bed=(23, 0), job=None, problems=(), z=Non
 
 
 class Script:
-    """Feeds take_snapshot a list of snapshots (the last one repeats) and runs a fake clock."""
+    """Feeds take_snapshot a list of snapshots (the last one repeats; an Exception in the list is
+    raised instead) and runs a fake clock."""
 
     def __init__(self, monkeypatch, snaps):
         self.snaps, self.t, self.sleeps, self.reports = list(snaps), 0.0, [], []
 
         async def take(target, client):
-            return self.snaps.pop(0) if len(self.snaps) > 1 else self.snaps[0]
+            item = self.snaps.pop(0) if len(self.snaps) > 1 else self.snaps[0]
+            if isinstance(item, Exception):
+                raise item
+            return item
 
         monkeypatch.setattr(w._snapshot, "take_snapshot", take)
 
@@ -79,10 +83,28 @@ async def test_first_layer_done_by_layer_count(monkeypatch):
     assert (await s.run(KL, "first_layer_done"))["met"] is True
 
 
-async def test_first_layer_done_by_height(monkeypatch):
-    job = {"layer": {"current": None, "total": None}, "first_layer_height": 0.3}
-    s = Script(monkeypatch, [snap("printing", job=job, z=0.3), snap("printing", job=job, z=0.6)])
-    assert (await s.run(KL, "first_layer_done"))["met"] is True
+NO_LAYERS = {"layer": {"current": None, "total": None}, "first_layer_height": 0.3, "filament_used_mm": 40}
+
+
+async def test_first_layer_done_by_height_needs_two_polls_in_a_row(monkeypatch):
+    s = Script(monkeypatch, [snap("printing", job=NO_LAYERS, z=0.3), snap("printing", job=NO_LAYERS, z=0.6),
+                             snap("printing", job=NO_LAYERS, z=0.8)])
+    out = await s.run(KL, "first_layer_done")
+    assert out["met"] is True and len(s.sleeps) == 2
+
+
+async def test_first_layer_done_by_height_ignores_z_before_extrusion(monkeypatch):
+    job = {**NO_LAYERS, "filament_used_mm": 0}
+    s = Script(monkeypatch, [snap("printing", job=job, z=5.0)])
+    out = await s.run(KL, "first_layer_done", timeout_s=12)
+    assert out["met"] is False and "timed out" in out["note"]
+
+
+async def test_first_layer_done_by_height_ignores_a_single_z_hop(monkeypatch):
+    s = Script(monkeypatch, [snap("printing", job=NO_LAYERS, z=0.3), snap("printing", job=NO_LAYERS, z=0.9),
+                             snap("printing", job=NO_LAYERS, z=0.3)])
+    out = await s.run(KL, "first_layer_done", timeout_s=12)
+    assert out["met"] is False and "timed out" in out["note"]
 
 
 async def test_first_layer_done_is_klipper_only(monkeypatch):
@@ -99,8 +121,34 @@ async def test_finished_when_nothing_is_printing(monkeypatch):
 
 
 async def test_finished_when_already_done(monkeypatch):
-    s = Script(monkeypatch, [snap("finished")])
-    assert (await s.run(KL, "finished"))["met"] is True
+    s = Script(monkeypatch, [snap("finished", job={"state": "complete"})])
+    out = await s.run(KL, "finished")
+    assert out["met"] is True and out["stopped_early"] is None and s.sleeps == []
+
+
+async def test_finished_on_klipper_in_an_error_state_without_a_job_is_not_met(monkeypatch):
+    s = Script(monkeypatch, [snap("error")])
+    out = await s.run(KL, "finished")
+    assert out["met"] is False and out["stopped_early"] == "the printer reports an error"
+    assert "note" not in out and s.sleeps == []
+
+
+async def test_finished_by_a_klipper_job_error_still_says_why(monkeypatch):
+    s = Script(monkeypatch, [snap("printing", job={"state": "printing"}), snap("error", job={"state": "error"})])
+    out = await s.run(KL, "finished")
+    assert out["met"] is True and out["stopped_early"] == "the printer reports an error"
+
+
+async def test_finished_by_a_cancelled_klipper_job_has_no_fault(monkeypatch):
+    s = Script(monkeypatch, [snap("printing", job={"state": "printing"}), snap("cancelled", job={"state": "cancelled"})])
+    out = await s.run(KL, "finished")
+    assert out["met"] is True and out["stopped_early"] is None
+
+
+async def test_finished_on_octoprint_losing_the_printer_says_why(monkeypatch):
+    s = Script(monkeypatch, [snap("printing"), snap("offline", problems=[FATAL])])
+    out = await s.run(OP, "finished")
+    assert out["met"] is True and out["stopped_early"] == FATAL["message"]
 
 
 async def test_finished_on_a_shut_down_printer_says_why(monkeypatch):
@@ -118,6 +166,55 @@ async def test_finished_on_octoprint_with_an_old_finished_job_is_not_met(monkeyp
     s = Script(monkeypatch, [snap("finished")])
     out = await s.run(OP, "finished")
     assert out["met"] is False and out["note"] == "nothing is printing" and s.sleeps == []
+
+
+def lost(code="not_reachable"):
+    return PrinterError(code, "The printer didn't answer.")
+
+
+async def test_a_network_blip_mid_wait_is_ridden_out(monkeypatch):
+    s = Script(monkeypatch, [snap("printing", job={"filament_used_mm": 0}), lost(),
+                             snap("printing", job={"filament_used_mm": 12})])
+    out = await s.run(KL, "printing")
+    assert out["met"] is True and out["stopped_early"] is None and len(s.sleeps) == 2
+
+
+async def test_a_protocol_error_blip_is_ridden_out_too(monkeypatch):
+    s = Script(monkeypatch, [snap("printing", job={"filament_used_mm": 0}), lost("protocol_error"),
+                             snap("printing", job={"filament_used_mm": 12})])
+    assert (await s.run(KL, "printing"))["met"] is True
+
+
+async def test_a_good_poll_resets_the_failure_count(monkeypatch):
+    hot = snap("heating", (150, 215))
+    s = Script(monkeypatch, [hot, lost(), hot, lost(), hot, lost(), snap("heating", (214, 215), (23, 0))])
+    out = await s.run(KL, "heated")
+    assert out["met"] is True and len(s.sleeps) == 6
+
+
+async def test_three_failed_polls_in_a_row_end_the_wait_with_the_last_good_status(monkeypatch):
+    first = snap("heating", (150, 215))
+    s = Script(monkeypatch, [first, lost()])
+    out = await s.run(KL, "heated")
+    assert out["met"] is False and out["stopped_early"].startswith("Lost contact with the printer")
+    assert "The printer didn't answer." in out["stopped_early"]
+    assert out["status"] is first and out["until"] == "heated" and out["waited_s"] == 15
+    assert s.sleeps == [5.0, 5.0, 5.0]
+
+
+async def test_a_non_transient_error_mid_wait_ends_the_wait_at_once(monkeypatch):
+    first = snap("heating", (150, 215))
+    s = Script(monkeypatch, [first, PrinterError("auth_rejected", "The printer refused the API key.")])
+    out = await s.run(KL, "heated")
+    assert out["met"] is False and out["status"] is first and len(s.sleeps) == 1
+    assert out["stopped_early"] == "Lost contact with the printer: The printer refused the API key."
+
+
+async def test_a_failure_on_the_first_poll_still_raises(monkeypatch):
+    s = Script(monkeypatch, [lost()])
+    with pytest.raises(PrinterError) as e:
+        await s.run(KL, "heated")
+    assert e.value.code == "not_reachable"
 
 
 async def test_timeout_is_capped(monkeypatch):
@@ -160,3 +257,9 @@ async def test_wait_for_printer_tool_reports_progress(monkeypatch):
     ctx = Ctx()
     out = await srv.wait_for_printer("heated", 60, ctx)
     assert out["met"] is True and len(ctx.calls) == 1
+
+
+def test_first_layer_done_description_says_it_can_be_approximate():
+    props = srv.mcp._tool_manager._tools["wait_for_printer"].parameters["properties"]
+    desc = props["until"]["description"]
+    assert "judged from the nozzle height, so it is approximate" in desc and chr(0x2014) not in desc

@@ -7,8 +7,8 @@ import sqlite3
 import sys
 import uuid
 from pathlib import Path
-from typing import Annotated
-from mcp.server.mcpserver import MCPServer, Image
+from typing import Annotated, Literal
+from mcp.server.mcpserver import MCPServer, Image, Context
 from pydantic import Field
 from mcp.types import ToolAnnotations
 from .config import load_config
@@ -28,6 +28,7 @@ import hashlib
 import time
 from . import plate_describe as _plate
 from .printer import target as _ptarget
+from .printer import wait as _pwait
 from .printer.errors import PrinterError
 from .printer.snapshot import take_snapshot
 from .printer.status import _dur as _duration_text
@@ -1247,6 +1248,28 @@ async def get_printer_status() -> dict:
     return await _with_printer(lambda t, c: take_snapshot(t, c))
 
 
+@mcp.tool()
+async def wait_for_printer(
+    until: Annotated[Literal["heated", "printing", "first_layer_done", "finished"], Field(description=(
+        "What to wait for. 'heated': every heater with a target is within 3 °C of it. 'printing': "
+        "extrusion has started. 'first_layer_done': the second layer has begun (Klipper only). "
+        "'finished': the job completed, was cancelled or errored."))],
+    timeout_s: Annotated[int, Field(description=(
+        "Seconds to wait before returning the latest status. Default 300, at most 1800. "
+        "Call again to keep waiting."))] = _pwait.DEFAULT_TIMEOUT_S,
+    ctx: Context | None = None,
+) -> dict:
+    """Wait until the printer reaches a point in a print, checking every 5 seconds. Returns as soon as
+    it happens (met: true), early if the printer reports a fault (stopped_early says why), or at the
+    timeout with the latest status (met: false). Waiting for 'finished' when nothing is printing
+    returns at once with the note 'nothing is printing'. Read-only: it never sends commands."""
+    async def report(done: float, total: float, message: str) -> None:
+        if ctx is not None:
+            await ctx.report_progress(done, total, message)
+
+    return await _with_printer(lambda t, c: _pwait.run_wait(t, c, until, timeout_s, report))
+
+
 # --- Tool annotations (title + read-only/destructive hints) -----------------
 # The Claude connectors directory requires every tool to carry a title and the
 # applicable readOnlyHint / destructiveHint. Kept as one table so completeness
@@ -1300,6 +1323,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "delete_object": ("Delete object from plate", False, True),
     "delete_preset": ("Delete preset", False, True),
     "get_printer_status": ("Get printer status", True, False),
+    "wait_for_printer": ("Wait for the printer", True, False),
 }
 
 

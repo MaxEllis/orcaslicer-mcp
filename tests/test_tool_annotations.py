@@ -35,3 +35,8 @@ def test_annotations_surface_in_list_tools():
 def test_printer_tools_are_read_only_and_open_world():
     ann = srv.mcp._tool_manager._tools["get_printer_status"].annotations
     assert ann.read_only_hint is True and ann.open_world_hint is True
+
+
+def test_wait_for_printer_is_read_only_and_open_world():
+    ann = srv.mcp._tool_manager._tools["wait_for_printer"].annotations
+    assert ann.read_only_hint is True and ann.open_world_hint is True

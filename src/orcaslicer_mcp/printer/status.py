@@ -60,7 +60,7 @@ def klipper_state(webhooks: dict, print_stats: dict, nozzle: dict | None, bed: d
 def remaining(print_duration, progress, estimate_s) -> tuple[int | None, str | None]:
     pd = _f(print_duration, 0)
     est = _f(estimate_s, 0)
-    if est and est > 0 and pd is not None:
+    if est and est > 0 and pd is not None and est - pd > 0:
         return max(0, int(round(est - pd))), "slicer_estimate"
     pr = _f(progress, 4)
     if pd and pr and pr >= _PROGRESS_FLOOR:
@@ -98,6 +98,8 @@ def klipper_snapshot(status: dict, server_info: dict, console: list[dict], *, si
     if disconnected:
         problems.append(problem("fatal", "moonraker",
                                 "Klipper isn't connected to Moonraker: it may be starting up or may have crashed."))
+    if wh.get("state") == "startup":
+        problems.append(problem("warning", "klipper", "Klipper is starting up; check again in a minute."))
     problems += [p for p in (klippy_problem(wh), job_problem(ps)) if p]
     problems += console_problems(console, since)
     problems += moonraker_warnings(server_info, (status.get("configfile") or {}).get("warnings"))

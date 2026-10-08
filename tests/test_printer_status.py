@@ -78,6 +78,21 @@ def test_too_early_to_guess_time_left():
     assert s["job"]["remaining_s"] is None and s["job"]["remaining_basis"] is None
 
 
+def test_an_overrun_estimate_falls_back_to_progress():
+    s = snap(kstatus(print_stats={"state": "printing", "filename": "benchy.gcode", "print_duration": 3000.0,
+                                  "filament_used": 300.0},
+                     display_status={"progress": 0.6}),
+             meta={"estimated_time": 2280})
+    assert s["job"]["remaining_s"] == 2000 and s["job"]["remaining_basis"] == "progress"
+    assert "about 1 min left" not in s["headline"] and "about 33 min left" in s["headline"]
+    s = snap(kstatus(print_stats={"state": "printing", "filename": "benchy.gcode", "print_duration": 3000.0,
+                                  "filament_used": 300.0},
+                     display_status={"progress": 0.0}),
+             meta={"estimated_time": 2280})
+    assert s["job"]["remaining_s"] is None and s["job"]["remaining_basis"] is None
+    assert "left" not in s["headline"]
+
+
 def test_finished_job_is_kept():
     s = snap(kstatus(print_stats={"state": "complete", "filename": "benchy.gcode", "print_duration": 2000.0}))
     assert s["state"] == "finished" and s["job"]["file"] == "benchy.gcode" and s["job"]["remaining_s"] is None
@@ -96,7 +111,11 @@ def test_shutdown_is_fatal_with_a_hint():
 
 
 def test_klipper_starting_up_is_offline():
-    assert snap(kstatus(webhooks={"state": "startup"}))["state"] == "offline"
+    s = snap(kstatus(webhooks={"state": "startup"}))
+    assert s["state"] == "offline"
+    assert [p["message"] for p in s["problems"]] == ["Klipper is starting up; check again in a minute."]
+    assert s["problems"][0]["severity"] == "warning" and s["problems"][0]["hint"] is None
+    assert "No problems" not in s["headline"]
 
 
 def test_klipper_disconnected_from_moonraker_is_offline_and_fatal():

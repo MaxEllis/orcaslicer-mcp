@@ -30,3 +30,8 @@ def test_annotations_surface_in_list_tools():
     assert by_name["delete_preset"].annotations.destructive_hint is True
     assert by_name["load_model"].annotations.destructive_hint is False
     assert all(t.annotations and t.annotations.title for t in tools)
+
+
+def test_printer_tools_are_read_only_and_open_world():
+    ann = srv.mcp._tool_manager._tools["get_printer_status"].annotations
+    assert ann.read_only_hint is True and ann.open_world_hint is True

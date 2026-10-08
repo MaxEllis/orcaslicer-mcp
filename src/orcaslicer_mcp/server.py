@@ -27,6 +27,9 @@ from . import outcomes as _outcomes
 import hashlib
 import time
 from . import plate_describe as _plate
+from .printer import target as _ptarget
+from .printer.errors import PrinterError
+from .printer.snapshot import take_snapshot
 
 try:
     import importlib.metadata as _md
@@ -1192,6 +1195,41 @@ async def render_plate(view: str = "editor", angle: str = "iso",
 
 
 
+# --- Printer feedback (read-only) ---------------------------------------------
+# The printer is found through OrcaSlicer's active printer profile (or ORCA_PRINTER_URL) and asked
+# over HTTP GET only. Nothing here sends commands to a printer.
+
+
+def _printer_api_key() -> str | None:
+    return os.environ.get("ORCA_PRINTER_API_KEY", "").strip() or None
+
+
+async def _with_printer(fn) -> dict:
+    """Find the printer (override > OrcaSlicer profile > remembered), open the protocol that
+    answers, and run fn(target, client). Printer problems come back as {error, message, hint, ...}."""
+    try:
+        target = await _ptarget.resolve_target(_client)
+        target, client = await _ptarget.open_printer(target, _printer_api_key())
+        async with client:
+            return await fn(target, client)
+    except PrinterError as e:
+        return e.as_dict()
+
+
+@mcp.tool()
+async def get_printer_status() -> dict:
+    """What the 3D printer is doing right now: state (idle, heating, printing, paused, finished,
+    cancelled, error, shutdown, offline), nozzle and bed temperatures with their targets, the current
+    job (file, progress, layer, time elapsed and left, and what the time left is based on), and any
+    problems the printer reports, each in the printer's own words with a plain-English hint for
+    common ones. Relay `headline` as-is. Never invent a cause the printer did not report.
+
+    Finds the printer from OrcaSlicer's active printer profile (or ORCA_PRINTER_URL), so it needs no
+    extra setup once the printer is connected in OrcaSlicer. Klipper (Moonraker) printers report the
+    most; OctoPrint reports basic status. Read-only: it never sends commands to the printer."""
+    return await _with_printer(lambda t, c: take_snapshot(t, c))
+
+
 # --- Tool annotations (title + read-only/destructive hints) -----------------
 # The Claude connectors directory requires every tool to carry a title and the
 # applicable readOnlyHint / destructiveHint. Kept as one table so completeness
@@ -1244,7 +1282,14 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "edit_preset": ("Edit preset (overwrites stored settings)", False, True),
     "delete_object": ("Delete object from plate", False, True),
     "delete_preset": ("Delete preset", False, True),
+    "get_printer_status": ("Get printer status", True, False),
 }
+
+
+# Tools that reach outside OrcaSlicer (the printer on the network), and tools that are safe to repeat
+# although they write local state.
+_OPEN_WORLD_TOOLS = frozenset({"get_printer_status", "wait_for_printer", "list_print_history", "check_printer_match"})
+_IDEMPOTENT_TOOLS = frozenset({"list_print_history"})
 
 
 def _apply_tool_annotations() -> None:
@@ -1257,6 +1302,8 @@ def _apply_tool_annotations() -> None:
             title=title,
             readOnlyHint=read_only,
             destructiveHint=None if read_only else destructive,
+            idempotentHint=True if name in _IDEMPOTENT_TOOLS else None,
+            openWorldHint=True if name in _OPEN_WORLD_TOOLS else None,
         )
 
 

@@ -28,8 +28,8 @@ class PrinterError(Exception):
 def auth_error(service: str, key_set: bool, *, basic_auth: bool = False) -> PrinterError:
     if basic_auth:
         return PrinterError("auth_rejected", f"{service} refused the user name and password in the printer address.",
-                            hint="Check the user name and password in ORCA_PRINTER_URL or in the printer profile's "
-                                 "address in OrcaSlicer (special characters must be percent-encoded).")
+                            hint="Check the user name and password in ORCA_PRINTER_URL "
+                                 "(special characters must be percent-encoded).")
     if key_set:
         return PrinterError("auth_rejected", f"{service} refused the API key in ORCA_PRINTER_API_KEY.",
                             hint="Check the key in the printer's web interface and update ORCA_PRINTER_API_KEY.")

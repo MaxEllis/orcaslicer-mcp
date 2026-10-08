@@ -82,6 +82,7 @@ def test_basic_auth_refusal_wording_never_echoes_credentials():
     e = auth_error("OctoPrint", key_set=False, basic_auth=True)
     assert e.code == "auth_rejected"
     assert e.message == "OctoPrint refused the user name and password in the printer address."
-    assert "ORCA_PRINTER_URL" in e.hint and "percent-encoded" in e.hint
+    assert e.hint == "Check the user name and password in ORCA_PRINTER_URL (special characters must be percent-encoded)."
+    assert "profile" not in e.hint  # credentials in OrcaSlicer's own address are redacted and never read
     text = e.message + " " + e.hint + json.dumps(e.as_dict())
     assert "—" not in text and "–" not in text

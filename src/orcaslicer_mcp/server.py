@@ -1064,31 +1064,42 @@ def _unique_gcode_path(out_dir: Path, fname: str) -> tuple[Path, str]:
 
 
 def _gcode_base_dir() -> Path:
-    """Where save_gcode writes: PRINT_OUTCOMES_DIR if set, else the shared print-outcomes
-    folder if it already exists (so recall_prints/klipper-mcp find it), else
-    ~/.orcaslicer-mcp (the folder `remember` already owns) when no shared store exists yet."""
-    shared = _outcomes.store_dir()
-    if os.environ.get("PRINT_OUTCOMES_DIR") or shared.exists():
-        return shared
+    """Where save_gcode writes the G-code file: PRINT_OUTCOMES_DIR if set (whitespace counts as unset),
+    else the shared print-outcomes folder if it already exists (klipper-mcp's start_print finds files
+    there), else ~/.orcaslicer-mcp (the folder `remember` already owns). The outcome store itself lives
+    at outcomes.store_dir(), which defaults to ~/.orcaslicer-mcp/outcomes."""
+    if os.environ.get("PRINT_OUTCOMES_DIR", "").strip() or _outcomes.LEGACY_DIR.exists():
+        return _outcomes.store_dir()
     return Path.home() / ".orcaslicer-mcp"
 
 
 @mcp.tool()
 async def save_gcode(filename: str | None = None) -> dict:
-    """Save the last successful slice's G-code and record the slice (model, geometry, full
-    settings snapshot) under that filename, so that when klipper-mcp later prints this exact
-    file the real outcome joins back to these settings. Returns the saved path; hand it to
-    klipper-mcp's start_print. Default filename: <object>_<timestamp>.gcode. Never overwrites
-    an existing file — a name collision gets a -2, -3, ... suffix. Writes into a gcode folder
-    under PRINT_OUTCOMES_DIR if set, else under the shared print-outcomes folder
-    (~/projects/_shared/print-outcomes) if it already exists, else under ~/.orcaslicer-mcp;
-    the gcode folder itself is created if missing. If the shared outcome store is not present,
-    or the store write fails, the file is still saved and outcome_recorded is False."""
+    """Save the last successful slice's G-code and record the slice (model, geometry, full settings
+    snapshot, and OrcaSlicer's time and filament estimates) in the local outcome store under that
+    filename. When that file is printed, list_print_history (or klipper-mcp's recorder) matches the
+    finished job by filename, so the real result joins back to these settings. Returns the saved
+    path; hand it to klipper-mcp's start_print. Default filename: <object>_<timestamp>.gcode. Never
+    overwrites an existing file: a name collision gets a -2, -3, ... suffix. Writes into a gcode
+    folder under PRINT_OUTCOMES_DIR if set, else under the shared print-outcomes folder
+    (~/projects/_shared/print-outcomes) if it already exists, else under ~/.orcaslicer-mcp; the folder
+    is created if missing. If the store write fails, the file is still saved and outcome_recorded is
+    False."""
     try:
         async with _client() as c:
             data = await c.get_gcode()
             objs = (await c.get_objects()).get("objects") or []
             cfg = await c.get_config(None)
+            stats: dict = {}
+            printer_name = None
+            try:
+                stats = (await c.slice_status()).get("stats") or {}
+            except ApiError:
+                pass  # the estimate is nice to have; the file still saves without it
+            try:
+                printer_name = ((await c.get_status()).get("presets") or {}).get("printer")
+            except ApiError:
+                pass
     except Conflict:
         return {"error": "not_sliced"}
     except ApiError as e:
@@ -1104,11 +1115,13 @@ async def save_gcode(filename: str | None = None) -> dict:
         return {"error": "write_failed", "detail": str(e), "path": str(path)}
     row_id = None
     outcome_error = None
-    if _outcomes.is_available():
-        try:
-            row_id = _outcomes.record_slice(fname, model_name, _outcomes.geometry_hash_for(objs), cfg)
-        except sqlite3.Error as e:
-            outcome_error = str(e)
+    try:
+        row_id = _outcomes.record_slice(
+            fname, model_name, _outcomes.geometry_hash_for(objs), cfg,
+            printer_id=os.environ.get("ORCA_PRINTER_ID", "").strip() or printer_name or "unknown",
+            est_time_s=stats.get("estimated_time_seconds"), est_filament_g=stats.get("filament_used_g"))
+    except (sqlite3.Error, OSError) as e:
+        outcome_error = str(e)
     result = {"path": str(path), "filename": fname, "bytes": len(data), "model_name": model_name,
               "outcome_recorded": row_id is not None, "outcome_row_id": row_id}
     if outcome_error is not None:
@@ -1141,7 +1154,11 @@ async def recall_prints(model_name: str | None = None, limit: int = 5) -> dict:
     (or by model_name if given / the slicer is offline), returning each past print's result
     (success/cancelled/error), your recorded verdict (e.g. 'warped'), and the settings it was sliced
     with. Call this BEFORE slicing and tell the user anything relevant (a past warp, a failed layer
-    height). Read-only. Returns available=false and nothing else when no outcome store exists.
+    height). Each row also carries failure_reason (the printer's own words, when known) and OrcaSlicer's
+    estimates (est_time_s, est_filament_g). duration_s is the real job time; filament_g comes from
+    the G-code file's own estimate, because printers don't report grams. Call list_print_history
+    first to pull in recent results. Read-only. Returns available=false and nothing else when no
+    outcome store exists yet.
     If neither geometry nor name matches, it returns the most recent prints of ANY model with
     matched_by='recent'; never attribute those to the current model."""
     if not _outcomes.is_available():

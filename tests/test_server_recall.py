@@ -56,3 +56,16 @@ async def test_recent_when_nothing_to_match_on(monkeypatch, tmp_path):
     out = await srv.recall_prints(limit=3)
     assert out["matched_by"] == "recent" and out["prints"][0]["result"] == "cancelled"
     assert out["summary"] == "1 recent print: 1 cancelled"
+
+
+@respx.mock
+async def test_rows_carry_failure_reason_and_estimates(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    respx.get(f"{B}/api/v1/objects").mock(return_value=httpx.Response(200, json=OBJS))
+    h = oc.geometry_hash_for(OBJS["objects"])
+    oc.record_slice("c3.gcode", "cube20", h, {"layer_height": "0.5"}, sliced_at=1.0, est_time_s=600, est_filament_g=6.0)
+    oc.record_outcome({"job_id": "9", "filename": "c3.gcode", "status": "error", "end_time": 2.0,
+                       "total_duration": 120.0}, failure_reason="Must home axis first")
+    out = await srv.recall_prints()
+    p = out["prints"][0]
+    assert p["failure_reason"] == "Must home axis first" and p["est_time_s"] == 600 and p["duration_s"] == 120.0

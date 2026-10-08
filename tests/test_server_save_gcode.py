@@ -6,20 +6,27 @@ B = "http://x:13130"
 OBJS = {"count": 1, "objects": [{"id": 1, "index": 0, "name": "cube20", "size_mm": [20, 20, 20], "instances": 1,
                                  "transform": {"offset": [0, 0, 10], "rotation": [0, 0, 0], "scale": [1, 1, 1]}}]}
 CFG = {"config": {"layer_height": "0.5", "fan_max_speed": "60", "unrelated": "x"}}
+STATUS = {"presets": {"printer": "Test Printer", "print": "p", "filaments": ["f"]}}
+SLICE = {"state": "done", "percent": 100, "stats": {"estimated_time_seconds": 1234.0, "filament_used_g": 5.6}}
 
 
-def _env(m, tmp_path):
-    m.setenv("ORCA_API_TOKEN", "tok"); m.setenv("ORCA_API_URL", B)
-    m.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+def _routes(slice_resp=None):
     respx.get(f"{B}/api/v1/gcode").mock(return_value=httpx.Response(200, content=b"G28\nG1 X1\n"))
     respx.get(f"{B}/api/v1/objects").mock(return_value=httpx.Response(200, json=OBJS))
     respx.get(url__regex=rf"{B}/api/v1/config.*").mock(return_value=httpx.Response(200, json=CFG))
+    respx.get(f"{B}/api/v1/slice/status").mock(return_value=slice_resp or httpx.Response(200, json=SLICE))
+    respx.get(f"{B}/api/v1/status").mock(return_value=httpx.Response(200, json=STATUS))
+
+
+def _env(m, tmp_path, slice_resp=None):
+    m.setenv("ORCA_API_TOKEN", "tok"); m.setenv("ORCA_API_URL", B)
+    m.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    _routes(slice_resp)
 
 
 @respx.mock
-async def test_save_gcode_writes_file_and_records_slice_when_store_present(monkeypatch, tmp_path):
+async def test_save_gcode_writes_file_and_records_slice(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
-    oc.connect(create=True).close()
     out = await srv.save_gcode("cube_test.gcode")
     assert out["filename"] == "cube_test.gcode" and out["bytes"] == 10
     assert (tmp_path / "gcode" / "cube_test.gcode").read_bytes() == b"G28\nG1 X1\n"
@@ -31,12 +38,31 @@ async def test_save_gcode_writes_file_and_records_slice_when_store_present(monke
 
 
 @respx.mock
-async def test_save_gcode_without_store_still_saves_but_does_not_record(monkeypatch, tmp_path):
+async def test_save_gcode_creates_the_store_and_records_estimates(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
-    out = await srv.save_gcode("a.gcode")
-    assert out["outcome_recorded"] is False and out["outcome_row_id"] is None
-    assert (tmp_path / "gcode" / "a.gcode").exists()
     assert oc.is_available() is False
+    out = await srv.save_gcode("a.gcode")
+    assert (tmp_path / "gcode" / "a.gcode").exists()
+    assert out["outcome_recorded"] is True and oc.is_available() is True
+    row = oc.get(out["outcome_row_id"])
+    assert row["est_time_s"] == 1234.0 and row["est_filament_g"] == 5.6
+    assert row["printer_id"] == "Test Printer"
+
+
+@respx.mock
+async def test_save_gcode_uses_orca_printer_id(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ORCA_PRINTER_ID", "bench")
+    out = await srv.save_gcode("b.gcode")
+    assert oc.get(out["outcome_row_id"])["printer_id"] == "bench"
+
+
+@respx.mock
+async def test_save_gcode_still_records_without_an_estimate(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path, slice_resp=httpx.Response(500, json={"error": "boom"}))
+    out = await srv.save_gcode("c.gcode")
+    row = oc.get(out["outcome_row_id"])
+    assert out["outcome_recorded"] is True and row["est_time_s"] is None and row["printer_id"] == "Test Printer"
 
 
 @respx.mock
@@ -80,24 +106,43 @@ async def test_save_gcode_degrades_when_store_write_fails(monkeypatch, tmp_path)
 
 @respx.mock
 async def test_save_gcode_falls_back_to_home_dotfolder_when_no_shared_store(monkeypatch, tmp_path):
-    # outcomes.DEFAULT_DIR is a module-level constant fixed at import time, not re-read from
-    # HOME per call - patch it directly (rather than relying on HOME alone) so this test can't
-    # ever land on the real shared store regardless of import order in the test session.
+    # The module path constants are fixed at import time, so patch them (not HOME alone): this test
+    # can then never land on a real store whatever the import order.
     monkeypatch.delenv("PRINT_OUTCOMES_DIR", raising=False)
     fake_shared = tmp_path / "would_be_shared" / "print-outcomes"
-    monkeypatch.setattr(oc, "DEFAULT_DIR", fake_shared)
+    monkeypatch.setattr(oc, "LEGACY_DIR", fake_shared)
+    monkeypatch.setattr(oc, "DEFAULT_DIR", tmp_path / ".orcaslicer-mcp" / "outcomes")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("ORCA_API_TOKEN", "tok"); monkeypatch.setenv("ORCA_API_URL", B)
-    respx.get(f"{B}/api/v1/gcode").mock(return_value=httpx.Response(200, content=b"G28\nG1 X1\n"))
-    respx.get(f"{B}/api/v1/objects").mock(return_value=httpx.Response(200, json=OBJS))
-    respx.get(url__regex=rf"{B}/api/v1/config.*").mock(return_value=httpx.Response(200, json=CFG))
-    assert not fake_shared.exists()
+    _routes()
 
     out = await srv.save_gcode("a.gcode")
 
-    assert out["outcome_recorded"] is False
+    assert out["outcome_recorded"] is True
     assert (tmp_path / ".orcaslicer-mcp" / "gcode" / "a.gcode").exists()
+    assert (tmp_path / ".orcaslicer-mcp" / "outcomes" / "outcomes.db").exists()
     assert not fake_shared.exists()
+
+
+@respx.mock
+async def test_whitespace_only_outcomes_dir_counts_as_unset(monkeypatch, tmp_path):
+    # A whitespace-only PRINT_OUTCOMES_DIR is unset (outcomes.store_dir() strips it too). chdir so a
+    # regression that used the raw value as a relative path lands inside tmp_path and is caught.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", "   ")
+    fake_shared = tmp_path / "would_be_shared" / "print-outcomes"
+    monkeypatch.setattr(oc, "LEGACY_DIR", fake_shared)
+    monkeypatch.setattr(oc, "DEFAULT_DIR", tmp_path / ".orcaslicer-mcp" / "outcomes")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("ORCA_API_TOKEN", "tok"); monkeypatch.setenv("ORCA_API_URL", B)
+    _routes()
+
+    out = await srv.save_gcode("w.gcode")
+
+    assert out["outcome_recorded"] is True
+    assert (tmp_path / ".orcaslicer-mcp" / "gcode" / "w.gcode").exists()
+    assert (tmp_path / ".orcaslicer-mcp" / "outcomes" / "outcomes.db").exists()
+    assert not (tmp_path / "   ").exists()
 
 
 @respx.mock
@@ -105,16 +150,15 @@ async def test_save_gcode_uses_shared_store_when_it_already_exists(monkeypatch, 
     monkeypatch.delenv("PRINT_OUTCOMES_DIR", raising=False)
     fake_shared = tmp_path / "would_be_shared" / "print-outcomes"
     fake_shared.mkdir(parents=True)
-    monkeypatch.setattr(oc, "DEFAULT_DIR", fake_shared)
+    monkeypatch.setattr(oc, "LEGACY_DIR", fake_shared)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("ORCA_API_TOKEN", "tok"); monkeypatch.setenv("ORCA_API_URL", B)
-    respx.get(f"{B}/api/v1/gcode").mock(return_value=httpx.Response(200, content=b"G28\nG1 X1\n"))
-    respx.get(f"{B}/api/v1/objects").mock(return_value=httpx.Response(200, json=OBJS))
-    respx.get(url__regex=rf"{B}/api/v1/config.*").mock(return_value=httpx.Response(200, json=CFG))
+    _routes()
 
     out = await srv.save_gcode("a.gcode")
 
     assert (fake_shared / "gcode" / "a.gcode").exists()
+    assert (fake_shared / "outcomes.db").exists() and out["outcome_recorded"] is True
     assert not (tmp_path / ".orcaslicer-mcp").exists()
 
 

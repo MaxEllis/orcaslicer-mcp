@@ -76,7 +76,50 @@ def test_missing_printer_settings_are_unknown_not_errors():
     r = m.compare(CFG, {})
     statuses = {c["check"]: c["status"] for c in r["checks"]}
     assert [name for name, s in statuses.items() if s != "unknown"] == ["firmware retraction"]  # off needs no Klipper data
-    assert r["headline"] == "The profile matches the printer on 1 of 7 checks. 6 couldn't be checked."
+    assert r["headline"] == "No mismatches found: 1 check passed, 6 couldn't be checked."
+
+
+def test_acceleration_warning_says_the_printer_accelerates_harder():
+    c = by_check(m.compare({**CFG, "travel_acceleration": "8000"}, SETTINGS))["acceleration"]
+    assert c["status"] == "warn"
+    assert "accelerate harder" in c["why"] and "slows" not in c["why"]
+    assert "max_accel is 5000 mm/s²" in c["why"] and "(travel_acceleration)" in c["why"]
+
+
+def test_speed_warning_says_klipper_slows_the_moves_unless_the_gcode_raises_the_limit():
+    c = by_check(m.compare({**CFG, "travel_speed": "500"}, SETTINGS))["speed"]
+    assert c["status"] == "warn"
+    assert "Klipper caps speed at 300 mm/s" in c["why"] and "SET_VELOCITY_LIMIT" in c["why"]
+    assert "slows those moves down" in c["why"]
+
+
+def test_firmware_retraction_unknown_without_klipper_settings():
+    assert by_check(m.compare({**CFG, "use_firmware_retraction": "1"}, {}))["firmware retraction"]["status"] == "unknown"
+
+
+def test_firmware_retraction_unknown_when_the_profile_has_no_length():
+    s = {**SETTINGS, "firmware_retraction": {"retract_length": 0.3}}
+    cfg = {k: v for k, v in {**CFG, "use_firmware_retraction": "1"}.items() if k != "retraction_length"}
+    assert by_check(m.compare(cfg, s))["firmware retraction"]["status"] == "unknown"
+
+
+def test_firmware_retraction_unknown_when_the_klipper_section_has_no_length():
+    s = {**SETTINGS, "firmware_retraction": {}}
+    assert by_check(m.compare({**CFG, "use_firmware_retraction": "1"}, s))["firmware retraction"]["status"] == "unknown"
+
+
+def test_nothing_could_be_checked_says_so():
+    for cfg, settings in (({}, {}), ({**CFG, "use_firmware_retraction": "1"}, {})):
+        r = m.compare(cfg, settings)
+        assert all(c["status"] == "unknown" for c in r["checks"]), r
+        assert r["headline"] == "Nothing could be checked: the profile or the printer's settings weren't available."
+
+
+def test_no_mismatches_headline_counts_passed_and_unknown():
+    s = {"printer": SETTINGS["printer"], "extruder": SETTINGS["extruder"]}  # no steppers, no heater_bed
+    r = m.compare(CFG, s)
+    assert [c["status"] for c in r["checks"]].count("unknown") == 2
+    assert r["headline"] == "No mismatches found: 5 checks passed, 2 couldn't be checked."
 
 
 @pytest.mark.parametrize("value,expected", [("220,230", "warn"), ("", "unknown"), ("nil", "unknown"), (None, "unknown")])
@@ -116,3 +159,32 @@ async def test_check_printer_match_needs_orcaslicer(monkeypatch):
     printer_routes()
     out = await srv.check_printer_match()
     assert out["error"] == "orca_unreachable"
+    assert out["message"] == "check_printer_match couldn't read the active profile from OrcaSlicer."
+    assert out["hint"] == ("Check ORCA_API_TOKEN in this MCP server's settings: it must match the token on the "
+                           "Remote API page of OrcaSlicer's Preferences.")
+    assert "ORCA_API_TOKEN is required" in out["detail"]
+
+
+@respx.mock
+async def test_check_printer_match_fork_unreachable_says_to_start_it(monkeypatch):
+    monkeypatch.setenv("ORCA_PRINTER_URL", P)
+    monkeypatch.setenv("ORCA_API_TOKEN", "tok")
+    monkeypatch.setenv("ORCA_API_URL", F)
+    printer_routes()
+    respx.get(url__regex=rf"{F}/api/v1/config.*").mock(side_effect=httpx.ConnectError("refused"))
+    out = await srv.check_printer_match()
+    assert out["error"] == "orca_unreachable"
+    assert out["hint"] == "Start OrcaSlicer (MCP build) with the Remote API enabled."
+    assert "refused" in out["detail"]
+
+
+@respx.mock
+async def test_check_printer_match_rejected_token_says_to_check_the_token(monkeypatch):
+    monkeypatch.setenv("ORCA_PRINTER_URL", P)
+    monkeypatch.setenv("ORCA_API_TOKEN", "wrong")
+    monkeypatch.setenv("ORCA_API_URL", F)
+    printer_routes()
+    respx.get(url__regex=rf"{F}/api/v1/config.*").mock(return_value=httpx.Response(401, json={"error": "unauthorized"}))
+    out = await srv.check_printer_match()
+    assert out["error"] == "orca_unreachable"
+    assert out["hint"].startswith("Check ORCA_API_TOKEN")

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlunsplit
 
-from ..errors import ApiError
+from ..errors import ApiError, ConfigError, Unauthorized
 from .errors import PrinterError
 from .moonraker import MoonrakerClient
 from .octoprint import OctoPrintClient
@@ -105,6 +105,15 @@ def printer_id_for(target: PrinterTarget) -> str:
 
 SET_URL_HINT = ("set ORCA_PRINTER_URL in this MCP server's settings to an address that works from here, "
                 "for example the printer's IP address.")
+TOKEN_HINT = ("Check ORCA_API_TOKEN in this MCP server's settings: it must match the token on the Remote API "
+              "page of OrcaSlicer's Preferences.")
+
+
+def token_problem(e: ApiError) -> bool:
+    """True when OrcaSlicer refused or lacks the token (the fix is the token), False when it is simply not
+    reachable (the fix is to start it)."""
+    return isinstance(e, (ConfigError, Unauthorized))
+
 
 _PROFILE_ADDRESS_HINT = ("In OrcaSlicer, open the connection settings next to the printer and enter "
                          "its address, or " + SET_URL_HINT)
@@ -192,7 +201,8 @@ async def resolve_target(fork_factory) -> PrinterTarget:
             return remembered
         raise PrinterError("orca_unreachable",
                            "Couldn't read the printer profile from OrcaSlicer, and no printer has answered before.",
-                           hint="Start OrcaSlicer (MCP build) with the Remote API enabled, or " + SET_URL_HINT,
+                           hint=(TOKEN_HINT if token_problem(e) else
+                                 "Start OrcaSlicer (MCP build) with the Remote API enabled, or " + SET_URL_HINT),
                            detail=str(e)) from e
     cfg = (preset or {}).get("config") or {}
     host = str(cfg.get("print_host") or "").strip()

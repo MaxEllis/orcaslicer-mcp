@@ -109,6 +109,24 @@ def _highest(cfg: dict, keys) -> tuple[str | None, float | None]:
     return best_key, best
 
 
+def _accel_warning(best: float, key: str, lim: float, unit: str) -> str:
+    # Klipper accepts a higher acceleration when the G-code asks for it (M204, SET_VELOCITY_LIMIT), so
+    # the risk is the printer accelerating harder than its configured limit, not slower prints.
+    return (f"The profile asks for up to {best:g} {unit} ({key}) but Klipper's max_accel is {lim:g} {unit}. "
+            "Klipper accepts the higher value when the G-code sets it (M204 or SET_VELOCITY_LIMIT), so the "
+            "printer will accelerate harder than its configured limit. Check it can take that, or lower the "
+            "profile's acceleration.")
+
+
+def _speed_warning(best: float, key: str, lim: float, unit: str) -> str:
+    return (f"Klipper caps speed at {lim:g} {unit} but the profile asks for up to {best:g} {unit} ({key}). "
+            "Unless the G-code raises the limit with SET_VELOCITY_LIMIT, Klipper slows those moves down, "
+            "so prints take longer than OrcaSlicer estimates.")
+
+
+_LIMIT_WARNINGS = {"acceleration": _accel_warning, "speed": _speed_warning}
+
+
 def check_limit(name: str, cfg: dict, keys, printer_value, unit: str) -> dict:
     key, best = _highest(cfg, keys)
     lim = floats(printer_value)
@@ -116,10 +134,7 @@ def check_limit(name: str, cfg: dict, keys, printer_value, unit: str) -> dict:
         return _unknown(name)
     profile = {"highest": best, "setting": key}
     if best > lim[0] + 1:
-        return _check(name, "warn", profile, lim[0],
-                      f"Klipper caps {name} at {lim[0]:g} {unit} but the profile asks for up to {best:g} {unit} "
-                      f"({key}). Klipper slows those moves down quietly, so prints take longer than OrcaSlicer "
-                      "estimates.")
+        return _check(name, "warn", profile, lim[0], _LIMIT_WARNINGS[name](best, key, lim[0], unit))
     return _check(name, "ok", profile, lim[0], f"Every {name} in the profile is within Klipper's {lim[0]:g} {unit}.")
 
 
@@ -152,18 +167,22 @@ def check_firmware_retraction(cfg: dict, settings: dict) -> dict:
     fw = floats(cfg.get("use_firmware_retraction"))
     if not fw:
         return _unknown(name)
-    section = settings.get("firmware_retraction")
+    section = settings.get("firmware_retraction")  # presence is the key, so an empty section still counts
     if not fw[0]:
-        return _check(name, "ok", "off", "present" if section else "absent", "OrcaSlicer does the retraction itself.")
-    if not section:
+        return _check(name, "ok", "off", "absent" if section is None else "present",
+                      "OrcaSlicer does the retraction itself.")
+    if "printer" not in settings:  # Klipper's settings were never read, so a missing section proves nothing
+        return _unknown(name)
+    if section is None:
         return _check(name, "warn", "on", "absent", "OrcaSlicer sends G10/G11 for retraction but Klipper has no "
                                                     "[firmware_retraction] section, so those commands fail.")
     p, k = floats(cfg.get("retraction_length")), floats(section.get("retract_length"))
-    if p and k and abs(p[0] - k[0]) > 0.01:
+    if not p or not k:
+        return _unknown(name)
+    if abs(p[0] - k[0]) > 0.01:
         return _check(name, "warn", p[0], k[0], f"Retraction is done by Klipper, so its {k[0]:g} mm is used, not "
                                                 f"the profile's {p[0]:g} mm.")
-    return _check(name, "ok", p[0] if p else None, k[0] if k else None,
-                  "Klipper does the retraction with the same length as the profile.")
+    return _check(name, "ok", p[0], k[0], "Klipper does the retraction with the same length as the profile.")
 
 
 def compare(cfg: dict, settings: dict) -> dict:
@@ -179,10 +198,15 @@ def compare(cfg: dict, settings: dict) -> dict:
     ]
     warns = [c["check"] for c in checks if c["status"] == "warn"]
     unknown = sum(1 for c in checks if c["status"] == "unknown")
+    ok = sum(1 for c in checks if c["status"] == "ok")
     if warns:
         head = f"{len(warns)} warning{'s' if len(warns) != 1 else ''}: {', '.join(warns)}."
+        if unknown:
+            head += f" {unknown} couldn't be checked."
+    elif unknown == len(checks):
+        head = "Nothing could be checked: the profile or the printer's settings weren't available."
+    elif unknown:
+        head = f"No mismatches found: {ok} check{'s' if ok != 1 else ''} passed, {unknown} couldn't be checked."
     else:
-        head = f"The profile matches the printer on {len(checks) - unknown} of {len(checks)} checks."
-    if unknown:
-        head += f" {unknown} couldn't be checked."
+        head = f"The profile matches the printer on {len(checks)} of {len(checks)} checks."
     return {"headline": head, "checks": checks}

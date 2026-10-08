@@ -1303,8 +1303,10 @@ async def check_printer_match() -> dict:
                 cfg = await fork.get_config(list(_pmatch.PROFILE_KEYS))
         except ApiError as e:
             raise PrinterError("orca_unreachable",
-                               "check_printer_match needs OrcaSlicer running to read the active profile.",
-                               hint="Start OrcaSlicer (MCP build) with the Remote API enabled.") from e
+                               "check_printer_match couldn't read the active profile from OrcaSlicer.",
+                               hint=(_ptarget.TOKEN_HINT if _ptarget.token_problem(e)
+                                     else "Start OrcaSlicer (MCP build) with the Remote API enabled."),
+                               detail=str(e)) from e
         out = _pmatch.compare(cfg, settings)
         out["printer"] = t.public()
         return out

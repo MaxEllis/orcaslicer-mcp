@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from orcaslicer_mcp.errors import ConfigError, NotReachable
+from orcaslicer_mcp.errors import ConfigError, NotReachable, Unauthorized
 from orcaslicer_mcp.printer import http as phttp
 from orcaslicer_mcp.printer import target as t
 from orcaslicer_mcp.printer.errors import PrinterError
@@ -108,6 +108,20 @@ async def test_orca_down_and_nothing_remembered():
     with pytest.raises(PrinterError) as e:
         await t.resolve_target(no_token)
     assert e.value.code == "orca_unreachable"
+
+
+@pytest.mark.parametrize("exc,hint", [
+    (ConfigError("ORCA_API_TOKEN is required (the OrcaSlicer Remote API token)"), t.TOKEN_HINT),
+    (Unauthorized("unauthorized (check ORCA_API_TOKEN)"), t.TOKEN_HINT),
+    (NotReachable("OrcaSlicer not reachable at http://127.0.0.1:13130"),
+     "Start OrcaSlicer (MCP build) with the Remote API enabled, or " + t.SET_URL_HINT),
+])
+async def test_orca_unreachable_with_nothing_remembered_names_the_real_fix(exc, hint):
+    with pytest.raises(PrinterError) as e:
+        await t.resolve_target(factory(FakeFork(exc=exc)))
+    assert e.value.code == "orca_unreachable"
+    assert e.value.hint == hint
+    assert e.value.details["detail"] == str(exc)
 
 
 async def test_probe_moonraker_at_the_given_address():

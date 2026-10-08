@@ -35,6 +35,22 @@
           "name": "ORCA_MCP_ALLOW_KEYS",
           "description": "Optional comma-separated config keys the MCP may change even though they run code or drive the printer directly (post_process, *_gcode, print host settings). Wildcards allowed. Blank by default.",
           "isRequired": false
+        },
+        {
+          "name": "ORCA_PRINTER_URL",
+          "description": "Optional printer address; by default the address in OrcaSlicer's active printer profile is used. A user name and password can be part of it (http://user:password@192.0.2.10); percent-encode special characters in them (@ as %40).",
+          "isRequired": false
+        },
+        {
+          "name": "ORCA_PRINTER_API_KEY",
+          "description": "Optional API key for printers that need one (OctoPrint, or Moonraker with authorization).",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "ORCA_PRINTER_ID",
+          "description": "Optional printer name for the outcome store; defaults to the printer profile's name.",
+          "isRequired": false
         }
       ]
     }

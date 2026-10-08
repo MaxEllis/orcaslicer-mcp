@@ -2,7 +2,7 @@
   "identifier": "maxellis-orcaslicer-mcp",
   "version": "0.1.14",
   "name": "OrcaSlicer MCP",
-  "description": "Work a running OrcaSlicer with AI: load models, arrange the plate, tune settings, slice, and understand the result through slice breakdowns, setting explanations, and physics checks. Talks only to OrcaSlicer on localhost or a host you configure; no cloud calls from this server.",
+  "description": "Work a running OrcaSlicer with AI: load models, arrange the plate, tune settings, slice, and understand the result through slice breakdowns, setting explanations, and physics checks. Talks to OrcaSlicer on localhost or a host you configure and, for the printer tools, makes read-only requests to your printer; no cloud calls from this server.",
   "category": "developer",
   "tags": [
     "mcp",
@@ -235,7 +235,23 @@
     },
     {
       "name": "recall_prints",
-      "description": "How past prints of the current model actually turned out: result, your verdict, and the settings used. Inert without the shared outcome store."
+      "description": "How past prints of the current model actually turned out: result, failure reason, your verdict, and the settings used. Empty until save_gcode or list_print_history has created the local outcome store."
+    },
+    {
+      "name": "get_printer_status",
+      "description": "What the printer is doing: state, temperatures, job progress and time left, and problems with plain-English hints. Read-only."
+    },
+    {
+      "name": "wait_for_printer",
+      "description": "Wait until the printer has heated, started printing, finished the first layer, or finished; returns early on a fault."
+    },
+    {
+      "name": "list_print_history",
+      "description": "Recent print results with failure reasons and time against OrcaSlicer's estimate; copies them into the local outcome store."
+    },
+    {
+      "name": "check_printer_match",
+      "description": "Compare the active OrcaSlicer profile with the printer's own Klipper settings: nozzle, bed size, speed and acceleration limits, temperatures, firmware retraction."
     }
   ],
   "prompts": [

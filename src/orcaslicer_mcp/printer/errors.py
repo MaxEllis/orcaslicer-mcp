@@ -1,0 +1,34 @@
+"""Errors the printer tools hand back to the model: a stable code, a plain message and a hint."""
+from __future__ import annotations
+
+CODES = frozenset({
+    "not_configured", "unsupported_connection", "not_reachable", "auth_required",
+    "auth_rejected", "orca_unreachable", "unsupported_for_connection", "protocol_error",
+})
+
+
+class PrinterError(Exception):
+    def __init__(self, code: str, message: str, hint: str | None = None, **details):
+        if code not in CODES:
+            raise ValueError(f"unknown printer error code: {code}")
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.hint = hint
+        self.details = details
+
+    def as_dict(self) -> dict:
+        out = {"error": self.code, "message": self.message}
+        if self.hint:
+            out["hint"] = self.hint
+        out.update(self.details)
+        return out
+
+
+def auth_error(service: str, key_set: bool) -> PrinterError:
+    if key_set:
+        return PrinterError("auth_rejected", f"{service} refused the API key in ORCA_PRINTER_API_KEY.",
+                            hint="Check the key in the printer's web interface and update ORCA_PRINTER_API_KEY.")
+    return PrinterError("auth_required", f"{service} needs an API key.",
+                        hint="Create an API key in the printer's web interface and set it as "
+                             "ORCA_PRINTER_API_KEY in this MCP server's settings.")

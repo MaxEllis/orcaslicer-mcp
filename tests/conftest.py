@@ -28,3 +28,20 @@ def _isolate_outcome_store(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(outcomes, "LEGACY_DIR", base / "legacy-absent")
     monkeypatch.setattr(outcomes, "DEFAULT_DIR", base / "default")
     monkeypatch.delenv("PRINT_OUTCOMES_DIR", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_printer_state(monkeypatch, tmp_path_factory):
+    """The printer tools remember the last printer on disk and cache probes and file metadata in
+    memory. No test may read or write the real file or inherit another test's caches or settings."""
+    import importlib
+    from orcaslicer_mcp.printer import target
+    monkeypatch.setattr(target, "REMEMBERED_PATH", tmp_path_factory.mktemp("printer") / "printer.json")
+    for name in ("ORCA_PRINTER_URL", "ORCA_PRINTER_API_KEY", "ORCA_PRINTER_ID"):
+        monkeypatch.delenv(name, raising=False)
+    for module, attr in (("orcaslicer_mcp.printer.target", "_PROBE_CACHE"),
+                         ("orcaslicer_mcp.printer.snapshot", "_META_CACHE")):
+        try:
+            getattr(importlib.import_module(module), attr).clear()
+        except (ImportError, AttributeError):
+            continue  # that module or cache arrives in a later task

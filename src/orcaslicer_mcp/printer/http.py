@@ -15,6 +15,7 @@ class ReadClient:
     def __init__(self, base_url: str, api_key: str | None = None, auth: tuple[str, str] | None = None):
         self.base_url = base_url.rstrip("/")
         self._key_set = bool(api_key)
+        self._basic_set = auth is not None
         self._http = httpx.AsyncClient(
             timeout=httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
             headers={"X-Api-Key": api_key} if api_key else {}, auth=auth)
@@ -33,10 +34,12 @@ class ReadClient:
             resp = await self._http.get(self.base_url + path, params=params)
         except httpx.TransportError as e:
             raise PrinterError("not_reachable", f"{self.service} did not answer at {self.base_url}.") from e
+        except httpx.InvalidURL as e:
+            raise PrinterError("not_configured", f"The printer address {self.base_url} isn't a valid URL.") from e
         if resp.status_code in none_on:
             return None
         if resp.status_code in (401, 403):
-            raise auth_error(self.service, self._key_set)
+            raise auth_error(self.service, self._key_set, basic_auth=self._basic_set and not self._key_set)
         if resp.status_code >= 400:
             raise PrinterError("protocol_error", f"{self.service} answered HTTP {resp.status_code} for {path}.")
         try:

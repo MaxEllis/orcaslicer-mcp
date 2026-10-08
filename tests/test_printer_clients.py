@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import respx
@@ -102,3 +104,42 @@ async def test_octoprint_wrong_key():
             with pytest.raises(PrinterError) as e:
                 await c.identify()
     assert e.value.code == "auth_rejected" and "OctoPrint" in e.value.message
+
+
+@pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.parametrize("call", ["server_info", "identify"])
+async def test_refused_basic_auth_says_so_and_never_echoes_the_login(status, call):
+    with respx.mock:
+        respx.get(f"{P}/server/info").mock(return_value=httpx.Response(status))
+        async with MoonrakerClient(P, auth=("test-user", "test-pass")) as c:
+            with pytest.raises(PrinterError) as e:
+                await getattr(c, call)()
+    assert e.value.code == "auth_rejected"
+    assert "user name and password" in e.value.message
+    assert "API key" not in e.value.message and "ORCA_PRINTER_API_KEY" not in e.value.hint
+    dumped = json.dumps(e.value.as_dict())
+    assert "test-user" not in dumped and "test-pass" not in dumped
+
+
+async def test_refused_api_key_wording_wins_when_both_are_set():
+    with respx.mock:
+        respx.get(f"{P}/server/info").mock(return_value=httpx.Response(401))
+        async with MoonrakerClient(P, api_key="test-key", auth=("test-user", "test-pass")) as c:
+            with pytest.raises(PrinterError) as e:
+                await c.server_info()
+    assert e.value.code == "auth_rejected" and "API key" in e.value.message
+
+
+@pytest.mark.parametrize("bad", ["http://192.0.2.10:abc", "http://[::1"])
+async def test_malformed_address_is_not_configured(bad):
+    with respx.mock:
+        async with MoonrakerClient(bad) as c:
+            with pytest.raises(PrinterError) as e:
+                await c.server_info()
+    assert e.value.code == "not_configured" and bad in e.value.message
+
+
+async def test_malformed_address_identify_is_false_not_a_raw_exception():
+    with respx.mock:
+        async with OctoPrintClient("http://192.0.2.10:abc") as c:
+            assert await c.identify() is False

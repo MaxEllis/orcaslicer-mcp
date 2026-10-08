@@ -76,3 +76,12 @@ def test_error_codes_are_checked_and_serialise():
     assert e.as_dict() == {"error": "not_reachable", "message": "No answer.", "hint": "Switch it on.", "tried": ["a"]}
     assert auth_error("OctoPrint", key_set=False).code == "auth_required"
     assert auth_error("OctoPrint", key_set=True).code == "auth_rejected"
+
+
+def test_basic_auth_refusal_wording_never_echoes_credentials():
+    e = auth_error("OctoPrint", key_set=False, basic_auth=True)
+    assert e.code == "auth_rejected"
+    assert e.message == "OctoPrint refused the user name and password in the printer address."
+    assert "ORCA_PRINTER_URL" in e.hint and "percent-encoded" in e.hint
+    text = e.message + " " + e.hint + json.dumps(e.as_dict())
+    assert "—" not in text and "–" not in text

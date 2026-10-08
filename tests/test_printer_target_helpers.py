@@ -13,6 +13,7 @@ from orcaslicer_mcp.printer.errors import PrinterError, auth_error
     ("192.0.2.10:8080/octo/", "http://192.0.2.10:8080/octo", None),
     ("http://user:secret@192.0.2.10", "http://192.0.2.10", ("user", "secret")),
     ("http://<redacted>@192.0.2.10", "http://192.0.2.10", None),
+    ("http://us%65r:p%40ss@192.0.2.10", "http://192.0.2.10", ("user", "p@ss")),
     ("   ", "", None),
 ])
 def test_normalise_url(raw, url, auth):
@@ -23,6 +24,12 @@ def test_public_view_never_includes_auth():
     tgt = t.PrinterTarget(url="http://192.0.2.10", source="override", auth=("u", "pw"))
     assert set(tgt.public()) == {"profile", "url", "kind", "source", "remembered_at"}
     assert "pw" not in json.dumps(tgt.public())
+
+
+def test_repr_hides_the_password():
+    tgt = t.PrinterTarget(url="http://192.0.2.10", source="override", auth=("user", "pw-secret"))
+    assert "pw-secret" not in repr(tgt)
+    assert "user" not in repr(tgt)
 
 
 @pytest.mark.parametrize("ht", ["prusalink", "duet", "3dprinteros", "PrusaLink"])

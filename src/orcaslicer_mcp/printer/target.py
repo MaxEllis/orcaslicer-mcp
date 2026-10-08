@@ -7,9 +7,9 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from .errors import PrinterError
 
@@ -32,7 +32,7 @@ class PrinterTarget:
     printer_model: str | None = None
     kind: str | None = None               # "klipper" | "octoprint" once a probe answered
     remembered_at: float | None = None
-    auth: tuple[str, str] | None = None   # basic auth from ORCA_PRINTER_URL; never reported
+    auth: tuple[str, str] | None = field(default=None, repr=False)  # basic auth from ORCA_PRINTER_URL; never reported or repr'd
 
     def public(self) -> dict:
         """What the model may see. Never the auth pair."""
@@ -54,7 +54,7 @@ def normalise_url(raw: str) -> tuple[str, tuple[str, str] | None]:
         userinfo, netloc = netloc.rsplit("@", 1)
         if userinfo and "<redacted>" not in userinfo:
             user, _, password = userinfo.partition(":")
-            auth = (user, password)
+            auth = (unquote(user), unquote(password))
     return urlunsplit((parts.scheme, netloc, parts.path.rstrip("/"), "", "")), auth
 
 

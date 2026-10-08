@@ -22,9 +22,11 @@ An offline settings reference ships with the package, carrying the authoritative
 
 Read and write any of roughly 800 OrcaSlicer settings on the live config, for the whole plate or scoped narrower: `get_config`, `set_config`, `find_config_keys`, `set_layer_height`, `set_height_range` for a band of layers, and `set_object_config` for one object's overrides.
 
+On a multi-filament setup, per-filament keys are read merged across every loaded slot but written one preset at a time, and selecting a preset discards unsaved overrides in every group. So make filament edits first and print edits second; [docs/order-of-operations.md](docs/order-of-operations.md) explains why and gives the sequence.
+
 ### Presets
 
-`list_presets`, `select_preset`, `get_preset_config`, `edit_preset`, `save_preset`, `rename_preset`, `delete_preset`.
+`list_presets`, `select_preset`, `get_preset_config`, `edit_preset`, `save_preset`, `rename_preset`, `delete_preset`. `select_preset` discards unsaved overrides in every group, not only the one switched; see [docs/order-of-operations.md](docs/order-of-operations.md).
 
 ### Slicing, and reading the result back
 

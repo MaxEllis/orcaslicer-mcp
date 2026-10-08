@@ -1,17 +1,24 @@
-# VENDORED from klipper-mcp (src/klipper_mcp/outcomes.py). klipper-mcp owns the schema; do not edit here, re-copy.
 """Shared print-outcome store (SQLite, WAL). One row per print job.
 
-klipper-mcp OWNS this schema. orcaslicer-mcp carries a verbatim vendored copy and treats the
-store as optional: if the DB file does not exist, its advisor is a silent no-op. Keep this
-module stdlib-only so the copy has no dependency footprint.
+orcaslicer-mcp OWNS this schema. klipper-mcp carries a verbatim vendored copy (its recorder service
+writes finished jobs here); edit this file in orcaslicer-mcp, then re-copy it. Readers treat the
+store as optional: if the DB file does not exist, recall is a silent no-op. Keep this module
+stdlib-only so the copy has no dependency footprint.
 """
 from __future__ import annotations
 import hashlib, json, os, sqlite3, time
 from contextlib import closing
 from pathlib import Path
 
-SCHEMA_VERSION = 1
-DEFAULT_DIR = Path.home() / "projects" / "_shared" / "print-outcomes"
+SCHEMA_VERSION = 2
+# The original shared store. Still used whenever it exists, so nothing moves on a machine that
+# already has one (klipper-mcp's sandboxed recorder may only write there).
+LEGACY_DIR = Path.home() / "projects" / "_shared" / "print-outcomes"
+# Everyone else's store, created on first write.
+DEFAULT_DIR = Path.home() / ".orcaslicer-mcp" / "outcomes"
+# A job may join a slice row saved up to this long after the job started: the slicer machine and
+# the printer do not share a clock.
+JOIN_CLOCK_SKEW_S = 120
 
 # Settings worth surfacing when recalling a past print (Orca config keys).
 SUMMARY_KEYS = ["layer_height", "nozzle_temperature", "nozzle_temperature_initial_layer",
@@ -44,9 +51,18 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', '1');
 """
 
+# Columns added in schema v2. Additive only, so an older reader keeps working on a migrated file.
+_V2_COLUMNS = (("failure_reason", "TEXT"), ("est_time_s", "REAL"), ("est_filament_g", "REAL"))
+_V2_KEYS = tuple(name for name, _ in _V2_COLUMNS)
+
 
 def store_dir() -> Path:
-    return Path(os.environ.get("PRINT_OUTCOMES_DIR") or DEFAULT_DIR)
+    env = os.environ.get("PRINT_OUTCOMES_DIR", "").strip()
+    if env:
+        return Path(env)
+    if LEGACY_DIR.exists():
+        return LEGACY_DIR
+    return DEFAULT_DIR
 
 
 def db_path() -> Path:
@@ -71,7 +87,33 @@ def connect(create: bool = False) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     if create:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring a v1 store to v2: add the v2 columns and stamp the version. Only writers call this."""
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(prints)")}
+    if all(name in have for name in _V2_KEYS):
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        have = {r["name"] for r in conn.execute("PRAGMA table_info(prints)")}  # re-read under the write lock
+        for name, typ in _V2_COLUMNS:
+            if name not in have:
+                conn.execute(f"ALTER TABLE prints ADD COLUMN {name} {typ}")
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _num(v) -> float | None:
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def result_for_status(status: str | None) -> str:
@@ -91,15 +133,16 @@ def geometry_hash_for(objects: list[dict]) -> str:
 
 
 def record_slice(gcode_filename: str, model_name: str, geometry_hash: str, settings: dict,
-                 printer_id: str = "swx2", sliced_at: float | None = None) -> int:
+                 printer_id: str = "unknown", sliced_at: float | None = None,
+                 est_time_s: float | None = None, est_filament_g: float | None = None) -> int:
     with closing(connect(create=True)) as conn:
         conn.execute("BEGIN IMMEDIATE")
         try:
             cur = conn.execute(
-                "INSERT INTO prints(printer_id, sliced_at, model_name, geometry_hash, gcode_filename, settings_json)"
-                " VALUES (?,?,?,?,?,?)",
+                "INSERT INTO prints(printer_id, sliced_at, model_name, geometry_hash, gcode_filename, settings_json,"
+                " est_time_s, est_filament_g) VALUES (?,?,?,?,?,?,?,?)",
                 (printer_id, time.time() if sliced_at is None else sliced_at, model_name, geometry_hash,
-                 gcode_filename, json.dumps(settings, sort_keys=True)))
+                 gcode_filename, json.dumps(settings, sort_keys=True), _num(est_time_s), _num(est_filament_g)))
             conn.commit()
             return int(cur.lastrowid)
         except Exception:
@@ -107,16 +150,30 @@ def record_slice(gcode_filename: str, model_name: str, geometry_hash: str, setti
             raise
 
 
-def record_outcome(job: dict, printer_id: str = "swx2") -> int:
+def _fill_gaps(conn: sqlite3.Connection, row_id: int, failure_reason: str | None,
+               est_time_s: float | None, est_filament_g: float | None) -> None:
+    """Fill NULL columns only; a value already recorded is never overwritten."""
+    conn.execute(
+        "UPDATE prints SET failure_reason=COALESCE(failure_reason, ?), est_time_s=COALESCE(est_time_s, ?),"
+        " est_filament_g=COALESCE(est_filament_g, ?) WHERE id=?",
+        (failure_reason, est_time_s, est_filament_g, row_id))
+
+
+def record_outcome(job: dict, printer_id: str = "unknown", failure_reason: str | None = None) -> int:
     """Record a FINISHED Moonraker history job. Idempotent on job_id. Joins to the newest
-    slice row for the same filename that has not been printed yet; otherwise inserts a new row
-    whose settings come from Moonraker's gcode metadata (a print sliced outside the agent).
+    unprinted slice row for the same filename that was saved before the job started; otherwise
+    inserts a new row whose settings come from Moonraker's gcode metadata (a print sliced outside
+    the agent). On a row that already exists it only fills gaps (failure_reason, estimates).
 
     The whole read-then-write is one BEGIN IMMEDIATE transaction so two concurrent recorders
     can't both claim the same candidate slice row (lost update)."""
     fn = job.get("filename") or ""
     job_id = job.get("job_id")
     meta = job.get("metadata") or {}
+    est_t, est_f = _num(meta.get("estimated_time")), _num(meta.get("filament_weight_total"))
+    started = _num(job.get("start_time"))
+    if started is None:
+        started = _num(job.get("end_time"))
     vals = (job.get("end_time"), job_id, result_for_status(job.get("status")),
             job.get("total_duration"), meta.get("filament_weight_total"))
     with closing(connect(create=True)) as conn:
@@ -125,21 +182,28 @@ def record_outcome(job: dict, printer_id: str = "swx2") -> int:
             if job_id:
                 hit = conn.execute("SELECT id FROM prints WHERE job_id=?", (job_id,)).fetchone()
                 if hit:
+                    _fill_gaps(conn, hit["id"], failure_reason, est_t, est_f)
                     conn.commit()
                     return int(hit["id"])
-            row = conn.execute(
-                "SELECT id FROM prints WHERE gcode_filename=? AND printed_at IS NULL AND job_id IS NULL"
-                " ORDER BY sliced_at DESC, id DESC LIMIT 1", (fn,)).fetchone()
+            sql = "SELECT id FROM prints WHERE gcode_filename=? AND printed_at IS NULL AND job_id IS NULL"
+            args: list = [fn]
+            if started is not None:
+                sql += " AND (sliced_at IS NULL OR sliced_at <= ?)"
+                args.append(started + JOIN_CLOCK_SKEW_S)
+            row = conn.execute(sql + " ORDER BY sliced_at DESC, id DESC LIMIT 1", args).fetchone()
             if row:
                 conn.execute("UPDATE prints SET printed_at=?, job_id=?, result=?, duration_s=?, filament_g=?"
                              " WHERE id=?", (*vals, row["id"]))
+                _fill_gaps(conn, row["id"], failure_reason, est_t, est_f)
                 conn.commit()
                 return int(row["id"])
             subset = settings_summary(meta) or None
             cur = conn.execute(
                 "INSERT INTO prints(printer_id, model_name, gcode_filename, settings_json, printed_at, job_id,"
-                " result, duration_s, filament_g) VALUES (?,?,?,?,?,?,?,?,?)",
-                (printer_id, Path(fn).stem, fn, json.dumps(subset) if subset else None, *vals))
+                " result, duration_s, filament_g, failure_reason, est_time_s, est_filament_g)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (printer_id, Path(fn).stem, fn, json.dumps(subset) if subset else None, *vals,
+                 failure_reason, est_t, est_f))
             conn.commit()
             return int(cur.lastrowid)
         except Exception:
@@ -193,6 +257,15 @@ def recall(model_name: str | None = None, geometry_hash: str | None = None, limi
     return [_row(r) for r in rows]
 
 
+def get(row_id: int) -> dict | None:
+    """One row by id, or None (also when there is no store yet)."""
+    if not is_available():
+        return None
+    with closing(connect()) as conn:
+        r = conn.execute("SELECT * FROM prints WHERE id=?", (row_id,)).fetchone()
+    return _row(r) if r else None
+
+
 def _row(r: sqlite3.Row) -> dict:
     d = dict(r)
     raw = d.pop("settings_json")
@@ -201,4 +274,6 @@ def _row(r: sqlite3.Row) -> dict:
     except (ValueError, TypeError):
         settings = None
     d["settings_summary"] = settings_summary(settings) if isinstance(settings, dict) else {}
+    for key in _V2_KEYS:
+        d.setdefault(key, None)  # a v1 file read before any writer migrated it
     return d

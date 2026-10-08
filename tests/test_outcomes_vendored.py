@@ -2,7 +2,7 @@ from pathlib import Path
 import pytest
 from orcaslicer_mcp import outcomes as oc
 
-KLIPPER_COPY = Path("/home/max/projects/klipper-mcp/src/klipper_mcp/outcomes.py")
+KLIPPER_COPY = Path(__file__).resolve().parents[2] / "klipper-mcp" / "src" / "klipper_mcp" / "outcomes.py"
 
 
 def _body(p: Path) -> str:
@@ -11,10 +11,11 @@ def _body(p: Path) -> str:
     return "\n".join(l for l in lines if not l.startswith("# VENDORED"))
 
 
-def test_vendored_copy_matches_owner_when_owner_present():
+def test_klipper_copy_matches_owner_when_present():
     if not KLIPPER_COPY.exists():
         pytest.skip("klipper-mcp checkout not present")
-    assert _body(Path(oc.__file__)) == _body(KLIPPER_COPY), "outcomes.py drifted from klipper-mcp; re-copy it"
+    assert _body(Path(oc.__file__)) == _body(KLIPPER_COPY), \
+        "klipper-mcp's outcomes.py drifted; re-copy it from orcaslicer-mcp"
 
 
 def test_absent_store_is_a_no_op(monkeypatch, tmp_path):

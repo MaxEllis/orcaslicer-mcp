@@ -7,11 +7,14 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlunsplit
 
+from ..errors import ApiError
 from .errors import PrinterError
+from .moonraker import MoonrakerClient
+from .octoprint import OctoPrintClient
 
 REMEMBERED_PATH = Path.home() / ".orcaslicer-mcp" / "printer.json"
 
@@ -98,3 +101,164 @@ def printer_id_for(target: PrinterTarget) -> str:
     if target.profile:
         return target.profile
     return urlsplit(target.url).hostname or target.url
+
+
+SET_URL_HINT = ("set ORCA_PRINTER_URL in this MCP server's settings to an address that works from here, "
+                "for example the printer's IP address.")
+
+_PROFILE_ADDRESS_HINT = ("In OrcaSlicer, open the connection settings next to the printer and enter "
+                         "its address, or " + SET_URL_HINT)
+_OVERRIDE_ADDRESS_HINT = ("Correct ORCA_PRINTER_URL in this MCP server's settings, or remove it to use "
+                          "the printer profile in OrcaSlicer.")
+
+# Process-wide memory of which protocol and base URL answered for a target URL, so repeat calls
+# skip the probes that failed. Cleared by tests; a failed cached probe falls through to the rest.
+_PROBE_CACHE: dict[str, tuple[str, str]] = {}
+
+
+def _shown(raw: str) -> str:
+    """The address as it may appear in a message: everything between '://' and the last '@' is
+    hidden, so a password can never reach the model or a log line."""
+    s = (raw or "").strip()
+    if "@" not in s:
+        return s
+    scheme, sep, rest = s.partition("://")
+    tail = rest.rsplit("@", 1)[1] if sep else s.rsplit("@", 1)[1]
+    return f"{scheme}://<redacted>@{tail}" if sep else f"<redacted>@{tail}"
+
+
+def _origin(source: str, profile: str | None) -> str:
+    if source == "override":
+        return "ORCA_PRINTER_URL"
+    if source == "profile":
+        return f"the printer profile '{profile}'" if profile else "the printer profile"
+    return "the remembered printer"
+
+
+def _bad_address(raw: str, source: str, profile: str | None = None, *, encoding: bool = False) -> PrinterError:
+    shown, origin = _shown(raw), _origin(source, profile)
+    if encoding:
+        message = (f"The user name or password in the printer address '{shown}' from {origin} contains "
+                   "characters that must be percent-encoded (for example / ? # @).")
+    else:
+        message = f"The printer address '{shown}' from {origin} isn't a valid URL."
+    hint = _OVERRIDE_ADDRESS_HINT if source == "override" else _PROFILE_ADDRESS_HINT
+    return PrinterError("not_configured", message, hint=hint)
+
+
+def _parse_address(raw: str, source: str, profile: str | None = None) -> tuple[str, tuple[str, str] | None]:
+    """normalise_url for an address that came from a person: anything urllib cannot handle becomes
+    a not_configured PrinterError (a ValueError never escapes), and nothing is echoed unredacted."""
+    s = raw.strip()
+    try:
+        parts = urlsplit(s if "://" in s else "http://" + s)
+        # An '@' outside the authority means a '/', '?' or '#' in the user name or password was not
+        # percent-encoded: urllib would drop or misread the rest, e.g. 'http://user:123?x@host'.
+        loose_at = "@" in parts.path + parts.query + parts.fragment
+    except ValueError:
+        raise _bad_address(raw, source, profile) from None
+    if loose_at:
+        raise _bad_address(raw, source, profile, encoding=True)
+    try:
+        url, auth = normalise_url(raw)
+        checked = urlsplit(url)
+        checked.port  # raises ValueError for a non-numeric or out-of-range port
+        valid = bool(checked.hostname)
+    except ValueError:
+        valid = False
+    if not valid:
+        raise _bad_address(raw, source, profile)
+    return url, auth
+
+
+async def resolve_target(fork_factory) -> PrinterTarget:
+    """Find the printer: ORCA_PRINTER_URL, else OrcaSlicer's active printer profile, else the
+    printer remembered from the last time OrcaSlicer could be read."""
+    override = os.environ.get("ORCA_PRINTER_URL", "").strip()
+    if override:
+        url, auth = _parse_address(override, "override")
+        return PrinterTarget(url=url, source="override", auth=auth)
+    try:
+        async with fork_factory() as fork:
+            status = await fork.get_status()
+            name = ((status or {}).get("presets") or {}).get("printer")
+            if not name:
+                raise PrinterError("not_configured", "OrcaSlicer reports no active printer profile.",
+                                   hint="Select a printer in OrcaSlicer, or " + SET_URL_HINT)
+            preset = await fork.get_preset_config("printer", name)
+    except ApiError as e:
+        remembered = recall_remembered()
+        if remembered is not None:
+            return remembered
+        raise PrinterError("orca_unreachable",
+                           "Couldn't read the printer profile from OrcaSlicer, and no printer has answered before.",
+                           hint="Start OrcaSlicer (MCP build) with the Remote API enabled, or " + SET_URL_HINT,
+                           detail=str(e)) from e
+    cfg = (preset or {}).get("config") or {}
+    host = str(cfg.get("print_host") or "").strip()
+    model = cfg.get("printer_model") or None
+    host_type = str(cfg.get("host_type") or "").strip().lower() or None
+    if not host:
+        if (model or "").startswith("Bambu Lab"):
+            raise PrinterError("unsupported_connection", "Bambu printers aren't supported yet (it's planned).",
+                               host_type="bambu")
+        raise PrinterError("not_configured", f"The printer profile '{name}' has no connection set up.",
+                           hint=_PROFILE_ADDRESS_HINT)
+    check_host_type(host_type)
+    url, auth = _parse_address(host, "profile", name)
+    return PrinterTarget(url=url, source="profile", profile=name, host_type=host_type,
+                         printer_model=model, auth=auth)
+
+
+def _candidates(url: str, kind_hint: str | None) -> list[tuple[str, str]]:
+    parts = urlsplit(url)
+    out = [("klipper", url)]
+    if parts.port != 7125 and parts.hostname:
+        host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+        out.append(("klipper", urlunsplit((parts.scheme or "http", f"{host}:7125", "", "", ""))))
+    out.append(("octoprint", url))
+    if kind_hint:
+        out.sort(key=lambda c: c[0] != kind_hint)  # stable: the remembered protocol goes first
+    return out
+
+
+def _unreachable_hint(target: PrinterTarget) -> str:
+    hint = ("Is the printer switched on and on the same network as this computer? If OrcaSlicer's "
+            "address only works from another machine, " + SET_URL_HINT)
+    if "centauri" in (target.printer_model or "").lower():
+        hint += " Elegoo Centauri printers use a different protocol (SDCP) that isn't supported yet."
+    return hint
+
+
+async def open_printer(target: PrinterTarget, api_key: str | None = None):
+    """Return (target with kind and url set to what answered, an open client). The caller closes the
+    client. Tries Moonraker as given, Moonraker on 7125, then OctoPrint, cached per target URL."""
+    try:
+        candidates = _candidates(target.url, target.kind)
+    except ValueError:  # a bad port or bracket in a target that did not come through resolve_target
+        raise _bad_address(target.url, target.source, target.profile) from None
+    cached = _PROBE_CACHE.get(target.url)
+    if cached:
+        candidates = [cached] + [c for c in candidates if c != cached]
+    tried: list[str] = []
+    auth_err: PrinterError | None = None
+    for kind, base in candidates:
+        cls = MoonrakerClient if kind == "klipper" else OctoPrintClient
+        client = cls(base, api_key=api_key, auth=target.auth)
+        try:
+            ok = await client.identify()
+        except PrinterError as e:  # only auth errors escape identify()
+            ok = False
+            auth_err = auth_err or e
+        if ok:
+            _PROBE_CACHE[target.url] = (kind, base)
+            found = replace(target, kind=kind, url=base)
+            if target.source == "profile":
+                remember(found)
+            return found, client
+        await client.aclose()
+        tried.append(f"{base} ({'Klipper' if kind == 'klipper' else 'OctoPrint'})")
+    if auth_err is not None:
+        raise auth_err
+    raise PrinterError("not_reachable", f"The printer didn't answer at {target.url}.",
+                       hint=_unreachable_hint(target), tried=tried)

@@ -30,6 +30,7 @@ from . import plate_describe as _plate
 from .printer import target as _ptarget
 from .printer import wait as _pwait
 from .printer import history as _phistory
+from .printer import match as _pmatch
 from .printer.errors import PrinterError
 from .printer.snapshot import take_snapshot
 from .printer.status import _dur as _duration_text
@@ -1284,6 +1285,33 @@ async def list_print_history(limit: int = 10) -> dict:
         lambda t, c: _phistory.print_history(t, c, limit, _ptarget.printer_id_for(t)))
 
 
+@mcp.tool()
+async def check_printer_match() -> dict:
+    """Does the active OrcaSlicer profile match the printer it will print on? Compares nozzle size,
+    bed size and height, the highest speeds and accelerations, nozzle and bed temperatures, and
+    firmware retraction against the printer's own Klipper settings. Each check comes back ok, warn or
+    unknown with both values and why it matters; relay `headline` and the warnings. Warnings only: it
+    never changes or blocks anything. Run it before printing with a new or edited profile, or when
+    prints take longer than estimated. Klipper printers only; needs OrcaSlicer running."""
+    async def run(t, c):
+        if t.kind != "klipper":
+            return {"supported": False, "reason": "Only Klipper printers report their settings.",
+                    "printer": t.public()}
+        settings = ((await c.objects_query(["configfile=settings"])).get("configfile") or {}).get("settings") or {}
+        try:
+            async with _client() as fork:
+                cfg = await fork.get_config(list(_pmatch.PROFILE_KEYS))
+        except ApiError as e:
+            raise PrinterError("orca_unreachable",
+                               "check_printer_match needs OrcaSlicer running to read the active profile.",
+                               hint="Start OrcaSlicer (MCP build) with the Remote API enabled.") from e
+        out = _pmatch.compare(cfg, settings)
+        out["printer"] = t.public()
+        return out
+
+    return await _with_printer(run)
+
+
 # --- Tool annotations (title + read-only/destructive hints) -----------------
 # The Claude connectors directory requires every tool to carry a title and the
 # applicable readOnlyHint / destructiveHint. Kept as one table so completeness
@@ -1339,6 +1367,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "get_printer_status": ("Get printer status", True, False),
     "wait_for_printer": ("Wait for the printer", True, False),
     "list_print_history": ("List print history", False, False),
+    "check_printer_match": ("Check the profile against the printer", True, False),
 }
 
 

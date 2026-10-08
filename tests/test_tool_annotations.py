@@ -46,3 +46,12 @@ def test_list_print_history_writes_locally_but_is_safe_to_repeat():
     ann = srv.mcp._tool_manager._tools["list_print_history"].annotations
     assert ann.read_only_hint is False and ann.destructive_hint is False
     assert ann.idempotent_hint is True and ann.open_world_hint is True
+
+
+def test_check_printer_match_is_read_only_and_open_world():
+    tool = srv.mcp._tool_manager._tools["check_printer_match"]
+    ann = tool.annotations
+    assert tool.title == "Check the profile against the printer"
+    assert ann.title == "Check the profile against the printer"
+    assert ann.read_only_hint is True and ann.destructive_hint is None
+    assert ann.idempotent_hint is None and ann.open_world_hint is True

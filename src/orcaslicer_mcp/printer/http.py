@@ -1,6 +1,9 @@
 """Shared plumbing for the read-only printer clients: timeouts, the optional API key, and turning
 HTTP failures into PrinterError codes the tools can explain. GET only."""
 from __future__ import annotations
+from datetime import timezone
+from email.utils import parsedate_to_datetime
+
 import httpx
 
 from .errors import PrinterError, auth_error
@@ -16,6 +19,9 @@ class ReadClient:
         self.base_url = base_url.rstrip("/")
         self._key_set = bool(api_key)
         self._basic_set = auth is not None
+        # The printer's own clock (epoch seconds) from the Date header of the last successful reply,
+        # or None before one arrives. Moonraker stamps its console lines with this clock, not ours.
+        self.server_time: float | None = None
         self._http = httpx.AsyncClient(
             timeout=httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
             headers={"X-Api-Key": api_key} if api_key else {}, auth=auth)
@@ -42,10 +48,24 @@ class ReadClient:
             raise auth_error(self.service, self._key_set, basic_auth=self._basic_set and not self._key_set)
         if resp.status_code >= 400:
             raise PrinterError("protocol_error", f"{self.service} answered HTTP {resp.status_code} for {path}.")
+        self._note_clock(resp)
         try:
             return resp.json()
         except ValueError as e:
             raise PrinterError("protocol_error", f"{self.service} sent a reply to {path} that wasn't JSON.") from e
+
+    def _note_clock(self, resp: httpx.Response) -> None:
+        """Remember the server's clock from the Date header; a missing or unreadable one changes nothing."""
+        raw = resp.headers.get("Date")
+        if not raw:
+            return
+        try:
+            when = parsedate_to_datetime(raw)
+            if when.tzinfo is None:  # HTTP dates are GMT; a zone-less parse must not fall back to local time
+                when = when.replace(tzinfo=timezone.utc)
+            self.server_time = when.timestamp()
+        except (TypeError, ValueError, IndexError, OverflowError):
+            pass
 
     async def _identify_with(self, probe) -> bool:
         """True if probe() answers and looks right. A locked server raises (it IS the right one)."""

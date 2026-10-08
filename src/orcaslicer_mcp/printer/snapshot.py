@@ -11,23 +11,10 @@ STATUS_OBJECTS = ["webhooks", "print_stats", "display_status", "virtual_sdcard",
 CONSOLE_LINES = 100
 IDLE_CONSOLE_WINDOW_S = 600.0
 
-# File metadata (slicer time estimate, first-layer height) per G-code file, process-wide.
-_META_CACHE: dict[str, dict | None] = {}
-
-
-async def _file_meta(client, filename: str) -> dict | None:
-    if filename not in _META_CACHE:
-        try:
-            _META_CACHE[filename] = await client.file_metadata(filename)
-        except PrinterError:
-            return None  # a transient failure is not cached
-    return _META_CACHE[filename]
-
 
 async def take_snapshot(target, client, *, now: float | None = None) -> dict:
     if target.kind == "octoprint":
         return octoprint_snapshot(await client.printer(), await client.job(), target_public=target.public())
-    now = time.time() if now is None else now
     notes: list[str] = []
     info: dict = {}
     try:
@@ -42,6 +29,10 @@ async def take_snapshot(target, client, *, now: float | None = None) -> dict:
         console = await client.gcode_store(CONSOLE_LINES)
     except PrinterError as e:
         notes.append(f"The console log couldn't be read: {e.message}")
+    if now is None:
+        # Moonraker stamps console lines with the printer's own clock, so staleness is judged on that
+        # clock (from the replies' Date header), not this computer's. Read after the last request.
+        now = client.server_time if client.server_time is not None else time.time()
     ps = status.get("print_stats") or {}
     active = ps.get("state") in ("printing", "paused")
     since = now - IDLE_CONSOLE_WINDOW_S
@@ -50,7 +41,14 @@ async def take_snapshot(target, client, *, now: float | None = None) -> dict:
             since = now - float(ps.get("total_duration") or 0) - 5.0
         except (TypeError, ValueError):
             pass
-    meta = await _file_meta(client, ps["filename"]) if active and ps.get("filename") else None
+    meta = None
+    if active and ps.get("filename"):
+        # Read on every snapshot: a file re-sliced and re-uploaded under the same name has a new estimate.
+        # A file the printer has no record of (None) is simply not used.
+        try:
+            meta = await client.file_metadata(ps["filename"])
+        except PrinterError as e:
+            notes.append(f"The slicer's time estimate for this file couldn't be read: {e.message}")
     snap = klipper_snapshot(status, info, console, since=since, file_meta=meta, target_public=target.public())
     if notes:
         snap["notes"] = notes

@@ -1,4 +1,5 @@
 import json
+from email.utils import formatdate
 
 import httpx
 import pytest
@@ -143,3 +144,30 @@ async def test_malformed_address_identify_is_false_not_a_raw_exception():
     with respx.mock:
         async with OctoPrintClient("http://192.0.2.10:abc") as c:
             assert await c.identify() is False
+
+
+@pytest.mark.parametrize("cls", [MoonrakerClient, OctoPrintClient])
+async def test_clients_record_the_servers_clock_from_the_date_header(cls):
+    when = 1_700_000_000.0  # an invented moment
+    path = "/server/info" if cls is MoonrakerClient else "/api/version"
+    with respx.mock:
+        route = respx.get(f"{P}{path}")
+        async with cls(P) as c:
+            assert c.server_time is None
+            route.mock(return_value=httpx.Response(200, json=READY, headers={"Date": formatdate(when, usegmt=True)}))
+            await c.get_json(path)
+            assert c.server_time == when
+            route.mock(return_value=httpx.Response(200, json=READY, headers={"Date": "not a date"}))
+            await c.get_json(path)
+            assert c.server_time == when  # an unreadable header leaves the last good value
+            route.mock(return_value=httpx.Response(200, json=READY))
+            await c.get_json(path)
+            assert c.server_time == when  # so does a missing one
+
+
+async def test_a_response_without_a_date_leaves_the_server_clock_unknown():
+    with respx.mock:
+        respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=READY))
+        async with MoonrakerClient(P) as c:
+            await c.server_info()
+            assert c.server_time is None

@@ -30,6 +30,7 @@ from . import plate_describe as _plate
 from .printer import target as _ptarget
 from .printer.errors import PrinterError
 from .printer.snapshot import take_snapshot
+from .printer.status import _dur as _duration_text
 
 try:
     import importlib.metadata as _md
@@ -1204,16 +1205,32 @@ def _printer_api_key() -> str | None:
     return os.environ.get("ORCA_PRINTER_API_KEY", "").strip() or None
 
 
+def _remembered_note(target) -> str:
+    at = target.remembered_at
+    age = (f"{_duration_text(max(0.0, time.time() - at))} ago"
+           if isinstance(at, (int, float)) and not isinstance(at, bool) else "earlier")
+    return f"OrcaSlicer isn't running or can't be reached, so this uses the printer remembered {age}."
+
+
 async def _with_printer(fn) -> dict:
     """Find the printer (override > OrcaSlicer profile > remembered), open the protocol that
-    answers, and run fn(target, client). Printer problems come back as {error, message, hint, ...}."""
+    answers, and run fn(target, client). Printer problems come back as {error, message, hint, ...};
+    once the printer is known, every reply (error or not) says which one it is in `printer`."""
+    target = None
     try:
         target = await _ptarget.resolve_target(_client)
         target, client = await _ptarget.open_printer(target, _printer_api_key())
         async with client:
-            return await fn(target, client)
+            out = await fn(target, client)
+        if target.source == "remembered" and isinstance(out, dict):
+            notes = out.get("notes")
+            out["notes"] = (notes if isinstance(notes, list) else []) + [_remembered_note(target)]
+        return out
     except PrinterError as e:
-        return e.as_dict()
+        out = e.as_dict()
+        if target is not None:
+            out.setdefault("printer", target.public())
+        return out
 
 
 @mcp.tool()

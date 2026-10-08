@@ -29,6 +29,7 @@ import time
 from . import plate_describe as _plate
 from .printer import target as _ptarget
 from .printer import wait as _pwait
+from .printer import history as _phistory
 from .printer.errors import PrinterError
 from .printer.snapshot import take_snapshot
 from .printer.status import _dur as _duration_text
@@ -1271,6 +1272,18 @@ async def wait_for_printer(
     return await _with_printer(lambda t, c: _pwait.run_wait(t, c, until, timeout_s, report))
 
 
+@mcp.tool()
+async def list_print_history(limit: int = 10) -> dict:
+    """How did recent prints on the printer actually end? For each finished job: result (success,
+    cancelled or error), how long it took against OrcaSlicer's estimate, filament used, and for failed
+    or stopped jobs the printer's own reason while its console still holds it. `summary` says how
+    OrcaSlicer's time estimates compare with reality once there are a few finished prints. Also copies
+    those jobs into the local outcome store (safe to repeat), so recall_prints can learn from them.
+    Klipper printers only. `limit` is capped at 50."""
+    return await _with_printer(
+        lambda t, c: _phistory.print_history(t, c, limit, _ptarget.printer_id_for(t)))
+
+
 # --- Tool annotations (title + read-only/destructive hints) -----------------
 # The Claude connectors directory requires every tool to carry a title and the
 # applicable readOnlyHint / destructiveHint. Kept as one table so completeness
@@ -1325,6 +1338,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "delete_preset": ("Delete preset", False, True),
     "get_printer_status": ("Get printer status", True, False),
     "wait_for_printer": ("Wait for the printer", True, False),
+    "list_print_history": ("List print history", False, False),
 }
 
 

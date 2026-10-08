@@ -40,3 +40,9 @@ def test_printer_tools_are_read_only_and_open_world():
 def test_wait_for_printer_is_read_only_and_open_world():
     ann = srv.mcp._tool_manager._tools["wait_for_printer"].annotations
     assert ann.read_only_hint is True and ann.open_world_hint is True
+
+
+def test_list_print_history_writes_locally_but_is_safe_to_repeat():
+    ann = srv.mcp._tool_manager._tools["list_print_history"].annotations
+    assert ann.read_only_hint is False and ann.destructive_hint is False
+    assert ann.idempotent_hint is True and ann.open_world_hint is True

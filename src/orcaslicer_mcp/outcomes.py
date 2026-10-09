@@ -83,11 +83,15 @@ def connect(create: bool = False) -> sqlite3.Connection:
         # table-less DB here - that would flip is_available() True forever.
         raise FileNotFoundError(str(p))
     conn = sqlite3.connect(p, timeout=5.0, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    if create:
-        conn.executescript(_SCHEMA)
-        _migrate(conn)
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        if create:
+            conn.executescript(_SCHEMA)
+            _migrate(conn)
+    except BaseException:
+        conn.close()  # callers only close a connection they were handed
+        raise
     return conn
 
 

@@ -1,6 +1,8 @@
 import sqlite3
 from contextlib import closing
 
+import pytest
+
 from orcaslicer_mcp import outcomes as oc
 
 V1_DDL = """
@@ -129,3 +131,130 @@ def test_whitespace_store_env_counts_as_unset(monkeypatch, tmp_path):
     monkeypatch.setattr(oc, "LEGACY_DIR", tmp_path / "absent")
     monkeypatch.setattr(oc, "DEFAULT_DIR", tmp_path / "default")
     assert oc.store_dir() == tmp_path / "default"
+
+
+# --- the join window: a slice saved shortly after the job's start still joins ---------------------
+
+def _slice_at(sliced_at):
+    return oc.record_slice("part.gcode", "part", "h1", {"layer_height": "0.2"}, printer_id="test-printer",
+                           sliced_at=sliced_at)
+
+
+def test_a_slice_saved_60s_after_the_job_started_still_joins(monkeypatch, tmp_path):
+    # the slicer machine and the printer do not share a clock
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    sid = _slice_at(JOB["start_time"] + 60)
+    assert oc.record_outcome(JOB, "test-printer") == sid
+    assert oc.get(sid)["job_id"] == "000042"
+
+
+def test_a_slice_saved_200s_after_the_job_started_does_not_join(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    sid = _slice_at(JOB["start_time"] + 200)
+    rid = oc.record_outcome(JOB, "test-printer")
+    assert rid != sid
+    row = oc.get(sid)
+    assert row["job_id"] is None and row["printed_at"] is None and row["result"] is None
+
+
+def test_the_join_window_edge_is_the_published_skew(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    assert oc.JOIN_CLOCK_SKEW_S == 120
+    sid = _slice_at(JOB["start_time"] + oc.JOIN_CLOCK_SKEW_S)
+    assert oc.record_outcome(JOB, "test-printer") == sid  # exactly at the edge still joins
+
+
+def test_a_job_with_no_start_time_joins_by_its_end_time(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    no_start = {k: v for k, v in JOB.items() if k != "start_time"}  # end_time is 1200.0
+    near = _slice_at(no_start["end_time"] - 30)
+    assert oc.record_outcome(no_start, "test-printer") == near
+    # and a slice saved well after the end does not join a second such job
+    later = _slice_at(no_start["end_time"] + 500)
+    other = {**no_start, "job_id": "000043"}
+    rid = oc.record_outcome(other, "test-printer")
+    assert rid not in (near, later)
+    assert oc.get(later)["job_id"] is None
+
+
+def test_a_job_with_a_null_start_time_joins_by_its_end_time(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    sid = _slice_at(5000.0)
+    job = {**JOB, "start_time": None, "end_time": 6000.0}
+    assert oc.record_outcome(job, "test-printer") == sid
+    # a job whose end_time is long before the slice does not claim it
+    sid2 = _slice_at(9000.0)
+    early = {**JOB, "job_id": "000044", "start_time": None, "end_time": 4000.0}
+    assert oc.record_outcome(early, "test-printer") not in (sid, sid2)
+    assert oc.get(sid2)["job_id"] is None
+
+
+# --- connect(create=True) must not leak the connection when setup fails ---------------------------
+
+class _Tracker:
+    """Wraps sqlite3.connect so a test can see every connection connect() opened."""
+    def __init__(self, monkeypatch):
+        self.conns = []
+        real = sqlite3.connect
+
+        def tracked(*a, **kw):
+            c = real(*a, **kw)
+            self.conns.append(c)
+            return c
+        monkeypatch.setattr(oc.sqlite3, "connect", tracked)
+
+    def all_closed(self):
+        for c in self.conns:
+            try:
+                c.cursor()  # runs no SQL; a closed connection refuses it
+            except sqlite3.ProgrammingError:
+                continue  # "Cannot operate on a closed database."
+            return False
+        return bool(self.conns)
+
+
+def test_connect_closes_the_connection_when_schema_setup_raises(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    monkeypatch.setattr(oc, "_SCHEMA", "THIS IS NOT SQL;")
+    seen = _Tracker(monkeypatch)
+    with pytest.raises(sqlite3.Error):
+        oc.connect(create=True)
+    assert seen.all_closed()
+
+
+def test_connect_closes_the_connection_when_migration_raises(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+
+    def boom(conn):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(oc, "_migrate", boom)
+    seen = _Tracker(monkeypatch)
+    with pytest.raises(sqlite3.OperationalError):
+        oc.connect(create=True)
+    assert seen.all_closed()
+
+
+def test_connect_closes_the_connection_when_the_file_is_not_a_database(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    (tmp_path / "outcomes.db").write_bytes(b"this is not a sqlite file at all" * 20)
+    seen = _Tracker(monkeypatch)
+    with pytest.raises(sqlite3.DatabaseError):
+        oc.connect(create=True)
+    assert seen.all_closed()
+    # a reader hitting the same file must not leak either
+    seen2 = _Tracker(monkeypatch)
+    with pytest.raises(sqlite3.DatabaseError):
+        oc.connect()
+    assert seen2.all_closed()
+
+
+def test_a_failed_record_does_not_leave_a_connection_behind(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+
+    def boom(conn):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(oc, "_migrate", boom)
+    seen = _Tracker(monkeypatch)
+    with pytest.raises(sqlite3.OperationalError):
+        oc.record_outcome(JOB, "test-printer")
+    assert seen.all_closed()

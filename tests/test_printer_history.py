@@ -49,6 +49,17 @@ def test_shape_job_falls_back_to_the_file_estimate():
     assert j["estimate"] == {"time_s": 3000, "filament_g": 15.0, "source": "file"} and j["slice"] is None
 
 
+def test_the_estimate_percentage_is_only_for_successful_jobs():
+    # A cancelled 60 s run against a 3600 s estimate must not read as "98% faster than estimated".
+    cancelled = {**JOB_ERR, "status": "cancelled", "print_duration": 60.0, "metadata": {"estimated_time": 3600}}
+    interrupted = {**JOB_ERR, "status": "interrupted", "print_duration": 60.0}
+    for job in (JOB_ERR, cancelled, interrupted):
+        shaped = h.shape_job(job, None, None)
+        assert shaped["result"] != "success" and shaped["vs_estimate_pct"] is None
+        assert shaped["estimate"]["time_s"] is not None  # the estimate itself is still shown
+    assert h.shape_job(JOB_OK, None, None)["vs_estimate_pct"] == 10
+
+
 def test_estimate_summary():
     jobs = [{"result": "success", "print_duration_s": d, "estimate": {"time_s": 1000}} for d in (1050, 1100, 1200)]
     assert h.estimate_summary(jobs[:2]) is None

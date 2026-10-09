@@ -43,18 +43,21 @@ def shape_job(job: dict, reason: str | None, row: dict | None) -> dict:
     actual = _num(job.get("print_duration"))
     end = _num(job.get("end_time"))
     used = _num(job.get("filament_used"))
+    result = _outcomes.result_for_status(job.get("status"))
+    # Only a finished print says anything about the estimate: a cancelled 60 s run is not "98% faster".
+    vs_pct = int(round((actual / est_time - 1) * 100)) if result == "success" and actual and est_time else None
     return {
         "file": job.get("filename"),
         "job_id": job.get("job_id"),
         "ended_at": datetime.datetime.fromtimestamp(end).isoformat(timespec="minutes") if end else None,
-        "result": _outcomes.result_for_status(job.get("status")),
+        "result": result,
         "status": job.get("status"),
         "print_duration_s": None if actual is None else int(round(actual)),
         "filament_used_mm": None if used is None else int(round(used)),
         "failure_reason": reason or row.get("failure_reason"),
         "estimate": {"time_s": None if est_time is None else int(round(est_time)), "filament_g": est_fil,
                      "source": source},
-        "vs_estimate_pct": int(round((actual / est_time - 1) * 100)) if actual and est_time else None,
+        "vs_estimate_pct": vs_pct,
         "slice": ({"model_name": row.get("model_name"), "settings": row.get("settings_summary")}
                   if row.get("sliced_at") is not None else None),
         "outcome_row_id": row.get("id"),

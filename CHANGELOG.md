@@ -21,10 +21,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - With OctoPrint, a job request that fails (or answers with something that isn't JSON) no longer fails the whole status. The status comes back with a note that the current job couldn't be read.
 - `wait_for_printer` treats a job that completes successfully while it waits for `printing` or `first_layer_done` as met, instead of stopping with "The job ended before ...". A one-layer or very short print passes both points before the next poll. A cancelled or errored job still stops the wait early, and so does a job that was already complete when the wait began.
 - `wait_for_printer` no longer sends a progress notification carrying an old status after a poll fails. The next notification comes with the next good poll.
-- A hand-edited `printer.json` holding a remembered time that isn't a usable number (an enormous integer, say) no longer breaks the "remembered printer" note. It reads "remembered earlier".
+- A hand-edited `printer.json` holding a remembered time no calendar can hold (`-1e300`, say) no longer puts a 310-character age in the "remembered printer" note. It reads "remembered earlier".
 - `list_print_history` shows the failure reason already stored for a job, so the reply matches the row it just synced. Before, a reason read from the printer's console this time could differ from the one in the store.
-- `list_print_history` says how to fix it when Moonraker has no `[history]` component (a 404 from the printer): add a `[history]` section to `moonraker.conf` and restart Moonraker. Before, it reported only the HTTP status.
+- `list_print_history` says what to do when the printer answers 404 for its history list: Moonraker versions before 0.9 need a `[history]` section in `moonraker.conf`, so add one and restart Moonraker. Before, it reported only the HTTP status.
 - `list_print_history` copies jobs into the outcome store oldest first, as the always-on recorder does, so when one file was printed twice against a single saved slice, the earlier print claims it. The store writes also run off the event loop, so a busy store no longer stalls the server.
+- When OrcaSlicer can't be read because of a setting other than the token (an invalid `ORCA_API_TIMEOUT`, say), the printer tools no longer tell you to check `ORCA_API_TOKEN`. The hint points at the server's OrcaSlicer settings (`ORCA_API_URL`, `ORCA_API_TIMEOUT`) and `detail` names the problem.
+- `check_printer_match` no longer reports Klipper's `[firmware_retraction]` section as `absent` when retraction is off and Klipper's settings were never read. The printer side is empty then.
+- `check_printer_match` says when OrcaSlicer didn't report the bed type, and its bed check is `unknown`, not `ok`, when the printable height or Klipper's Z travel wasn't available. The message says the height wasn't checked.
+- `save_gcode` keeps the saved G-code file and returns `outcome_error` when recording the slice fails for any reason, not only a database or file error.
+- An `ORCA_PRINTER_API_KEY` holding a character that can't be sent in an HTTP header (a curly quote pasted from a word processor, say) is refused with a `not_configured` message instead of a raw encoding error. The message never repeats the key.
+- An OctoPrint reply that isn't a JSON object, and a Moonraker file-info reply that is the JSON value `null`, now return `protocol_error`. The first used to fail with a raw error and the second read as "no such file".
+- With OctoPrint, a refused API key on the job request is reported as `auth_required` or `auth_rejected` like any other request, instead of becoming a note.
 
 ### Changed
 - `get_printer_status` and `wait_for_printer` make one request fewer to a Klipper printer: the answer from the request that found the printer is reused once. Later polls of `wait_for_printer` still ask again.

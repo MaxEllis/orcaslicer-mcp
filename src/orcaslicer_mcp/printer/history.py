@@ -2,6 +2,7 @@
 the console still holds it), how long they took against OrcaSlicer's estimate, and a copy written
 into the outcome store so recall_prints learns from real results without any other software."""
 from __future__ import annotations
+import asyncio
 import datetime
 import sqlite3
 import statistics
@@ -49,12 +50,12 @@ def shape_job(job: dict, reason: str | None, row: dict | None) -> dict:
     return {
         "file": job.get("filename"),
         "job_id": job.get("job_id"),
-        "ended_at": datetime.datetime.fromtimestamp(end).isoformat(timespec="minutes") if end else None,
+        "ended_at": datetime.datetime.fromtimestamp(end).astimezone().isoformat(timespec="minutes") if end else None,
         "result": result,
         "status": job.get("status"),
         "print_duration_s": None if actual is None else int(round(actual)),
         "filament_used_mm": None if used is None else int(round(used)),
-        "failure_reason": reason or row.get("failure_reason"),
+        "failure_reason": row.get("failure_reason") or reason,  # the stored one, so the reply matches the row
         "estimate": {"time_s": None if est_time is None else int(round(est_time)), "filament_g": est_fil,
                      "source": source},
         "vs_estimate_pct": vs_pct,
@@ -74,9 +75,30 @@ def estimate_summary(jobs: list[dict]) -> str | None:
         return None
     n = len(ratios)
     pct = int(round((statistics.median(ratios) - 1) * 100))
+    # The estimate can be OrcaSlicer's own (a slice saved here) or any slicer's file metadata, so the
+    # sentence names no slicer.
+    subject = f"Your last {n} successful prints with an estimate"
     if abs(pct) < 2:
-        return f"Your last {n} finished prints matched OrcaSlicer's time estimate (median)."
-    return f"Your last {n} finished prints ran {abs(pct)}% {'longer' if pct > 0 else 'shorter'} than OrcaSlicer estimated (median)."
+        return f"{subject} matched the estimate (median)."
+    return f"{subject} ran {abs(pct)}% {'longer' if pct > 0 else 'shorter'} than estimated (median)."
+
+
+def _sync_to_store(jobs: list[dict], reasons: list[str | None], printer_id: str):
+    """Write each job into the outcome store, oldest first, and read its row back. Runs on a worker
+    thread (sqlite blocks). `jobs` is Moonraker's newest-first list: walking it from the end is the
+    order the live recorder saw the jobs finish, so when a file was printed twice against one saved
+    slice the earlier print claims it. Returns (rows aligned with `jobs`, rows synced, store error).
+    The first store failure stops the walk; the jobs not reached keep no row."""
+    rows: list[dict | None] = [None] * len(jobs)
+    synced, store_error = 0, None
+    for i in reversed(range(len(jobs))):
+        try:
+            rows[i] = _outcomes.get(_outcomes.record_outcome(jobs[i], printer_id, failure_reason=reasons[i]))
+            synced += 1
+        except (sqlite3.Error, OSError) as e:
+            store_error = str(e)
+            break
+    return rows, synced, store_error
 
 
 async def print_history(target, client, limit: int, printer_id: str) -> dict:
@@ -88,19 +110,10 @@ async def print_history(target, client, limit: int, printer_id: str) -> dict:
         console = await client.gcode_store(CONSOLE_LINES)
     except PrinterError:
         console = []
-    shaped, synced, store_error = [], 0, None
-    for job in jobs:
-        if job.get("status") not in FINISHED:
-            continue
-        reason = failure_reason(job, console)
-        row = None
-        if store_error is None:
-            try:
-                row = _outcomes.get(_outcomes.record_outcome(job, printer_id, failure_reason=reason))
-                synced += 1
-            except (sqlite3.Error, OSError) as e:
-                store_error = str(e)
-        shaped.append(shape_job(job, reason, row))
+    finished = [j for j in jobs if j.get("status") in FINISHED]
+    reasons = [failure_reason(j, console) for j in finished]
+    rows, synced, store_error = await asyncio.to_thread(_sync_to_store, finished, reasons, printer_id)
+    shaped = [shape_job(j, r, row) for j, r, row in zip(finished, reasons, rows)]
     out = {"printer": target.public(), "jobs": shaped, "summary": estimate_summary(shaped),
            "synced_to_store": synced, "store": str(_outcomes.db_path())}
     if store_error:

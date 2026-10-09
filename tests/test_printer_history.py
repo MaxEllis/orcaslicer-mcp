@@ -1,6 +1,10 @@
+import datetime
 import sqlite3
+import threading
+import time
 
 import httpx
+import pytest
 import respx
 
 import orcaslicer_mcp.server as srv
@@ -63,9 +67,55 @@ def test_the_estimate_percentage_is_only_for_successful_jobs():
 def test_estimate_summary():
     jobs = [{"result": "success", "print_duration_s": d, "estimate": {"time_s": 1000}} for d in (1050, 1100, 1200)]
     assert h.estimate_summary(jobs[:2]) is None
-    assert h.estimate_summary(jobs) == "Your last 3 finished prints ran 10% longer than OrcaSlicer estimated (median)."
+    assert h.estimate_summary(jobs) == (
+        "Your last 3 successful prints with an estimate ran 10% longer than estimated (median).")
+    shorter = [{"result": "success", "print_duration_s": d, "estimate": {"time_s": 1000}} for d in (850, 900, 950)]
+    assert h.estimate_summary(shorter) == (
+        "Your last 3 successful prints with an estimate ran 10% shorter than estimated (median).")
     close = [{"result": "success", "print_duration_s": 990, "estimate": {"time_s": 1000}}] * 3
-    assert h.estimate_summary(close) == "Your last 3 finished prints matched OrcaSlicer's time estimate (median)."
+    assert h.estimate_summary(close) == (
+        "Your last 3 successful prints with an estimate matched the estimate (median).")
+
+
+def test_the_summary_does_not_name_a_slicer():
+    # The estimate can come from another slicer's file metadata, so the sentence must not credit OrcaSlicer.
+    for d in (1100, 1000, 900):
+        jobs = [{"result": "success", "print_duration_s": d, "estimate": {"time_s": 1000}}] * 3
+        assert "OrcaSlicer" not in h.estimate_summary(jobs)
+
+
+# --- a job's shown failure reason is the stored one -----------------------------------------------------
+
+def test_the_stored_failure_reason_wins_over_the_console_one():
+    row = {"id": 7, "failure_reason": "stored words"}
+    assert h.shape_job(JOB_ERR, "console words", row)["failure_reason"] == "stored words"
+
+
+def test_the_console_reason_is_used_when_the_row_has_none():
+    assert h.shape_job(JOB_ERR, "console words", {"id": 7, "failure_reason": None})["failure_reason"] == "console words"
+    assert h.shape_job(JOB_ERR, "console words", None)["failure_reason"] == "console words"
+    assert h.shape_job(JOB_ERR, None, {"id": 7, "failure_reason": None})["failure_reason"] is None
+
+
+# --- ended_at carries the timezone offset ----------------------------------------------------------------
+
+def test_ended_at_names_its_utc_offset():
+    shaped = h.shape_job(JOB_OK, None, None)
+    parsed = datetime.datetime.fromisoformat(shaped["ended_at"])
+    assert parsed.utcoffset() is not None  # a zone-less time cannot be told apart from another zone's
+    assert parsed == datetime.datetime.fromtimestamp(JOB_OK["end_time"]).astimezone().replace(second=0, microsecond=0)
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="needs POSIX tzset")
+def test_ended_at_shows_the_local_offset_in_the_text(monkeypatch):
+    try:
+        with monkeypatch.context() as m:
+            m.setenv("TZ", "TST-12")  # a fixed UTC+12 zone, so the expected text does not depend on tz data
+            time.tzset()
+            # 8600 s after the epoch is 02:23 UTC, which is 14:23 at UTC+12
+            assert h.shape_job(JOB_OK, None, None)["ended_at"] == "1970-01-01T14:23+12:00"
+    finally:
+        time.tzset()  # back to the real zone once the variable is restored
 
 
 def history_routes(jobs, console=CONSOLE):
@@ -130,3 +180,80 @@ async def test_history_names_the_printer_by_its_host_when_only_the_url_is_set(mo
     history_routes([JOB_OK])
     out = await srv.list_print_history(5)
     assert oc.get(out["jobs"][0]["outcome_row_id"])["printer_id"] == "192.0.2.10"
+
+
+@respx.mock
+async def test_history_shows_the_reason_already_stored_and_the_row_agrees(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    rid = oc.record_outcome(JOB_ERR, "test-printer", failure_reason="Reason stored by an earlier call")
+    history_routes([JOB_ERR])  # the console now holds a different line for the same job
+    out = await srv.list_print_history(5)
+    assert out["jobs"][0]["failure_reason"] == "Reason stored by an earlier call"
+    assert oc.get(rid)["failure_reason"] == out["jobs"][0]["failure_reason"]
+
+
+@respx.mock
+async def test_history_reports_the_console_reason_when_the_store_is_locked(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    history_routes([JOB_ERR])
+
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(h._outcomes, "record_outcome", locked)
+    out = await srv.list_print_history(5)
+    assert out["jobs"][0]["failure_reason"] == REASON  # no row to prefer, so the console's words stand
+
+
+# --- the sync order and where the writes run ------------------------------------------------------------
+
+@respx.mock
+async def test_sync_walks_oldest_first_so_the_earliest_reprint_claims_the_slice(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    slice_id = oc.record_slice("bracket.gcode", "bracket", "hash-one", {"layer_height": "0.2"},
+                               printer_id="test-printer", sliced_at=1000.0, est_time_s=3000.0)
+    older = {**JOB_OK, "job_id": "000101", "start_time": 5000.0, "end_time": 8600.0}
+    newer = {**JOB_OK, "job_id": "000105", "start_time": 20000.0, "end_time": 23600.0}
+    history_routes([newer, older])  # Moonraker answers newest first
+    out = await srv.list_print_history(5)
+    assert oc.get(slice_id)["job_id"] == "000101"  # as the live recorder would have done it
+    # the reply keeps Moonraker's order (newest first) and each job shows the row it was synced to
+    assert [j["job_id"] for j in out["jobs"]] == ["000105", "000101"]
+    assert out["jobs"][0]["slice"] is None and out["jobs"][1]["slice"]["model_name"] == "bracket"
+    assert out["jobs"][1]["outcome_row_id"] == slice_id
+
+
+@respx.mock
+async def test_store_writes_run_off_the_event_loop(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    history_routes([JOB_ERR, JOB_OK])
+    loop_thread = threading.get_ident()
+    seen = []
+    real_record, real_get = oc.record_outcome, oc.get
+
+    def record(*args, **kwargs):
+        seen.append(("record_outcome", threading.get_ident()))
+        return real_record(*args, **kwargs)
+
+    def get(*args, **kwargs):
+        seen.append(("get", threading.get_ident()))
+        return real_get(*args, **kwargs)
+
+    monkeypatch.setattr(h._outcomes, "record_outcome", record)
+    monkeypatch.setattr(h._outcomes, "get", get)
+    out = await srv.list_print_history(5)
+    assert out["synced_to_store"] == 2
+    assert [name for name, _ in seen].count("record_outcome") == 2 and "get" in {name for name, _ in seen}
+    # no lock involved: a blocking sqlite call on the loop's own thread is what this would catch
+    assert all(thread != loop_thread for _, thread in seen)
+
+
+@respx.mock
+async def test_a_missing_history_component_says_how_to_enable_it(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO))
+    respx.get(url__startswith=f"{P}/server/history/list").mock(return_value=httpx.Response(404))
+    out = await srv.list_print_history(5)
+    assert out["error"] == "protocol_error"
+    assert out["hint"] == ("Moonraker's [history] component isn't enabled: add a [history] section to "
+                           "moonraker.conf and restart Moonraker.")

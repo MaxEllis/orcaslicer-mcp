@@ -293,6 +293,46 @@ async def test_a_result_field_of_the_wrong_type_is_a_protocol_error(name, inner)
     assert e.value.code == "protocol_error"
 
 
+async def test_a_404_from_the_history_list_names_the_missing_component():
+    with respx.mock:
+        respx.get(url__startswith=f"{P}/server/history/list").mock(return_value=httpx.Response(404))
+        async with MoonrakerClient(P) as c:
+            with pytest.raises(PrinterError) as e:
+                await c.history_list(3)
+    assert e.value.code == "protocol_error" and "/server/history/list" in e.value.message
+    assert e.value.hint == ("Moonraker's [history] component isn't enabled: add a [history] section to "
+                            "moonraker.conf and restart Moonraker.")
+
+
+@pytest.mark.parametrize("status", [500, 503])
+async def test_other_history_failures_get_no_hint(status):
+    with respx.mock:
+        respx.get(url__startswith=f"{P}/server/history/list").mock(return_value=httpx.Response(status))
+        async with MoonrakerClient(P) as c:
+            with pytest.raises(PrinterError) as e:
+                await c.history_list(3)
+    assert e.value.code == "protocol_error" and e.value.hint is None
+
+
+async def test_an_empty_history_reply_is_not_mistaken_for_a_404():
+    # a 200 whose body is JSON null reads as "nothing" inside the client, never as a missing component
+    with respx.mock:
+        respx.get(url__startswith=f"{P}/server/history/list").mock(return_value=httpx.Response(200, json=None))
+        async with MoonrakerClient(P) as c:
+            with pytest.raises(PrinterError) as e:
+                await c.history_list(3)
+    assert e.value.code == "protocol_error" and e.value.hint is None and "404" not in e.value.message
+
+
+async def test_a_404_elsewhere_does_not_blame_the_history_component():
+    with respx.mock:
+        respx.get(url__startswith=f"{P}/server/gcode_store").mock(return_value=httpx.Response(404))
+        async with MoonrakerClient(P) as c:
+            with pytest.raises(PrinterError) as e:
+                await c.gcode_store(5)
+    assert e.value.code == "protocol_error" and e.value.hint is None
+
+
 async def test_an_empty_result_object_is_still_an_answer():
     with respx.mock:
         for path in PATHS.values():

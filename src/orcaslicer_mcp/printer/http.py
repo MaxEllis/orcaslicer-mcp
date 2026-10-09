@@ -46,7 +46,10 @@ class ReadClient:
     async def aclose(self) -> None:
         await self._http.aclose()
 
-    async def get_json(self, path: str, params: dict | None = None, *, none_on: tuple[int, ...] = ()):
+    async def get_json(self, path: str, params: dict | None = None, *, none_on: tuple[int, ...] = (),
+                       hints: dict[int, str] | None = None):
+        """GET path and decode the JSON. `hints` maps an HTTP status to the hint its protocol_error
+        carries (a route that exists only when an optional component is enabled, say)."""
         try:
             resp = await self._http.get(self.base_url + path, params=params)
         except httpx.TransportError as e:
@@ -60,7 +63,8 @@ class ReadClient:
         if resp.status_code in (401, 403):
             raise auth_error(self.service, self._key_set, basic_auth=self._basic_set and not self._key_set)
         if resp.status_code >= 400:
-            raise PrinterError("protocol_error", f"{self.service} answered HTTP {resp.status_code} for {path}.")
+            raise PrinterError("protocol_error", f"{self.service} answered HTTP {resp.status_code} for {path}.",
+                               hint=(hints or {}).get(resp.status_code))
         self._note_clock(resp)
         try:
             return resp.json()

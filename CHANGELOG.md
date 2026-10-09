@@ -22,6 +22,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `wait_for_printer` treats a job that completes successfully while it waits for `printing` or `first_layer_done` as met, instead of stopping with "The job ended before ...". A one-layer or very short print passes both points before the next poll. A cancelled or errored job still stops the wait early, and so does a job that was already complete when the wait began.
 - `wait_for_printer` no longer sends a progress notification carrying an old status after a poll fails. The next notification comes with the next good poll.
 - A hand-edited `printer.json` holding a remembered time that isn't a usable number (an enormous integer, say) no longer breaks the "remembered printer" note. It reads "remembered earlier".
+- `list_print_history` shows the failure reason already stored for a job, so the reply matches the row it just synced. Before, a reason read from the printer's console this time could differ from the one in the store.
+- `list_print_history` says how to fix it when Moonraker has no `[history]` component (a 404 from the printer): add a `[history]` section to `moonraker.conf` and restart Moonraker. Before, it reported only the HTTP status.
+- `list_print_history` copies jobs into the outcome store oldest first, as the always-on recorder does, so when one file was printed twice against a single saved slice, the earlier print claims it. The store writes also run off the event loop, so a busy store no longer stalls the server.
 
 ### Changed
 - `get_printer_status` and `wait_for_printer` make one request fewer to a Klipper printer: the answer from the request that found the printer is reused once. Later polls of `wait_for_printer` still ask again.
@@ -29,6 +32,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - When a print that is already running is waiting for its heaters (OctoPrint reheating mid-print, or OctoPrint's first heat-up, which also shows file progress), the headline reads "Printing benchy: 28%, waiting for the heaters.", with the time left when it is known. A Klipper job's first heat-up still reads "Heating up to print benchy."
 - The headline says "almost done" when no time is left or progress is 100 %, instead of "about 1 min left".
 - `connected` in the status is false when the state is `offline`, OctoPrint keeps the job for a cancelled or errored print as Klipper does, and `headline` comes first in the result.
+- The `list_print_history` summary reads "Your last 3 successful prints with an estimate ran 9% longer than estimated (median)." (or `shorter`, or `matched the estimate`). It no longer names OrcaSlicer, because the estimate can come from another slicer's file.
+- `ended_at` in `list_print_history` carries the time zone offset, for example `2030-01-15T14:23+12:00`.
 
 ## [0.1.15] - 2026-10-09
 

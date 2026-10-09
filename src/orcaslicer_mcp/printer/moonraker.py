@@ -12,15 +12,20 @@ _monotonic = time.monotonic  # a seam for tests
 # probe within milliseconds; the bound only stops a client that sat unused from serving old news.
 PROBE_INFO_MAX_AGE_S = 5.0
 
+# Moonraker answers 404 on /server/history/list when its [history] component is not enabled.
+HISTORY_DISABLED_HINT = ("Moonraker's [history] component isn't enabled: add a [history] section to "
+                         "moonraker.conf and restart Moonraker.")
+
 
 class MoonrakerClient(ReadClient):
     service = "Klipper (Moonraker)"
     _probe_info: tuple[dict, float] | None = None  # identify()'s reply and when it arrived
 
-    async def _result(self, path: str, params: dict | None = None, *, none_on: tuple[int, ...] = ()) -> dict | None:
+    async def _result(self, path: str, params: dict | None = None, *, none_on: tuple[int, ...] = (),
+                      hints: dict[int, str] | None = None) -> dict | None:
         """Moonraker's `result` object. None only for a status listed in none_on; any other reply
-        whose `result` is not an object is a protocol_error."""
-        body = await self.get_json(path, params, none_on=none_on)
+        whose `result` is not an object is a protocol_error. `hints`: see get_json."""
+        body = await self.get_json(path, params, none_on=none_on, hints=hints)
         if body is None and none_on:
             return None
         result = body.get("result") if isinstance(body, dict) else None
@@ -28,10 +33,11 @@ class MoonrakerClient(ReadClient):
             raise PrinterError("protocol_error", f"{self.service} sent a reply to {path} without the expected result.")
         return result
 
-    async def _field(self, path: str, key: str, kind: type, params: dict | None = None):
+    async def _field(self, path: str, key: str, kind: type, params: dict | None = None, *,
+                     hints: dict[int, str] | None = None):
         """result[key] as a `kind`: an absent key is an empty one, a value of any other type is a
         protocol_error (and so is a list holding anything but objects: every caller reads them as such)."""
-        value = (await self._result(path, params)).get(key)
+        value = (await self._result(path, params, hints=hints)).get(key)
         if value is None:
             return kind()
         if not isinstance(value, kind) or (kind is list and not all(isinstance(v, dict) for v in value)):
@@ -73,7 +79,8 @@ class MoonrakerClient(ReadClient):
         return await self._field("/server/gcode_store", "gcode_store", list, {"count": count})
 
     async def history_list(self, limit: int = 10) -> list[dict]:
-        return await self._field("/server/history/list", "jobs", list, {"limit": limit, "order": "desc"})
+        return await self._field("/server/history/list", "jobs", list, {"limit": limit, "order": "desc"},
+                                 hints={404: HISTORY_DISABLED_HINT})
 
     async def file_metadata(self, filename: str) -> dict | None:
         return await self._result("/server/files/metadata", {"filename": filename}, none_on=(404,))

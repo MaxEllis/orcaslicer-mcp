@@ -72,9 +72,19 @@ async def test_printing_needs_extrusion_on_klipper(monkeypatch):
     assert (await s.run(KL, "printing"))["met"] is True and len(s.sleeps) == 1
 
 
-async def test_printing_needs_progress_on_octoprint(monkeypatch):
-    s = Script(monkeypatch, [snap("printing", job={"progress_percent": 0}), snap("printing", job={"progress_percent": 3})])
-    assert (await s.run(OP, "printing"))["met"] is True
+async def test_printing_on_octoprint_waits_for_the_heaters_not_for_file_progress(monkeypatch):
+    # OctoPrint's completion is a file position, so it is above zero while the start G-code heats.
+    job = {"progress_percent": 28}
+    s = Script(monkeypatch, [snap("heating", (60, 200), (60, 60), job=job),
+                             snap("printing", (200, 200), (60, 60), job=job)])
+    out = await s.run(OP, "printing")
+    assert out["met"] is True and out["waited_s"] == 5 and len(s.sleeps) == 1
+
+
+async def test_printing_on_octoprint_is_met_at_once_when_already_printing_at_temperature(monkeypatch):
+    s = Script(monkeypatch, [snap("printing", (200, 200), (60, 60), job={"progress_percent": 0})])
+    out = await s.run(OP, "printing")
+    assert out["met"] is True and s.sleeps == []
 
 
 async def test_first_layer_done_by_layer_count(monkeypatch):

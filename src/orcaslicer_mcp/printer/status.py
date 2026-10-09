@@ -147,7 +147,10 @@ def octoprint_snapshot(printer: dict | None, job: dict | None, *, target_public:
         elif flags.get("paused") or flags.get("pausing"):
             state = "paused"
         elif flags.get("printing"):
-            state = "heating" if not completion and _below_target(nozzle, bed) else "printing"
+            # OctoPrint's completion is a position in the file, above zero while the header and start
+            # G-code are read and M109/M190 still wait, so it cannot tell heating from printing. The
+            # heaters can: a brief "heating" during a mid-print temperature change is truthful too.
+            state = "heating" if _below_target(nozzle, bed) else "printing"
         elif flags.get("cancelling"):
             state = "cancelled"
         elif fname and completion is not None and completion >= 100:

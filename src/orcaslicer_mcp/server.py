@@ -1280,7 +1280,8 @@ async def get_printer_status() -> dict:
 async def wait_for_printer(
     until: Annotated[Literal["heated", "printing", "first_layer_done", "finished"], Field(description=(
         "What to wait for. 'heated': every heater with a target is within 3 °C of it. 'printing': "
-        "extrusion has started. 'first_layer_done': the second layer has begun (Klipper only). "
+        "extrusion has started (OctoPrint, which reports none: the print is running with the heaters "
+        "at temperature). 'first_layer_done': the second layer has begun (Klipper only). "
         "Without layer info from the slicer it is judged from the nozzle height, so it is approximate. "
         "'finished': the job completed, was cancelled or errored."))],
     timeout_s: Annotated[int, Field(description=(

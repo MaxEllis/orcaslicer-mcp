@@ -32,11 +32,15 @@ def heated(snap: dict) -> bool:
 
 
 def printing(snap: dict, kind: str | None) -> bool:
+    """Klipper: extrusion has started (it says "printing" before that, so filament used decides).
+    OctoPrint reports no extrusion, and its progress is a position in the file that moves while the
+    heaters are still warming, so it counts only as "printing" once its status says so, which the
+    status layer reserves for a running job whose heaters are at temperature."""
     if snap.get("state") != "printing":
         return False
-    job = snap.get("job") or {}
     if kind == "octoprint":
-        return (job.get("progress_percent") or 0) > 0
+        return True
+    job = snap.get("job") or {}
     return (job.get("filament_used_mm") or 0) > 0
 
 

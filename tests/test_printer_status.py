@@ -212,6 +212,31 @@ def test_octoprint_printing():
     assert s["headline"] == "Printing bracket: 42%, about 18 min left. Nozzle 215/215 °C, bed 60/60 °C. No problems."
 
 
+def _octo_printing(nozzle_actual, completion=28.0):
+    """A job OctoPrint calls "printing", with the nozzle at nozzle_actual against a 200 target. Its
+    completion is a position in the file, so it is above zero while the header and start G-code are
+    read and the heaters are still warming."""
+    printer = {"state": {"text": "Printing", "flags": {"operational": True, "printing": True}},
+               "temperature": {"tool0": {"actual": nozzle_actual, "target": 200.0},
+                               "bed": {"actual": 60.0, "target": 60.0}}}
+    job = {"job": {"file": {"name": "test-part.gcode"}},
+           "progress": {"completion": completion, "printTime": 30, "printTimeLeft": 900}, "state": "Printing"}
+    return st.octoprint_snapshot(printer, job, target_public=OP)
+
+
+def test_octoprint_is_heating_while_a_heater_is_below_target_even_with_file_progress():
+    s = _octo_printing(60.0)
+    assert s["state"] == "heating"
+    assert not s["headline"].startswith("Printing")
+    assert s["headline"].startswith("Heating up to print test-part")
+
+
+def test_octoprint_is_printing_once_the_heaters_are_at_target():
+    s = _octo_printing(199.0)
+    assert s["state"] == "printing"
+    assert s["headline"].startswith("Printing test-part: 28%")
+
+
 @pytest.mark.parametrize("flags", [{"error": True}, {"closedOrError": True}])
 def test_octoprint_error(flags):
     printer = {"state": {"text": "Offline after error", "flags": flags}, "temperature": {}}

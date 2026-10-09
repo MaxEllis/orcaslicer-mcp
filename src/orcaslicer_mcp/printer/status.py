@@ -233,8 +233,9 @@ def _job_line(verb: str, name: str, job: dict, *, left: bool, tail: str = "") ->
 
 
 def _heating_mid_job(job: dict) -> bool:
-    """Heating with the job already under way: a heater is catching up to a new target (OctoPrint
-    cannot tell this from its start G-code still heating). Klipper reports exactly 0 mm of filament
+    """Heating with the job already under way: a running print reheating after a temperature change,
+    or OctoPrint's first heat-up, which shows file progress above 0 too (it cannot tell the two
+    apart), so the headline words it to be true for both. Klipper reports exactly 0 mm of filament
     before the first extrusion, so a Klipper job at 0 mm is the first heat-up, even when the file
     position is above 0 because of a large header."""
     return (job.get("progress_percent") or 0) > 0 and job.get("filament_used_mm") != 0
@@ -250,7 +251,7 @@ def headline(snap: dict) -> str:
         first = _job_line("Paused", name, job, left=False)
     elif state == "heating":
         if _heating_mid_job(job):
-            first = _job_line("Printing", name, job, left=True, tail=", heating to the new target")
+            first = _job_line("Printing", name, job, left=True, tail=", waiting for the heaters")
         else:
             first = f"Heating up to print {name}."
     elif state == "finished":

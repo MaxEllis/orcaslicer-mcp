@@ -245,14 +245,23 @@ def _octo_printing(nozzle_actual, completion=28.0, left=900):
 def test_octoprint_is_heating_while_a_heater_is_below_target_even_with_file_progress():
     s = _octo_printing(60.0)
     assert s["state"] == "heating"
-    assert s["headline"] == ("Printing test-part: 28%, about 15 min left, heating to the new target. "
+    assert s["headline"] == ("Printing test-part: 28%, about 15 min left, waiting for the heaters. "
                              "Nozzle 60/200 °C, bed 60/60 °C. No problems.")
+
+
+def test_a_mid_print_temperature_dip_reads_the_same_as_the_first_heat_up():
+    """OctoPrint shows file progress above 0 both during the first heat-up and when a running print
+    reheats, so the wording must be true for both."""
+    s = _octo_printing(150.0, completion=55.0, left=1200)
+    assert s["state"] == "heating"
+    assert s["headline"] == ("Printing test-part: 55%, about 20 min left, waiting for the heaters. "
+                             "Nozzle 150/200 °C, bed 60/60 °C. No problems.")
 
 
 def test_heating_with_progress_and_no_time_left_estimate():
     s = _octo_printing(60.0, left=None)
     assert s["state"] == "heating" and s["job"]["remaining_s"] is None
-    assert s["headline"] == ("Printing test-part: 28%, heating to the new target. "
+    assert s["headline"] == ("Printing test-part: 28%, waiting for the heaters. "
                              "Nozzle 60/200 °C, bed 60/60 °C. No problems.")
 
 
@@ -280,9 +289,9 @@ def test_heating_with_progress_keeps_layers_problems_and_warnings():
     fatal = {"severity": "fatal", "message": "It broke."}
     error = {"severity": "error", "message": "Another."}
     assert st.headline({**base, "problems": [warn]}) == (
-        "Printing a: 5% (layer 3/90), about 50 min left, heating to the new target. Nozzle 100/215 °C. 1 warning.")
+        "Printing a: 5% (layer 3/90), about 50 min left, waiting for the heaters. Nozzle 100/215 °C. 1 warning.")
     assert st.headline({**base, "problems": [fatal, error, warn]}).endswith(
-        "heating to the new target. Nozzle 100/215 °C. Problem: It broke (+1 more).")
+        "waiting for the heaters. Nozzle 100/215 °C. Problem: It broke (+1 more).")
 
 
 def test_klipper_heating_with_file_progress_is_still_the_first_heat_up():

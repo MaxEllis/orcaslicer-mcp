@@ -22,7 +22,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 - `get_printer_status` and `wait_for_printer` make one request fewer to a Klipper printer: the answer from the request that found the printer is reused once. Later polls of `wait_for_printer` still ask again.
 - A printer found through OrcaSlicer's profile is tried first with the protocol that answered last time at the same address, so a new session makes fewer attempts.
-- When a printer is heating with its job already under way (OctoPrint changing temperature mid-print), the headline reads "Printing benchy: 28%, heating to the new target.", with the time left when it is known. A Klipper job's first heat-up still reads "Heating up to print benchy."
+- When a print that is already running is waiting for its heaters (OctoPrint reheating mid-print, or OctoPrint's first heat-up, which also shows file progress), the headline reads "Printing benchy: 28%, waiting for the heaters.", with the time left when it is known. A Klipper job's first heat-up still reads "Heating up to print benchy."
 - The headline says "almost done" when no time is left or progress is 100 %, instead of "about 1 min left".
 - `connected` in the status is false when the state is `offline`, OctoPrint keeps the job for a cancelled or errored print as Klipper does, and `headline` comes first in the result.
 

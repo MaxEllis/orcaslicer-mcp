@@ -8,7 +8,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [Unreleased]
 
 ### Fixed
-- The printer tools no longer fail with a raw error when a printer sends a reply that can't be decoded, redirects, or holds JSON of the wrong shape. They return `protocol_error` (or `not_reachable` when the connection drops) with a message.
+- The printer tools no longer fail with a raw error when a printer sends a reply that can't be decoded, redirects, or isn't the JSON object expected at the top level. They return `protocol_error` (or `not_reachable` when the connection drops) with a message.
 - An `ORCA_PRINTER_API_KEY` pasted with a trailing space or newline is trimmed before it is sent.
 - A user name and password in the printer address are dropped from the address a message can echo, as a second guard after the existing redaction.
 - Looking for the printer no longer leaves an HTTP client open when the call is cancelled or fails in an unexpected way.
@@ -30,7 +30,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `check_printer_match` says when OrcaSlicer didn't report the bed type, and its bed check is `unknown`, not `ok`, when the printable height or Klipper's Z travel wasn't available. The message says the height wasn't checked.
 - `save_gcode` keeps the saved G-code file and returns `outcome_error` when recording the slice fails for any reason, not only a database or file error.
 - An `ORCA_PRINTER_API_KEY` holding a character that can't be sent in an HTTP header (a curly quote pasted from a word processor, say) is refused with a `not_configured` message instead of a raw encoding error. The message never repeats the key.
-- An OctoPrint reply that isn't a JSON object, and a Moonraker file-info reply that is the JSON value `null`, now return `protocol_error`. The first used to fail with a raw error and the second read as "no such file".
+- An OctoPrint reply that isn't a JSON object, and a Moonraker file-info reply that is the JSON value `null`, now return `protocol_error`. The first used to fail with a raw error (or, for `null`, read as offline or no job) and the second read as "no such file".
 - With OctoPrint, a refused API key on the job request is reported as `auth_required` or `auth_rejected` like any other request, instead of becoming a note.
 - The outcome store closes its database connection when it can't set up or upgrade the store (a locked or damaged file), instead of leaving it open for the caller.
 - A printer error's extra detail can no longer replace its `error`, `message` or `hint`.

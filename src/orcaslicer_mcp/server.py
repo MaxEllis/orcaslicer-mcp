@@ -3,7 +3,6 @@ import asyncio
 import os
 import re
 import datetime
-import sqlite3
 import sys
 import uuid
 from pathlib import Path
@@ -25,7 +24,6 @@ from .guard import allow_override_warnings
 from . import notes as _notes
 from . import outcomes as _outcomes
 import hashlib
-import math
 import time
 from . import plate_describe as _plate
 from .printer import target as _ptarget
@@ -1126,8 +1124,8 @@ async def save_gcode(filename: str | None = None) -> dict:
             fname, model_name, _outcomes.geometry_hash_for(objs), cfg,
             printer_id=_ptarget.printer_id(printer_name),
             est_time_s=stats.get("estimated_time_seconds"), est_filament_g=stats.get("filament_used_g"))
-    except (sqlite3.Error, OSError) as e:
-        outcome_error = str(e)
+    except Exception as e:  # noqa: BLE001 - whatever goes wrong while recording, the saved file stays
+        outcome_error = str(e) or type(e).__name__
     result = {"path": str(path), "filename": fname, "bytes": len(data), "model_name": model_name,
               "outcome_recorded": row_id is not None, "outcome_row_id": row_id}
     if outcome_error is not None:
@@ -1347,8 +1345,8 @@ async def check_printer_match() -> dict:
         except ApiError as e:
             raise PrinterError("orca_unreachable",
                                "check_printer_match couldn't read the active profile from OrcaSlicer.",
-                               hint=(_ptarget.TOKEN_HINT if _ptarget.token_problem(e)
-                                     else "Start OrcaSlicer (MCP build) with the Remote API enabled."),
+                               hint=_ptarget.orca_read_hint(
+                                   e, "Start OrcaSlicer (MCP build) with the Remote API enabled."),
                                detail=str(e)) from e
         out = _pmatch.compare(cfg, settings)
         out["printer"] = t.public()

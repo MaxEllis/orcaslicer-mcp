@@ -163,6 +163,9 @@ async def test_orca_down_and_nothing_remembered():
 @pytest.mark.parametrize("exc,hint", [
     (ConfigError("ORCA_API_TOKEN is required (the OrcaSlicer Remote API token)"), t.TOKEN_HINT),
     (Unauthorized("unauthorized (check ORCA_API_TOKEN)"), t.TOKEN_HINT),
+    # any other settings problem (an invalid ORCA_API_TIMEOUT, say) is not the token's fault
+    (ConfigError("could not convert string to float: 'abc'"),
+     "Check the OrcaSlicer settings of this MCP server (ORCA_API_URL, ORCA_API_TIMEOUT)."),
     (NotReachable("OrcaSlicer not reachable at http://127.0.0.1:13130"),
      "Start OrcaSlicer (MCP build) with the Remote API enabled, or " + t.SET_URL_HINT),
 ])

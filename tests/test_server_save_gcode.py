@@ -1,4 +1,4 @@
-import httpx, respx
+import httpx, pytest, respx
 import orcaslicer_mcp.server as srv
 from orcaslicer_mcp import outcomes as oc
 
@@ -93,6 +93,20 @@ async def test_save_gcode_with_no_printer_name_at_all_records_unknown(monkeypatc
     assert oc.get(out["outcome_row_id"])["printer_id"] == "unknown"
 
 
+@pytest.mark.parametrize("status_reply", [
+    httpx.Response(500, json={"error": "boom"}),                  # OrcaSlicer's status call fails
+    httpx.Response(200, json={"presets": {"printer": "   "}}),    # a blank profile name
+    httpx.Response(200, json={"presets": {"printer": ""}}),
+], ids=["status-fails", "blank-name", "empty-name"])
+@respx.mock
+async def test_save_gcode_records_unknown_when_the_printer_name_cannot_be_had(monkeypatch, tmp_path, status_reply):
+    _env(monkeypatch, tmp_path)
+    respx.get(f"{B}/api/v1/status").mock(return_value=status_reply)
+    out = await srv.save_gcode("nameless2.gcode")
+    assert out["outcome_recorded"] is True
+    assert oc.get(out["outcome_row_id"])["printer_id"] == "unknown"
+
+
 @respx.mock
 async def test_save_gcode_still_records_without_an_estimate(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path, slice_resp=httpx.Response(500, json={"error": "boom"}))
@@ -127,7 +141,6 @@ async def test_save_gcode_unicode_only_name_falls_back_to_print_prefix(monkeypat
 @respx.mock
 async def test_save_gcode_degrades_when_store_write_fails(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
-    oc.connect(create=True).close()
 
     def _boom(*args, **kwargs):
         raise __import__("sqlite3").OperationalError("database is locked")
@@ -138,6 +151,38 @@ async def test_save_gcode_degrades_when_store_write_fails(monkeypatch, tmp_path)
     assert out["outcome_recorded"] is False
     assert out["outcome_row_id"] is None
     assert "locked" in out["outcome_error"]
+
+
+@pytest.mark.parametrize("exc,shown", [
+    (RuntimeError("store exploded"), "store exploded"),
+    (ValueError("bad value in the slice"), "bad value in the slice"),
+    (TypeError("not serialisable"), "not serialisable"),
+    (KeyError("size_mm"), "size_mm"),
+    (ValueError(), "ValueError"),                                  # no message: the type still says what happened
+], ids=["runtime", "value", "type", "key", "no-message"])
+@respx.mock
+async def test_save_gcode_keeps_the_file_whatever_goes_wrong_while_recording(monkeypatch, tmp_path, exc, shown):
+    _env(monkeypatch, tmp_path)
+
+    def _boom(*args, **kwargs):
+        raise exc
+
+    monkeypatch.setattr(srv._outcomes, "record_slice", _boom)
+    out = await srv.save_gcode("kept.gcode")
+    assert (tmp_path / "gcode" / "kept.gcode").read_bytes() == b"G28\nG1 X1\n"
+    assert out["outcome_recorded"] is False and out["outcome_row_id"] is None
+    assert shown in out["outcome_error"] and out["path"] == str(tmp_path / "gcode" / "kept.gcode")
+
+
+@respx.mock
+async def test_save_gcode_keeps_the_file_when_an_object_has_an_unreadable_size(monkeypatch, tmp_path):
+    # no patching: the geometry hash is computed inside the recording step and float(None) raises TypeError
+    _env(monkeypatch, tmp_path)
+    odd = {"count": 1, "objects": [{**OBJS["objects"][0], "size_mm": [None, 20, 20]}]}
+    respx.get(f"{B}/api/v1/objects").mock(return_value=httpx.Response(200, json=odd))
+    out = await srv.save_gcode("odd.gcode")
+    assert (tmp_path / "gcode" / "odd.gcode").exists()
+    assert out["outcome_recorded"] is False and out["outcome_error"]
 
 
 @respx.mock

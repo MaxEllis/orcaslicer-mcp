@@ -97,6 +97,15 @@ def check_bed(cfg: dict, settings: dict) -> dict:
         return _check("bed", "warn", profile, printer,
                       "The profile's printable space goes past the printer's travel: " + "; ".join(issues)
                       + ". Moves there fail with 'Move out of range'.")
+    # ok only when the height was compared too: X and Y fitting says nothing about Z.
+    unchecked = []
+    if not height:
+        unchecked.append("OrcaSlicer reported no printable height")
+    if not zmax:
+        unchecked.append("Klipper reports no Z travel limit")
+    if unchecked:
+        return _check("bed", "unknown", profile, printer,
+                      "X and Y fit the printer's travel, but the height wasn't checked: " + " and ".join(unchecked) + ".")
     return _check("bed", "ok", profile, printer, "The profile's printable space fits the printer's travel.")
 
 
@@ -155,7 +164,11 @@ def check_nozzle_temp(cfg: dict, settings: dict) -> dict:
 
 
 def check_bed_temp(cfg: dict, settings: dict) -> dict:
-    key = BED_TEMP_KEYS.get(str(cfg.get("curr_bed_type") or "").strip().lower())
+    bed_type = str(cfg.get("curr_bed_type") or "").strip().lower()
+    if not bed_type:
+        return _unknown("bed temperature", "OrcaSlicer didn't report which bed type is selected, so the bed "
+                                           "temperature can't be checked.")
+    key = BED_TEMP_KEYS.get(bed_type)
     if key is None:
         return _unknown("bed temperature", "The bed type isn't one OrcaSlicer maps to a temperature setting.")
     temps = floats(cfg.get(key)) + floats(cfg.get(key + "_initial_layer"))
@@ -169,8 +182,9 @@ def check_firmware_retraction(cfg: dict, settings: dict) -> dict:
         return _unknown(name)
     section = settings.get("firmware_retraction")  # presence is the key, so an empty section still counts
     if not fw[0]:
-        return _check(name, "ok", "off", "absent" if section is None else "present",
-                      "OrcaSlicer does the retraction itself.")
+        # Klipper's side is only known when its settings were read; otherwise "absent" would be a guess.
+        klipper = None if "printer" not in settings else ("absent" if section is None else "present")
+        return _check(name, "ok", "off", klipper, "OrcaSlicer does the retraction itself.")
     if "printer" not in settings:  # Klipper's settings were never read, so a missing section proves nothing
         return _unknown(name)
     if section is None:

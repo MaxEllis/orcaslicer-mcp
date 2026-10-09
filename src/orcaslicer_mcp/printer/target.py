@@ -175,10 +175,22 @@ TOKEN_HINT = ("Check ORCA_API_TOKEN in this MCP server's settings: it must match
               "page of OrcaSlicer's Preferences.")
 
 
+SETTINGS_HINT = "Check the OrcaSlicer settings of this MCP server (ORCA_API_URL, ORCA_API_TIMEOUT)."
+
+
 def token_problem(e: ApiError) -> bool:
-    """True when OrcaSlicer refused or lacks the token (the fix is the token), False when it is simply not
-    reachable (the fix is to start it)."""
-    return isinstance(e, (ConfigError, Unauthorized))
+    """True when OrcaSlicer refused the token or this server has none (the fix is the token). A
+    ConfigError is a missing token only when it names ORCA_API_TOKEN (load_config says so); any other
+    one, an invalid ORCA_API_TIMEOUT for instance, is not the token's fault."""
+    return isinstance(e, Unauthorized) or (isinstance(e, ConfigError) and "ORCA_API_TOKEN" in str(e))
+
+
+def orca_read_hint(e: ApiError, start_hint: str) -> str:
+    """The hint for a failed read of OrcaSlicer: the token when that is the problem, the settings for any
+    other configuration error, else `start_hint` (OrcaSlicer is simply not running)."""
+    if token_problem(e):
+        return TOKEN_HINT
+    return SETTINGS_HINT if isinstance(e, ConfigError) else start_hint
 
 
 _PROFILE_ADDRESS_HINT = ("In OrcaSlicer, open the connection settings next to the printer and enter "
@@ -282,8 +294,8 @@ async def _resolve_target(fork_factory, where: dict) -> PrinterTarget:
             return remembered
         raise PrinterError("orca_unreachable",
                            "Couldn't read the printer profile from OrcaSlicer, and no printer has answered before.",
-                           hint=(TOKEN_HINT if token_problem(e) else
-                                 "Start OrcaSlicer (MCP build) with the Remote API enabled, or " + SET_URL_HINT),
+                           hint=orca_read_hint(
+                               e, "Start OrcaSlicer (MCP build) with the Remote API enabled, or " + SET_URL_HINT),
                            detail=str(e)) from e
     cfg = (preset or {}).get("config") or {}
     host = str(cfg.get("print_host") or "").strip()

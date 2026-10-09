@@ -120,3 +120,13 @@ async def test_history_is_klipper_only(monkeypatch, tmp_path):
     respx.get(f"{P}/api/version").mock(return_value=httpx.Response(200, json={"api": "0.1", "server": "1.10.2"}))
     out = await srv.list_print_history()
     assert out["supported"] is False and "OctoPrint" in out["reason"]
+
+
+@respx.mock
+async def test_history_names_the_printer_by_its_host_when_only_the_url_is_set(monkeypatch, tmp_path):
+    # The same rule save_gcode uses, so the slice row and the job row carry one printer_id.
+    monkeypatch.setenv("ORCA_PRINTER_URL", f"http://test-user:pw-secret@192.0.2.10")
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    history_routes([JOB_OK])
+    out = await srv.list_print_history(5)
+    assert oc.get(out["jobs"][0]["outcome_row_id"])["printer_id"] == "192.0.2.10"

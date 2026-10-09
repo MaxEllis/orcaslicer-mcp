@@ -1118,7 +1118,7 @@ async def save_gcode(filename: str | None = None) -> dict:
     try:
         row_id = _outcomes.record_slice(
             fname, model_name, _outcomes.geometry_hash_for(objs), cfg,
-            printer_id=os.environ.get("ORCA_PRINTER_ID", "").strip() or printer_name or "unknown",
+            printer_id=_ptarget.printer_id(printer_name),
             est_time_s=stats.get("estimated_time_seconds"), est_filament_g=stats.get("filament_used_g"))
     except (sqlite3.Error, OSError) as e:
         outcome_error = str(e)

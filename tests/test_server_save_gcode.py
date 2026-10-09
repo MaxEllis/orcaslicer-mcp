@@ -58,6 +58,42 @@ async def test_save_gcode_uses_orca_printer_id(monkeypatch, tmp_path):
 
 
 @respx.mock
+async def test_save_gcode_names_the_printer_by_its_host_when_orca_printer_url_is_set(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ORCA_PRINTER_URL", "http://test-user:pw-secret@192.0.2.10:7125")
+    out = await srv.save_gcode("host.gcode")
+    assert oc.get(out["outcome_row_id"])["printer_id"] == "192.0.2.10"
+
+
+@respx.mock
+async def test_orca_printer_id_beats_orca_printer_url(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ORCA_PRINTER_URL", "http://192.0.2.10")
+    monkeypatch.setenv("ORCA_PRINTER_ID", "bench")
+    out = await srv.save_gcode("both.gcode")
+    assert oc.get(out["outcome_row_id"])["printer_id"] == "bench"
+
+
+@respx.mock
+async def test_a_whitespace_orca_printer_id_counts_as_unset(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ORCA_PRINTER_ID", "   ")
+    out = await srv.save_gcode("blank.gcode")
+    assert oc.get(out["outcome_row_id"])["printer_id"] == "Test Printer"
+    monkeypatch.setenv("ORCA_PRINTER_URL", "http://192.0.2.10")
+    out = await srv.save_gcode("blank2.gcode")
+    assert oc.get(out["outcome_row_id"])["printer_id"] == "192.0.2.10"
+
+
+@respx.mock
+async def test_save_gcode_with_no_printer_name_at_all_records_unknown(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    respx.get(f"{B}/api/v1/status").mock(return_value=httpx.Response(200, json={"presets": {}}))
+    out = await srv.save_gcode("nameless.gcode")
+    assert oc.get(out["outcome_row_id"])["printer_id"] == "unknown"
+
+
+@respx.mock
 async def test_save_gcode_still_records_without_an_estimate(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path, slice_resp=httpx.Response(500, json={"error": "boom"}))
     out = await srv.save_gcode("c.gcode")

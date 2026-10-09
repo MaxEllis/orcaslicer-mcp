@@ -69,6 +69,36 @@ def test_printer_id_precedence(monkeypatch):
     assert t.printer_id_for(t.PrinterTarget(url="http://192.0.2.10:7125", source="override")) == "192.0.2.10"
 
 
+def test_printer_id_helper_has_one_rule_for_both_writers(monkeypatch):
+    assert t.printer_id("Test Printer") == "Test Printer"
+    assert t.printer_id(None) == "unknown" and t.printer_id("") == "unknown" and t.printer_id("  ") == "unknown"
+    monkeypatch.setenv("ORCA_PRINTER_URL", "http://test-user:pw-secret@Printer-Test.local:7125/")
+    assert t.printer_id("Test Printer") == "printer-test.local"  # the host name only, never the login
+    assert t.printer_id(None) == "printer-test.local"
+    monkeypatch.setenv("ORCA_PRINTER_ID", "bench")
+    assert t.printer_id("Test Printer") == "bench"
+    monkeypatch.setenv("ORCA_PRINTER_ID", "   ")  # whitespace counts as unset
+    assert t.printer_id("Test Printer") == "printer-test.local"
+
+
+@pytest.mark.parametrize("raw", ["http://[2001:db8::1", "http://", "   "])
+def test_printer_id_never_raises_on_an_unusable_printer_url(monkeypatch, raw):
+    monkeypatch.setenv("ORCA_PRINTER_URL", raw)
+    assert t.printer_id("Test Printer") == "Test Printer"
+    assert t.printer_id(None) == "unknown"
+
+
+def test_printer_id_for_follows_the_same_rule(monkeypatch):
+    monkeypatch.setenv("ORCA_PRINTER_URL", "http://user:pw@192.0.2.10:7125")
+    override = t.PrinterTarget(url="http://192.0.2.10:7125", source="override")
+    assert t.printer_id_for(override) == t.printer_id("Test Printer") == "192.0.2.10"
+    monkeypatch.delenv("ORCA_PRINTER_URL")
+    profile = t.PrinterTarget(url="http://192.0.2.10:7125", source="profile", profile="Test Printer")
+    assert t.printer_id_for(profile) == t.printer_id("Test Printer") == "Test Printer"
+    # a target with no profile and no setting still gets its host rather than "unknown"
+    assert t.printer_id_for(t.PrinterTarget(url="http://192.0.2.10:7125", source="remembered")) == "192.0.2.10"
+
+
 def test_error_codes_are_checked_and_serialise():
     with pytest.raises(ValueError):
         PrinterError("made_up", "x")

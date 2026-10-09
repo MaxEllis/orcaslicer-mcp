@@ -94,13 +94,31 @@ def recall_remembered() -> PrinterTarget | None:
                          printer_model=d.get("printer_model"), kind=d.get("kind"), remembered_at=d.get("found_at"))
 
 
-def printer_id_for(target: PrinterTarget) -> str:
+def _host_of(raw: str | None) -> str | None:
+    """The host name of an address, never its user name or password; None when there isn't one."""
+    try:
+        return urlsplit(normalise_url(raw or "")[0]).hostname or None
+    except ValueError:
+        return None
+
+
+def printer_id(profile_name: str | None = None, *, fallback_url: str | None = None) -> str:
+    """The one rule for naming the printer in the outcome store, used by save_gcode and
+    list_print_history alike: ORCA_PRINTER_ID, else the host of ORCA_PRINTER_URL, else the printer
+    profile's name, else the host of `fallback_url` (a target found some other way), else "unknown"."""
     env = os.environ.get("ORCA_PRINTER_ID", "").strip()
     if env:
         return env
-    if target.profile:
-        return target.profile
-    return urlsplit(target.url).hostname or target.url
+    host = _host_of(os.environ.get("ORCA_PRINTER_URL", ""))
+    if host:
+        return host
+    if profile_name and profile_name.strip():
+        return profile_name
+    return _host_of(fallback_url) or "unknown"
+
+
+def printer_id_for(target: PrinterTarget) -> str:
+    return printer_id(target.profile, fallback_url=target.url)
 
 
 SET_URL_HINT = ("set ORCA_PRINTER_URL in this MCP server's settings to an address that works from here, "

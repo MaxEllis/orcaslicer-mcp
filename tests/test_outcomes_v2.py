@@ -258,3 +258,37 @@ def test_a_failed_record_does_not_leave_a_connection_behind(monkeypatch, tmp_pat
     with pytest.raises(sqlite3.OperationalError):
         oc.record_outcome(JOB, "test-printer")
     assert seen.all_closed()
+
+
+# --- a row deleted by hand: what comes back (the README says exactly this) ------------------------
+
+def _delete_row(dirpath, row_id):
+    with closing(sqlite3.connect(dirpath / "outcomes.db")) as conn:
+        conn.execute("DELETE FROM prints WHERE id=?", (row_id,))
+        conn.commit()
+
+
+def test_a_finished_print_row_deleted_by_hand_comes_back_without_its_slice_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    sid = oc.record_slice("part.gcode", "part", "h1", {"layer_height": "0.2", "wall_loops": "3"},
+                          printer_id="test-printer", sliced_at=900.0)
+    job = {**JOB, "metadata": {**JOB["metadata"], "layer_height": 0.3}}
+    assert oc.record_outcome(job, "test-printer") == sid  # the finished job joined the saved slice
+    assert oc.get(sid)["settings_summary"] == {"layer_height": "0.2", "wall_loops": "3"}
+    _delete_row(tmp_path, sid)
+    assert oc.get(sid) is None
+    again = oc.record_outcome(job, "test-printer")  # the next sync of the job still in the printer's history
+    row = oc.get(again)
+    assert row["job_id"] == "000042" and row["result"] == "error"
+    assert row["sliced_at"] is None  # no longer tied to the slice
+    assert row["settings_summary"] == {"layer_height": 0.3}  # only what the printer's file metadata carries
+
+
+def test_a_slice_row_with_no_job_stays_deleted(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
+    sid = oc.record_slice("part.gcode", "part", "h1", {"layer_height": "0.2"}, printer_id="test-printer",
+                          sliced_at=900.0)
+    _delete_row(tmp_path, sid)
+    oc.record_outcome({**JOB, "filename": "other.gcode"}, "test-printer")  # a sync of some other job
+    assert oc.get(sid) is None
+    assert [r["gcode_filename"] for r in oc.recall(limit=10)] == ["other.gcode"]

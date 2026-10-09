@@ -49,7 +49,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Documentation
 - The README and the `wait_for_printer` text say that with OctoPrint, waiting for `printing` means waiting until the job is running with the heaters at temperature, because OctoPrint reports no extrusion.
 - The README says the outcome store keeps a fingerprint of the objects' names and sizes, not their geometry, and `save_gcode` describes it the same way.
-- The README says a print row deleted from the store by hand comes back while its job is still in Moonraker's history, and that deleting the job there too drops it for good.
+- The README says a finished print's row deleted from the store by hand comes back, without its saved slice settings, while its job is still in Moonraker's history, and that deleting the job there too drops it for good.
 - The printer address setting in the Claude Desktop extension and the registry listing says a password in the address is stored as an ordinary setting, so the API key is the better choice.
 - `list_print_history` and `recall_prints` say "the slicer's estimate", because an estimate can come from another slicer's file.
 - The marketplace listing (`lhm.plugin.json`) now takes its tool descriptions from the live server with `scripts/gen_lhm_tools.py`, and a test keeps it from going stale. Before, many descriptions stopped mid-sentence or carried old `[needs M4b]` tags.

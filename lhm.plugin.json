@@ -63,7 +63,7 @@
   "tools": [
     {
       "name": "get_status",
-      "description": "App/project/preset status, dirty keys, slice validity, and whether a slice is running."
+      "description": "Snapshot of the current OrcaSlicer session: app and project info, the active print/filament/printer presets with which of their keys are modified (dirty), whether the last slice is still valid, and whether a slice is running. Read-only."
     },
     {
       "name": "get_config",
@@ -71,19 +71,19 @@
     },
     {
       "name": "set_config",
-      "description": "Apply config changes atomically. Returns {applied, errors}. On any invalid key, nothing is applied."
+      "description": "Apply config changes to the active project as unsaved overrides, atomically: if any key is invalid the whole batch is rejected and nothing changes. Returns {applied, errors}."
     },
     {
       "name": "slice",
-      "description": "Start slicing the current plate. Returns started / already_valid / conflict."
+      "description": "Start slicing the current plate in the background and return immediately, without waiting for the result. The reply is 'started' (a slice began), 'already_valid' (the plate is unchanged and the last result still holds), or a conflict if a slice is already running."
     },
     {
       "name": "get_slice_status",
-      "description": "Current/last slice state, stats, and warnings."
+      "description": "State of the current or most recent slice: state (slicing, done, error, or idle), stats (print time and filament use when done), and any warnings or errors. Read-only."
     },
     {
       "name": "get_slice_warnings",
-      "description": "Just the warnings/errors from the last (or current) slice, plus validity - the"
+      "description": "Just the warnings/errors from the last (or current) slice, plus validity: the fast 'did anything go wrong' check and the way to confirm a fix cleared."
     },
     {
       "name": "get_slice_breakdown",
@@ -91,15 +91,15 @@
     },
     {
       "name": "cancel_slice",
-      "description": "Abort a running slice, or unwedge a stale 'slicing' state (e.g. after an"
+      "description": "Abort a running slice, or unwedge a stale 'slicing' state (e.g. after an object outside the bed). Safe when idle."
     },
     {
       "name": "slice_and_wait",
-      "description": "Slice (or reuse a valid result) and wait for completion; return final stats + warnings."
+      "description": "Slice the current plate and block until it finishes, then return the final stats and warnings in one call. If the plate is already sliced and unchanged, it returns the existing result without re-slicing."
     },
     {
       "name": "apply_and_slice",
-      "description": "Apply config changes, then slice and report the resulting stats/warnings."
+      "description": "Apply config overrides and then slice in one step, returning {applied, errors, result} with the resulting stats and warnings. The changes are atomic (any invalid key rejects the whole batch) and unsaved, exactly like set_config, so they revert if the preset is reselected."
     },
     {
       "name": "compare_settings",
@@ -111,35 +111,35 @@
     },
     {
       "name": "list_objects",
-      "description": "List objects on the current plate: id (stable), name, size_mm, and transform (offset/rotation/scale). [needs M4b]"
+      "description": "List objects on the current plate: id (stable), name, size_mm, and transform (offset/rotation/scale)."
     },
     {
       "name": "set_object_config",
-      "description": "Set per-object config overrides on an object by id, e.g. {\"wall_loops\": 4, \"sparse_infill_density\": \"30%\"}. Atomic (nothing applied if any key is invalid). [needs M4c]"
+      "description": "Set per-object config overrides on an object by id, e.g. {\"wall_loops\": 4, \"sparse_infill_density\": \"30%\"}. Atomic (nothing applied if any key is invalid)."
     },
     {
       "name": "duplicate_object",
-      "description": "Duplicate an object on the plate by id (adds a copy, offset from the original). [needs M4b]"
+      "description": "Duplicate an object on the plate by id (adds a copy, offset from the original)."
     },
     {
       "name": "delete_object",
-      "description": "Delete an object from the current plate by its id. [needs M4b]"
+      "description": "Remove one object from the current plate by id. This is permanent within the session and cannot be undone through the API; the other objects keep their ids."
     },
     {
       "name": "transform_object",
-      "description": "Move/rotate/scale an object by id. translate=[dx,dy,dz] mm (relative), rotate=[rx,ry,rz] degrees (relative), scale=[sx,sy,sz] absolute factor. Provide at least one. [needs M4b]"
+      "description": "Move/rotate/scale an object by id. translate=[dx,dy,dz] mm (relative), rotate=[rx,ry,rz] degrees (relative), scale=[sx,sy,sz] absolute factor. Provide at least one."
     },
     {
       "name": "arrange_plate",
-      "description": "Auto-arrange all objects on the plate (async job; poll get_job_status until idle). [needs M4b]"
+      "description": "Auto-arrange all objects on the plate (async job; poll get_job_status until idle)."
     },
     {
       "name": "auto_orient",
-      "description": "Auto-orient all objects for printing (async job; poll get_job_status until idle). [needs M4b]"
+      "description": "Auto-orient all objects for printing (async job; poll get_job_status until idle)."
     },
     {
       "name": "get_job_status",
-      "description": "Whether the plate job worker is idle (poll after arrange_plate/auto_orient). [needs M4b]"
+      "description": "Whether the plate's background job worker is idle or still running. Read-only."
     },
     {
       "name": "watch_events",
@@ -151,27 +151,27 @@
     },
     {
       "name": "diagnose_plate",
-      "description": "One-call plate diagnosis: app/slice status, objects on the plate, bed + active"
+      "description": "One-call plate diagnosis: app/slice status, objects on the plate, bed + active skirt/brim/clearance settings, and the last slice's warnings, so you don't have to chain status->objects->config. Start here for 'why won't this slice / fit'."
     },
     {
       "name": "check_placement",
-      "description": "Estimate whether every object (plus its skirt/brim ring) fits inside the printable"
+      "description": "Estimate whether every object (plus its skirt/brim ring) fits inside the printable area. Returns per-object fit, expanded first-layer bbox, per-edge clearance (mm), and overflow."
     },
     {
       "name": "consult",
-      "description": "Retrieve curated slicing knowledge + saved context notes for a topic,"
+      "description": "Retrieve curated slicing knowledge + saved context notes for a topic, symptom, or intent. ALWAYS call before deriving or changing settings for a user goal. Composes principles per situation, never returns preset bundles. Falls back to find_config_keys/web search if empty."
     },
     {
       "name": "check_profile_physics",
-      "description": "Deterministic pre-save gate: fetches the live config, overlays optional"
+      "description": "Deterministic pre-save gate: fetches the live config, overlays optional proposed `changes`, and runs flow/temperature/geometry/cooling math. RUN THIS BEFORE save_preset. verdict=blocked means DO NOT SAVE."
     },
     {
       "name": "remember",
-      "description": "Persist a context fact for future sessions. scope: 'machine:<printer>/<filament>',"
+      "description": "Persist a context fact for future sessions. scope: 'machine:<printer>/<filament>', 'user', or 'project:<name>'. Local plain files; user-readable and deletable."
     },
     {
       "name": "describe_setting",
-      "description": "Authoritative definition of one OrcaSlicer setting: label, tooltip, type, unit, range, enum values, default. Offline; works even when OrcaSlicer is not running."
+      "description": "Authoritative definition of one OrcaSlicer setting: label, tooltip, type, unit, valid range, enum values, and default. Read-only and offline, so it works even when OrcaSlicer is not running."
     },
     {
       "name": "search_settings",
@@ -179,15 +179,15 @@
     },
     {
       "name": "load_model",
-      "description": "Load a model file (path on the OrcaSlicer host) onto the current plate."
+      "description": "Load a model file (path on the OrcaSlicer host) onto the current plate. Accepts .stl/.obj/.3mf, plus .step/.stp on fork v2.3.2-mcp.3+. Large STEP files can take a minute to tessellate; the call waits."
     },
     {
       "name": "select_preset",
-      "description": "Select a named preset. type = print|filament|printer. [needs M4a]"
+      "description": "Make the named preset the active one for its group (print, filament, or printer)."
     },
     {
       "name": "save_preset",
-      "description": "Save the currently edited settings as a named user preset (create or update,"
+      "description": "Save the currently edited settings as a named user preset (create or update, visible in the GUI immediately). type = print|filament|printer. detach=True saves it standalone instead of inheriting the current base preset; use it when creating a filament preset for a DIFFERENT material than the one selected, otherwise the new preset inherits the base's filament_type and temperatures."
     },
     {
       "name": "list_presets",
@@ -195,63 +195,63 @@
     },
     {
       "name": "set_layer_height",
-      "description": "Variable layer height for one object. mode='adaptive' (quality 0..1, higher = finer"
+      "description": "Variable layer height for one object. mode='adaptive' (quality 0..1, higher = finer detail) generates an adaptive profile; mode='reset' (aliases: 'default', 'none') restores uniform layers."
     },
     {
       "name": "set_height_range",
-      "description": "Set a per-height-band layer height on an object (e.g. 0-5mm at 0.1mm). Same exact"
+      "description": "Override the layer height over a Z band of one object (e.g. 0 to 5 mm printed at 0.1 mm for finer detail near the base). Passing the same min_z and max_z again updates that band's height; clear=True removes every band on the object."
     },
     {
       "name": "get_preset_config",
-      "description": "Read the full settings of a named preset without selecting it."
+      "description": "Read the full settings of a named preset without selecting it. type = print|filament|printer."
     },
     {
       "name": "delete_preset",
-      "description": "Delete a USER preset (system presets and the currently-selected one are refused)."
+      "description": "Delete a USER preset (system presets and the currently-selected one are refused). type = print|filament|printer."
     },
     {
       "name": "edit_preset",
-      "description": "Edit a named preset's settings and persist them: selects it, applies the"
+      "description": "Edit a named preset's settings and persist them: selects it, applies the changes atomically, saves under the same name."
     },
     {
       "name": "rename_preset",
-      "description": "Rename a USER preset: save a copy under the new name, select it, delete the old."
+      "description": "Rename a user preset by copying it to new_name, selecting the copy, and deleting the original. Only user presets can be renamed; system presets are read-only."
     },
     {
       "name": "get_gcode",
-      "description": "Retrieve the last successful slice's G-code as text. [needs M4a]"
+      "description": "Retrieve the last successful slice's G-code as text."
     },
     {
       "name": "describe_plate",
-      "description": "Machine-readable plate facts from the last slice's G-code, per object: orientation, footprint, overhang, support, and seam side, with a summary sentence."
+      "description": "Machine-readable plate facts from the last slice's G-code, per object, so you can answer orientation and placement questions instead of guessing from Euler angles or a picture: how the part stands (flat / tilted / on an edge or corner, from first-layer contact versus its widest layer), the first-layer footprint as islands, where overhang extrusions concentrate by 10 mm height band, where support stands and where its interface touches the part, and which side the outer-wall seams sit on (checked against seam_position)."
+    },
+    {
+      "name": "save_gcode",
+      "description": "Save the last successful slice's G-code and record the slice (model, a fingerprint of the objects' names and sizes, full settings snapshot, and OrcaSlicer's time and filament estimates) in the local outcome store under that filename."
+    },
+    {
+      "name": "recall_prints",
+      "description": "How did past prints of THIS model actually turn out? Matches the current plate by geometry (or by model_name if given / the slicer is offline), returning each past print's result (success/cancelled/error), your recorded verdict (e.g. 'warped'), and the settings it was sliced with."
     },
     {
       "name": "render_plate",
       "description": "Render a PNG picture of the current plate so you can SEE it."
     },
     {
-      "name": "save_gcode",
-      "description": "Save the last slice's G-code and record the slice (model, geometry, settings) so a later real print result can be joined back to it."
-    },
-    {
-      "name": "recall_prints",
-      "description": "How past prints of the current model actually turned out: result, failure reason, your verdict, and the settings used. Empty until save_gcode or list_print_history has created the local outcome store."
-    },
-    {
       "name": "get_printer_status",
-      "description": "What the printer is doing: state, temperatures, job progress and time left, and problems with plain-English hints. Read-only."
+      "description": "What the 3D printer is doing right now: state (idle, heating, printing, paused, finished, cancelled, error, shutdown, offline), nozzle and bed temperatures with their targets, the current job (file, progress, layer, time elapsed and left, and what the time left is based on), and any problems the printer reports, each in the printer's own words with a plain-English hint for common ones."
     },
     {
       "name": "wait_for_printer",
-      "description": "Wait until the printer has heated, started printing, finished the first layer, or finished; returns early on a fault."
+      "description": "Wait until the printer reaches a point in a print, checking every 5 seconds. Returns as soon as it happens (met: true), or at the timeout with the latest status (met: false)."
     },
     {
       "name": "list_print_history",
-      "description": "Recent print results with failure reasons and time against OrcaSlicer's estimate; copies them into the local outcome store."
+      "description": "How did recent prints on the printer actually end? For each finished job: result (success, cancelled or error), how long it took against the slicer's estimate, filament used, and for failed or stopped jobs the printer's own reason while its console still holds it."
     },
     {
       "name": "check_printer_match",
-      "description": "Compare the active OrcaSlicer profile with the printer's own Klipper settings: nozzle, bed size, speed and acceleration limits, temperatures, firmware retraction."
+      "description": "Does the active OrcaSlicer profile match the printer it will print on? Compares nozzle size, bed size and height, the highest speeds and accelerations, nozzle and bed temperatures, and firmware retraction against the printer's own Klipper settings."
     }
   ],
   "prompts": [

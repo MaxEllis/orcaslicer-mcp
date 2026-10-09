@@ -3,6 +3,7 @@ import time
 from email.utils import formatdate
 
 import httpx
+import pytest
 import respx
 
 import orcaslicer_mcp.server as srv
@@ -154,6 +155,17 @@ async def test_a_garbled_remembered_timestamp_does_not_break_the_reply(monkeypat
     printer_routes()
     out = await srv.get_printer_status()
     assert out["state"] == "idle" and any("remembered earlier" in n for n in out["notes"])
+
+
+@pytest.mark.parametrize("bad", ["-Infinity", "Infinity", "NaN"])
+@respx.mock
+async def test_a_non_finite_remembered_timestamp_reads_as_a_missing_one(monkeypatch, bad):
+    _orca_down(monkeypatch)
+    ptarget.REMEMBERED_PATH.write_text('{"url": "%s", "kind": "klipper", "found_at": %s}' % (P, bad))
+    printer_routes()
+    out = await srv.get_printer_status()
+    assert out["state"] == "idle" and out["printer"]["source"] == "remembered"
+    assert any("remembered earlier" in n and "ago" not in n for n in out["notes"])
 
 
 @respx.mock

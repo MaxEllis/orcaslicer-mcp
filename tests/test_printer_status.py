@@ -143,6 +143,48 @@ def test_odd_values_do_not_crash():  # Review Focus 3
     assert s["klipper"]["fan_percent"] is None
 
 
+NOT_A_NUMBER = [float("nan"), float("inf"), float("-inf")]
+
+
+@pytest.mark.parametrize("bad", NOT_A_NUMBER)
+def test_nan_and_infinity_from_a_printer_do_not_crash(bad):  # json.loads accepts NaN and Infinity
+    s = snap(kstatus(print_stats={"state": "printing", "filename": "a.gcode", "print_duration": bad,
+                                  "filament_used": bad},
+                     display_status={"progress": bad},
+                     virtual_sdcard={"progress": bad},
+                     extruder={"temperature": bad, "target": 215.0},
+                     heater_bed={"temperature": 60.0, "target": bad},
+                     fan={"speed": bad},
+                     toolhead={"position": [0.0, 0.0, bad, 0.0]},
+                     gcode_move={"homing_origin": [0.0, 0.0, bad, 0.0], "speed_factor": bad}),
+             meta={"estimated_time": bad, "first_layer_height": bad})
+    assert s["job"]["progress_percent"] is None and s["job"]["remaining_s"] is None
+    assert s["temps"]["nozzle"] == {"actual": None, "target": 215.0}
+    assert s["temps"]["bed"] == {"actual": 60.0, "target": None}
+    assert s["klipper"]["fan_percent"] is None and s["klipper"]["z_mm"] is None
+    assert isinstance(s["headline"], str) and not any(w in s["headline"].lower() for w in ("nan", "inf"))
+    octo = st.octoprint_snapshot(
+        {"state": {"text": "Printing", "flags": {"printing": True}},
+         "temperature": {"tool0": {"actual": bad, "target": 215.0}, "bed": {"actual": 60.0, "target": bad}}},
+        {"job": {"file": {"name": "a.gcode"}}, "progress": {"completion": bad, "printTime": bad, "printTimeLeft": bad}},
+        target_public=OP)
+    assert octo["job"]["progress_percent"] is None and octo["job"]["remaining_s"] is None
+    assert octo["temps"]["nozzle"]["actual"] is None
+
+
+def test_a_huge_integer_is_not_a_number_either():
+    assert st._f(10 ** 400) is None and st._f(float("nan")) is None and st._f("12.34") == 12.3
+
+
+@pytest.mark.parametrize("section", ["print_stats", "display_status", "virtual_sdcard", "toolhead", "gcode_move",
+                                     "fan", "extruder", "heater_bed", "configfile", "webhooks"])
+def test_a_status_section_that_is_not_an_object_counts_as_missing(section):
+    status = kstatus()
+    status[section] = "oops"
+    s = snap(status)
+    assert isinstance(s["headline"], str) and s["connected"] is True
+
+
 def test_console_errors_and_warnings_become_problems():
     console = [{"message": "!! Move out of range: 400.000 1.000 0.300 [0.000]", "time": 500.0},
                {"message": "!! old one", "time": 10.0}]
@@ -170,11 +212,12 @@ def test_octoprint_printing():
     assert s["headline"] == "Printing bracket: 42%, about 18 min left. Nozzle 215/215 °C, bed 60/60 °C. No problems."
 
 
-def test_octoprint_error():
-    printer = {"state": {"text": "Offline after error", "flags": {"error": True, "closedOrError": True}},
-               "temperature": {}}
+@pytest.mark.parametrize("flags", [{"error": True}, {"closedOrError": True}])
+def test_octoprint_error(flags):
+    printer = {"state": {"text": "Offline after error", "flags": flags}, "temperature": {}}
     s = st.octoprint_snapshot(printer, {}, target_public=OP)
     assert s["state"] == "error" and s["problems"][0]["message"] == "Offline after error"
+    assert s["problems"][0]["severity"] == "fatal"
 
 
 def test_octoprint_finished_job():

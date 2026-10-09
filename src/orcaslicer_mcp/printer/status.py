@@ -1,6 +1,7 @@
 """One protocol-neutral status shape, and the one-line headline the model relays as-is. Headlines
 never use em dashes (the same rule as compare_slices' headline)."""
 from __future__ import annotations
+import math
 from pathlib import PurePosixPath
 
 from .problems import console_problems, job_problem, klippy_problem, moonraker_warnings, problem
@@ -12,10 +13,22 @@ _PROGRESS_FLOOR = 0.05  # below 5 %, extrapolating time left from progress is no
 
 
 def _f(v, nd: int = 1) -> float | None:
+    """A number from a printer, or None for anything else. json.loads accepts NaN and Infinity, and
+    neither can be shown or rounded to a whole number, so they count as missing."""
     try:
-        return None if v is None else round(float(v), nd)
-    except (TypeError, ValueError):
+        x = None if v is None else float(v)
+    except (TypeError, ValueError, OverflowError):
         return None
+    return round(x, nd) if x is not None and math.isfinite(x) else None
+
+
+def _obj(v) -> dict:
+    """A Moonraker status section is an object; anything else counts as missing."""
+    return v if isinstance(v, dict) else {}
+
+
+def _seq(v) -> list:
+    return list(v) if isinstance(v, (list, tuple)) else []
 
 
 def _heater(obj) -> dict | None:
@@ -71,22 +84,18 @@ def remaining(print_duration, progress, estimate_s) -> tuple[int | None, str | N
 def klipper_snapshot(status: dict, server_info: dict, console: list[dict], *, since: float,
                      file_meta: dict | None, target_public: dict) -> dict:
     status = status or {}
-    wh = status.get("webhooks") or {}
-    ps = status.get("print_stats") or {}
-    ds = status.get("display_status") or {}
-    vs = status.get("virtual_sdcard") or {}
-    th = status.get("toolhead") or {}
-    gm = status.get("gcode_move") or {}
-    fan = status.get("fan") or {}
-    ex = status.get("extruder")
-    nozzle, bed = _heater(ex), _heater(status.get("heater_bed"))
+    wh, ps = _obj(status.get("webhooks")), _obj(status.get("print_stats"))
+    ds, vs = _obj(status.get("display_status")), _obj(status.get("virtual_sdcard"))
+    th, gm = _obj(status.get("toolhead")), _obj(status.get("gcode_move"))
+    fan, ex = _obj(status.get("fan")), _obj(status.get("extruder"))
+    nozzle, bed = _heater(ex), _heater(_obj(status.get("heater_bed")))
     disconnected = bool(server_info) and server_info.get("klippy_connected") is False
     state = "offline" if disconnected else klipper_state(wh, ps, nozzle, bed)
     progress = ds.get("progress") if ds.get("progress") is not None else vs.get("progress")
     job = None
     if ps.get("filename") and (state in ACTIVE or state in DONE):
-        info = ps.get("info") or {}
-        meta = file_meta or {}
+        info = _obj(ps.get("info"))
+        meta = _obj(file_meta)
         rem, basis = (remaining(ps.get("print_duration"), progress, meta.get("estimated_time"))
                       if state in ACTIVE else (None, None))
         job = {"file": ps.get("filename"), "state": ps.get("state"), "progress_percent": _percent(progress),
@@ -102,13 +111,12 @@ def klipper_snapshot(status: dict, server_info: dict, console: list[dict], *, si
         problems.append(problem("warning", "klipper", "Klipper is starting up; check again in a minute."))
     problems += [p for p in (klippy_problem(wh), job_problem(ps)) if p]
     problems += console_problems(console, since)
-    problems += moonraker_warnings(server_info, (status.get("configfile") or {}).get("warnings"))
-    origin = gm.get("homing_origin") or []
-    pos = th.get("position") or []
+    problems += moonraker_warnings(server_info, _obj(status.get("configfile")).get("warnings"))
+    origin, pos = _seq(gm.get("homing_origin")), _seq(th.get("position"))
     snap = {
         "printer": target_public, "connected": True, "state": state,
         "temps": {"nozzle": nozzle, "bed": bed}, "job": job, "problems": problems,
-        "klipper": {"pressure_advance": _f((ex or {}).get("pressure_advance"), 4),
+        "klipper": {"pressure_advance": _f(ex.get("pressure_advance"), 4),
                     "z_offset": _f(origin[2], 3) if len(origin) > 2 else None,
                     "speed_factor": _f(gm.get("speed_factor"), 3), "flow_factor": _f(gm.get("extrude_factor"), 3),
                     "fan_percent": _percent(fan.get("speed")), "homed_axes": th.get("homed_axes"),

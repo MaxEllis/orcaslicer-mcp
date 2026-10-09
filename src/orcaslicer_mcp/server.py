@@ -25,6 +25,7 @@ from .guard import allow_override_warnings
 from . import notes as _notes
 from . import outcomes as _outcomes
 import hashlib
+import math
 import time
 from . import plate_describe as _plate
 from .printer import target as _ptarget
@@ -1227,8 +1228,9 @@ def _printer_api_key() -> str | None:
 
 def _remembered_note(target) -> str:
     at = target.remembered_at
-    age = (f"{_duration_text(max(0.0, time.time() - at))} ago"
-           if isinstance(at, (int, float)) and not isinstance(at, bool) else "earlier")
+    # A hand-edited printer.json can hold NaN or Infinity (json.loads accepts them): that is no time at all.
+    known = isinstance(at, (int, float)) and not isinstance(at, bool) and math.isfinite(at)
+    age = f"{_duration_text(max(0.0, time.time() - at))} ago" if known else "earlier"
     return f"OrcaSlicer isn't running or can't be reached, so this uses the printer remembered {age}."
 
 

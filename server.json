@@ -38,7 +38,7 @@
         },
         {
           "name": "ORCA_PRINTER_URL",
-          "description": "Optional printer address; by default the address in OrcaSlicer's active printer profile is used. A user name and password can be part of it (http://user:password@192.0.2.10); percent-encode special characters in them (@ as %40).",
+          "description": "Optional printer address; by default the address in OrcaSlicer's active printer profile is used. A user name and password can be part of it (http://user:password@192.0.2.10); percent-encode special characters in them (@ as %40). A password in it is stored as an ordinary setting, so prefer ORCA_PRINTER_API_KEY where the printer accepts a key.",
           "isRequired": false
         },
         {

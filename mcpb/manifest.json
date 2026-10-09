@@ -74,7 +74,7 @@
     "printer_url": {
       "type": "string",
       "title": "Printer address",
-      "description": "Leave blank to use the address in OrcaSlicer's active printer profile. Set it when that address doesn't work from this computer, for example to the printer's IP address. A user name and password can be part of the address (http://user:password@192.0.2.10); percent-encode special characters in them, for example @ as %40.",
+      "description": "Leave blank to use the address in OrcaSlicer's active printer profile. Set it when that address doesn't work from this computer, for example to the printer's IP address. A user name and password can be part of the address (http://user:password@192.0.2.10); percent-encode special characters in them, for example @ as %40. A password in the address is stored as an ordinary setting, not in the credential store, so prefer the Printer API key where the printer accepts one.",
       "required": false
     },
     "printer_api_key": {

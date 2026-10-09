@@ -32,6 +32,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - An `ORCA_PRINTER_API_KEY` holding a character that can't be sent in an HTTP header (a curly quote pasted from a word processor, say) is refused with a `not_configured` message instead of a raw encoding error. The message never repeats the key.
 - An OctoPrint reply that isn't a JSON object, and a Moonraker file-info reply that is the JSON value `null`, now return `protocol_error`. The first used to fail with a raw error and the second read as "no such file".
 - With OctoPrint, a refused API key on the job request is reported as `auth_required` or `auth_rejected` like any other request, instead of becoming a note.
+- The outcome store closes its database connection when it can't set up or upgrade the store (a locked or damaged file), instead of leaving it open for the caller.
+- A printer error's extra detail can no longer replace its `error`, `message` or `hint`.
+- A console error that is only Klipper's "Printer is shutdown" or "Printer is halted" line is no longer listed as a problem. The shutdown reason is reported on its own.
 
 ### Changed
 - `get_printer_status` and `wait_for_printer` make one request fewer to a Klipper printer: the answer from the request that found the printer is reused once. Later polls of `wait_for_printer` still ask again.
@@ -41,6 +44,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `connected` in the status is false when the state is `offline`, OctoPrint keeps the job for a cancelled or errored print as Klipper does, and `headline` comes first in the result.
 - The `list_print_history` summary reads "Your last 3 successful prints with an estimate ran 9% longer than estimated (median)." (or `shorter`, or `matched the estimate`). It no longer names OrcaSlicer, because the estimate can come from another slicer's file.
 - `ended_at` in `list_print_history` carries the time zone offset, for example `2030-01-15T14:23+12:00`.
+- `~/.orcaslicer-mcp/printer.json` is now created readable only by its owner.
+
+### Documentation
+- The README and the `wait_for_printer` text say that with OctoPrint, waiting for `printing` means waiting until the job is running with the heaters at temperature, because OctoPrint reports no extrusion.
+- The README says the outcome store keeps a fingerprint of the objects' names and sizes, not their geometry, and `save_gcode` describes it the same way.
+- The README says a print row deleted from the store by hand comes back while its job is still in Moonraker's history, and that deleting the job there too drops it for good.
+- The printer address setting in the Claude Desktop extension and the registry listing says a password in the address is stored as an ordinary setting, so the API key is the better choice.
+- `list_print_history` and `recall_prints` say "the slicer's estimate", because an estimate can come from another slicer's file.
+- The marketplace listing (`lhm.plugin.json`) now takes its tool descriptions from the live server with `scripts/gen_lhm_tools.py`, and a test keeps it from going stale. Before, many descriptions stopped mid-sentence or carried old `[needs M4b]` tags.
 
 ## [0.1.15] - 2026-10-09
 

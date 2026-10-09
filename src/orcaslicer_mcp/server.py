@@ -178,7 +178,7 @@ async def get_slice_status() -> dict:
 
 @mcp.tool()
 async def get_slice_warnings() -> dict:
-    """Just the warnings/errors from the last (or current) slice, plus validity - the
+    """Just the warnings/errors from the last (or current) slice, plus validity: the
     fast 'did anything go wrong' check and the way to confirm a fix cleared.
 
     NOTE: only as complete as the API exposes. On the current fork build this may report
@@ -550,7 +550,7 @@ _PLATE_CFG_KEYS = ["printable_area", "bed_exclude_area", "skirt_loops", "skirt_d
 @mcp.tool()
 async def diagnose_plate() -> dict:
     """One-call plate diagnosis: app/slice status, objects on the plate, bed + active
-    skirt/brim/clearance settings, and the last slice's warnings - so you don't have to
+    skirt/brim/clearance settings, and the last slice's warnings, so you don't have to
     chain status->objects->config. Start here for 'why won't this slice / fit'.
 
     Slice warnings are only as complete as the fork exposes today (see get_slice_warnings).
@@ -593,7 +593,7 @@ async def check_placement() -> dict:
 async def consult(query: str) -> dict:
     """Retrieve curated slicing knowledge + saved context notes for a topic,
     symptom, or intent. ALWAYS call before deriving or changing settings for
-    a user goal. Composes principles per situation - never returns preset
+    a user goal. Composes principles per situation, never returns preset
     bundles. Falls back to find_config_keys/web search if empty.
 
     When recommending, present 2-3 concrete options quantified with
@@ -1079,9 +1079,9 @@ def _gcode_base_dir() -> Path:
 
 @mcp.tool()
 async def save_gcode(filename: str | None = None) -> dict:
-    """Save the last successful slice's G-code and record the slice (model, geometry, full settings
-    snapshot, and OrcaSlicer's time and filament estimates) in the local outcome store under that
-    filename. When that file is printed, list_print_history (or klipper-mcp's recorder) matches the
+    """Save the last successful slice's G-code and record the slice (model, a fingerprint of the
+    objects' names and sizes, full settings snapshot, and OrcaSlicer's time and filament estimates)
+    in the local outcome store under that filename. When that file is printed, list_print_history (or klipper-mcp's recorder) matches the
     finished job by filename, so the real result joins back to these settings. Returns the saved
     path; hand it to klipper-mcp's start_print. Default filename: <object>_<timestamp>.gcode. Never
     overwrites an existing file: a name collision gets a -2, -3, ... suffix. Writes into a gcode
@@ -1158,7 +1158,7 @@ async def recall_prints(model_name: str | None = None, limit: int = 5) -> dict:
     (or by model_name if given / the slicer is offline), returning each past print's result
     (success/cancelled/error), your recorded verdict (e.g. 'warped'), and the settings it was sliced
     with. Call this BEFORE slicing and tell the user anything relevant (a past warp, a failed layer
-    height). Each row also carries failure_reason (the printer's own words, when known) and OrcaSlicer's
+    height). Each row also carries failure_reason (the printer's own words, when known) and the slicer's
     estimates (est_time_s, est_filament_g). duration_s is Moonraker's whole job time, including heating
     up and any pauses, so beside the estimates it overstates an overrun; list_print_history compares the
     print time (without heating or pauses) with the estimate. filament_g comes from the G-code file's
@@ -1290,10 +1290,10 @@ async def get_printer_status() -> dict:
 async def wait_for_printer(
     until: Annotated[Literal["heated", "printing", "first_layer_done", "finished"], Field(description=(
         "What to wait for. 'heated': every heater with a target is within 3 °C of it. 'printing': "
-        "extrusion has started (OctoPrint, which reports none: the print is running with the heaters "
-        "at temperature). 'first_layer_done': the second layer has begun (Klipper only). "
-        "Without layer info from the slicer it is judged from the nozzle height, so it is approximate. "
-        "'finished': the job completed, was cancelled or errored."))],
+        "extrusion has started. OctoPrint reports no extrusion, so there it means the job is "
+        "running with the heaters at temperature. 'first_layer_done': the second layer has begun "
+        "(Klipper only); without layer info from the slicer it is judged from the nozzle height, so "
+        "it is approximate. 'finished': the job completed, was cancelled or errored."))],
     timeout_s: Annotated[int, Field(description=(
         "Seconds to wait before returning the latest status. Default 300, at most 1800. "
         "Call again to keep waiting."))] = _pwait.DEFAULT_TIMEOUT_S,
@@ -1317,9 +1317,9 @@ async def wait_for_printer(
 @mcp.tool()
 async def list_print_history(limit: int = 10) -> dict:
     """How did recent prints on the printer actually end? For each finished job: result (success,
-    cancelled or error), how long it took against OrcaSlicer's estimate, filament used, and for failed
+    cancelled or error), how long it took against the slicer's estimate, filament used, and for failed
     or stopped jobs the printer's own reason while its console still holds it. `summary` says how
-    OrcaSlicer's time estimates compare with reality once there are a few finished prints. Also copies
+    the slicer's time estimates compare with reality once there are a few finished prints. Also copies
     those jobs into the local outcome store (safe to repeat), so recall_prints can learn from them.
     Klipper printers only. `limit` is capped at 50."""
     return await _with_printer(

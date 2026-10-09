@@ -1,5 +1,5 @@
 """Recent print jobs from Klipper's own history: how each one ended, why failed ones stopped (while
-the console still holds it), how long they took against OrcaSlicer's estimate, and a copy written
+the console still holds it), how long they took against the slicer's estimate, and a copy written
 into the outcome store so recall_prints learns from real results without any other software."""
 from __future__ import annotations
 import asyncio

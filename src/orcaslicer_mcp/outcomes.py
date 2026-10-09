@@ -33,7 +33,7 @@ _RESULT = {"completed": "success", "cancelled": "cancelled"}
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS prints (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  printer_id TEXT NOT NULL DEFAULT 'swx2',
+  printer_id TEXT NOT NULL DEFAULT 'unknown',
   sliced_at REAL,
   model_name TEXT,
   geometry_hash TEXT,

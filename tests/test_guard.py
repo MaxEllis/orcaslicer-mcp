@@ -1,5 +1,5 @@
 import json
-import httpx, respx
+import httpx, pytest, respx
 import orcaslicer_mcp.server as srv
 from orcaslicer_mcp import guard
 
@@ -294,12 +294,57 @@ async def test_preset_config_redacts_secrets(monkeypatch):
     assert "hunter2" not in json.dumps(out)
 
 
-def test_userinfo_stripping_edges():
-    s = guard._strip_userinfo
-    assert s("klipper.local") == "klipper.local"
-    assert s("http://192.0.2.5") == "http://192.0.2.5"
-    assert s("http://host.invalid/path@x") == "http://host.invalid/path@x"
-    assert s("https://alice:p@ss@host.invalid/x@y") == "https://<redacted>@host.invalid/x@y"
+@pytest.mark.parametrize("url", [
+    "", "klipper.local", "192.0.2.5", "http://192.0.2.5", "http://192.0.2.10:7125/",
+    "https://[2001:db8::1]:7125/server/info", "http://192.0.2.10/octoprint/?a=1#top",
+    "http://192.0.2.10/files/a%40b",  # an encoded "@" is not a delimiter
+])
+def test_userinfo_stripping_leaves_urls_without_userinfo_alone(url):
+    assert guard._strip_userinfo(url) == url
+
+
+@pytest.mark.parametrize("url, expected", [
+    ("http://test-user:pa/ss@192.0.2.10", "http://<redacted>@192.0.2.10"),
+    ("http://test-user:pa ss@192.0.2.10", "http://<redacted>@192.0.2.10"),
+    ("http://test-user:pa?ss@192.0.2.10/", "http://<redacted>@192.0.2.10/"),
+    ("http://test-user:pa#ss@192.0.2.10:7125", "http://<redacted>@192.0.2.10:7125"),
+    ("https://test-user:p@ss@192.0.2.10/api", "https://<redacted>@192.0.2.10/api"),
+    ("http://test-user:12/34@192.0.2.10", "http://<redacted>@192.0.2.10"),  # "test-user:12" reads as host:port
+    ("http://test-user:pa://ss@192.0.2.10", "http://<redacted>@192.0.2.10"),
+    ("http://test-user@192.0.2.10", "http://<redacted>@192.0.2.10"),
+    ("http://test-user:@192.0.2.10", "http://<redacted>@192.0.2.10"),
+    ("http://test-user:pa/ss@[2001:db8::1]:7125/", "http://<redacted>@[2001:db8::1]:7125/"),
+    ("test-user:pa/ss@192.0.2.10", "<redacted>@192.0.2.10"),
+    # No scheme, and the password holds "://": "test-user:pa" must not be taken for a scheme.
+    ("test-user:pa://ss@192.0.2.10", "<redacted>@192.0.2.10"),
+    # An "@" in a path cannot be told apart from a password containing "/", so the
+    # part before it is hidden too. Over-redacting a rare URL beats leaking a password.
+    ("http://192.0.2.10/path@x", "http://<redacted>@x"),
+])
+def test_userinfo_stripping_hides_everything_before_the_last_at(url, expected):
+    assert guard._strip_userinfo(url) == expected
+
+
+@pytest.mark.parametrize("scheme", ["", "http://", "https://"])
+@pytest.mark.parametrize("ch", list("/ ?#@:%\\[]") + ["://", "\t"])
+@pytest.mark.parametrize("tail", ["", ":7125", "/printer", ":7125/a/b?c=d#e"])
+def test_no_password_character_survives_redaction(scheme, ch, tail):
+    out = guard._strip_userinfo(f"{scheme}test-user:s3c{ch}r3t@192.0.2.10{tail}")
+    assert "test-user" not in out and "s3c" not in out and "r3t" not in out
+    assert out == f"{scheme}{guard.REDACTED}@192.0.2.10{tail}"
+
+
+@respx.mock
+async def test_preset_config_hides_passwords_with_url_delimiters(monkeypatch):
+    _env(monkeypatch)
+    respx.post(f"{BASE}/api/v1/preset/config").mock(return_value=httpx.Response(200, json={
+        "config": {"print_host": "http://test-user:pa/ss w0rd@192.0.2.10",
+                   "print_host_webui": "https://test-user:pa#ss?x@192.0.2.11:7125/"}}))
+    out = await srv.get_preset_config("printer", "Test Printer")
+    assert out["config"] == {"print_host": "http://<redacted>@192.0.2.10",
+                             "print_host_webui": "https://<redacted>@192.0.2.11:7125/"}
+    dumped = json.dumps(out)
+    assert "test-user" not in dumped and "pa/ss" not in dumped and "pa#ss" not in dumped
 
 
 @respx.mock

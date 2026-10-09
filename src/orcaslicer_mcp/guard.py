@@ -63,13 +63,15 @@ UNREADABLE_KEYS = frozenset({
 
 # What get_preset_config hides: credentials outright, and any user:password inside a host
 # URL (the print_host tooltip documents https://user:password@host/). The host itself, the
-# CA file path and the port stay visible so upload problems remain diagnosable.
+# CA file path and the port stay visible so upload problems remain diagnosable. Keep
+# _strip_userinfo in step with strip_url_userinfo() in the fork's RemoteAPIController.cpp.
 CREDENTIAL_KEYS = frozenset({"printhost_apikey", "printhost_password", "printhost_user"})
 URL_KEYS = frozenset({"print_host", "print_host_webui"})
 REDACTED = "<redacted>"
 
-# Greedy up to the last "@" before the first "/", so a password containing "@" is covered.
-_URL_USERINFO = re.compile(r"^((?:[A-Za-z][A-Za-z0-9+.-]*://)?)[^/\s]+@")
+# A leading RFC 3986 scheme. It has to start the value and be letters, so in
+# "user:pa://ss@host" the "user:pa" is not mistaken for one.
+_URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 
 
 class BlockedKey(ApiError):
@@ -158,7 +160,17 @@ def changed_keys(changes: dict, hits: list[str], current: dict) -> list[str]:
 
 
 def _strip_userinfo(url: str) -> str:
-    return _URL_USERINFO.sub(lambda m: m.group(1) + REDACTED + "@", url, count=1)
+    """Replace everything between the scheme and the LAST "@" with the placeholder.
+
+    A host never contains "@", while a password may contain "@", "/", "?", "#" or spaces,
+    so cutting at the last one hides all of them. A URL with an "@" in its path loses the
+    part before it as well: it cannot be told apart from a password containing "/", and
+    over-redacting a rare URL is the safe way to be wrong."""
+    at = url.rfind("@")
+    if at < 0:
+        return url
+    scheme = _URL_SCHEME.match(url)
+    return (scheme.group(0) if scheme else "") + REDACTED + url[at:]
 
 
 def redact_secrets(cfg: dict) -> dict:

@@ -170,7 +170,8 @@ class OrcaClient:
         return await self._request("GET", "/api/v1/presets")
 
     async def get_preset_config(self, ptype: str, name: str) -> dict:
-        # The fork returns this unfiltered (printhost_apikey/user/password included).
+        # Fork builds before v2.4.2-mcp.10 return this unfiltered (printhost_apikey/user/password
+        # included); later ones redact it too. This pass covers both.
         return redact_secrets(await self._request(
             "POST", "/api/v1/preset/config", json={"type": ptype, "name": name}))
 

@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-10-09
+
 ### Added
 - Printer feedback: `get_printer_status`, `wait_for_printer`, `list_print_history` and `check_printer_match`. The server finds the printer from OrcaSlicer's active printer profile, or `ORCA_PRINTER_URL`. Klipper (Moonraker) printers get all four tools; OctoPrint gets status and waiting, with `ORCA_PRINTER_API_KEY` when it needs a key. Read-only: no command, G-code or file is ever sent to the printer. The server only reads, with HTTP GET requests (carrying the API key, or the user name and password from `ORCA_PRINTER_URL`, when you set them). `wait_for_printer` also returns early when the job ends before the point it waits for, as when a print is cancelled while it heats. Requested in orcaslicer-mcp#12.
 - The Claude Desktop extension has settings for the printer address, its API key and the printer name used in the outcome store.
@@ -27,7 +29,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `select_preset` says that it discards unsaved overrides in every preset group, not only the one being switched, and that newer slicer builds list the affected groups as `discarded_changes`. Reported by @RoyPorter (orcaslicer-mcp#10).
 
 ### Known issues
-- `compare_settings` and `compare_slices` snapshot with `get_config` and restore with `set_config`, so for a per-filament key on a multi-filament setup the restore writes back the merged list. That never actually restored the original - it corrupted the filament preset the same way a manual write did. On OrcaSlicer MCP v2.4.2-mcp.12 and later the restore now fails loudly with `per_filament_length_mismatch` instead of corrupting silently; re-select the filament preset to recover. Making the snapshot/restore path per-filament aware is still to do.
+- `compare_settings` and `compare_slices` snapshot with `get_config` and restore with `set_config`, so for a per-filament key on a multi-filament setup the restore writes back the merged list. That never actually restored the original: it corrupted the filament preset the same way a manual write did. On OrcaSlicer MCP v2.4.2-mcp.12 and later the restore now fails loudly with `per_filament_length_mismatch` instead of corrupting silently; re-select the filament preset to recover. Making the snapshot/restore path per-filament aware is still to do.
 
 ## [0.1.14] - 2026-10-02
 

@@ -10,6 +10,7 @@ import statistics
 from .. import outcomes as _outcomes
 from ..outcomes import _num
 from .errors import PrinterError
+from .problems import trim_klipper_message
 
 FINISHED = frozenset({"completed", "cancelled", "error", "klippy_shutdown", "klippy_disconnect", "interrupted"})
 CONSOLE_LINES = 1000          # Moonraker's default console store size
@@ -18,7 +19,9 @@ MIN_JOBS_FOR_SUMMARY = 3
 
 
 def failure_reason(job: dict, console: list[dict]) -> str | None:
-    """The last console error ('!!' line) between the job's start and end (+ a grace period)."""
+    """The last console error ('!!' line) between the job's start and end (+ a grace period). The text is
+    trimmed like the status's console errors, and a line with nothing left (Klipper's "Printer is shutdown",
+    which follows the real fault) is skipped: the first reason stored for a row is never replaced."""
     if job.get("status") == "completed":
         return None
     start, end = _num(job.get("start_time")), _num(job.get("end_time"))
@@ -28,7 +31,9 @@ def failure_reason(job: dict, console: list[dict]) -> str | None:
     for line in console or []:
         msg, t = str(line.get("message") or ""), _num(line.get("time"))
         if msg.startswith("!!") and t is not None and start <= t <= end + REASON_GRACE_S:
-            hits.append(msg[2:].strip())
+            text = trim_klipper_message(msg[2:])
+            if text:
+                hits.append(text)
     return hits[-1] if hits else None
 
 

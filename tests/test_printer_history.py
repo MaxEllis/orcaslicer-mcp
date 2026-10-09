@@ -33,6 +33,30 @@ def test_failure_reason_takes_the_last_console_error_inside_the_job():
     assert h.failure_reason(job, console) == "last"
 
 
+def test_failure_reason_skips_klippers_boilerplate_so_a_later_shutdown_line_cannot_replace_the_real_one():
+    # Klipper prints "!! Printer is shutdown" after the real fault; the stored reason is permanent
+    job = {"status": "error", "start_time": 1000.0, "end_time": 1100.0}
+    console = [{"message": "!! Move out of range: 305.000 0.000 0.200 [0.000]", "time": 1050.0},
+               {"message": "!! Printer is shutdown", "time": 1051.0},
+               {"message": "!! Printer is halted", "time": 1052.0}]
+    assert h.failure_reason(job, console) == "Move out of range: 305.000 0.000 0.200 [0.000]"
+
+
+def test_failure_reason_trims_the_restart_instructions_like_the_status_does():
+    job = {"status": "error", "start_time": 1000.0, "end_time": 1100.0}
+    console = [{"message": "!! Move out of range: 305.000 0.000 0.200 [0.000]\n"
+                           "Once the underlying issue is corrected, use the\n\"FIRMWARE_RESTART\" command to reset the firmware.",
+                "time": 1050.0}]
+    assert h.failure_reason(job, console) == "Move out of range: 305.000 0.000 0.200 [0.000]"
+
+
+def test_a_window_holding_only_boilerplate_has_no_reason():
+    job = {"status": "error", "start_time": 1000.0, "end_time": 1100.0}
+    console = [{"message": "!! Printer is shutdown", "time": 1050.0}, {"message": "!! Printer is halted", "time": 1051.0},
+               {"message": "!!", "time": 1052.0}, {"message": "!! ", "time": 1053.0}]
+    assert h.failure_reason(job, console) is None
+
+
 def test_completed_jobs_and_missing_times_have_no_reason():
     line = [{"message": "!! x", "time": 5.0}]
     assert h.failure_reason({"status": "completed", "start_time": 0.0, "end_time": 9.0}, line) is None

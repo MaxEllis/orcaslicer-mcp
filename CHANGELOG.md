@@ -17,6 +17,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Documentation
 - README: the introduction, security notes and privacy policy now name the printer as the one other place the server connects to, read-only, and the data-retention entry lists the outcome store and `printer.json`.
+- `docs/order-of-operations.md` explains why filament edits come before print edits on a multi-filament setup (per-filament keys are read merged but written to the one preset open in the Filament tab, and `select_preset` discards unsaved overrides in every group), with a recipe for setting up a multi-material plate. Linked from the README and from the `set_config` and `select_preset` docstrings.
 - `set_config` warns against echoing a `get_config` value back for a per-filament setting (`hot_plate_temp`, `fan_min_speed`, `nozzle_temperature_initial_layer`, ...). `get_config` reports those merged across every loaded filament, while the write lands in the one filament preset open in the Filament tab, so the merged string corrupted that preset's list. Reported by @RoyPorter (orcaslicer-mcp#9); OrcaSlicer MCP v2.4.2-mcp.12 rejects the merged shape instead of storing it.
 - `select_preset` says that it discards unsaved overrides in every preset group, not only the one being switched, and that newer slicer builds list the affected groups as `discarded_changes`. Reported by @RoyPorter (orcaslicer-mcp#10).
 

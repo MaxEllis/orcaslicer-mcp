@@ -136,7 +136,11 @@ async def set_config(
     if the preset is reselected; call save_preset to persist them. Each apply invalidates the
     last slice, so re-slice afterwards. It does not run the physics gate, so for temperature,
     speed, acceleration, or flow keys run check_profile_physics before trusting the result. To
-    edit a stored preset rather than the live project, use edit_preset."""
+    edit a stored preset rather than the live project, use edit_preset.
+
+    On a multi-filament setup do filament edits before print edits: changing another slot's
+    value means select_preset for that slot, which discards unsaved print overrides
+    (docs/order-of-operations.md)."""
     try:
         async with _client() as c:
             return await c.put_config(changes)
@@ -778,7 +782,8 @@ async def select_preset(
     which groups were affected as 'discarded_changes' in the reply.
 
     This also makes it the canonical way to reset dirty config. It leaves the last slice
-    invalid, so re-slice afterwards. Use list_presets for valid names."""
+    invalid, so re-slice afterwards. Use list_presets for valid names. Because of this, make
+    filament selections and edits before print-group edits (docs/order-of-operations.md)."""
     try:
         async with _client() as c:
             return await c.select_preset(type, name)

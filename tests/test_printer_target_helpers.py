@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 
 import pytest
 
@@ -239,6 +241,13 @@ def test_a_failed_remember_leaves_the_old_file_whole_and_no_temp_file(monkeypatc
     assert t.REMEMBERED_PATH.read_text() == before
     assert [p.name for p in t.REMEMBERED_PATH.parent.iterdir()] == ["printer.json"]
 
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_the_remembered_printer_file_is_readable_only_by_its_owner():
+    t.REMEMBERED_PATH.write_text("{}")
+    os.chmod(t.REMEMBERED_PATH, 0o644)  # an older, wider file is replaced by an owner-only one
+    t.remember(_remembered_target())
+    assert stat.S_IMODE(os.stat(t.REMEMBERED_PATH).st_mode) == 0o600
 
 # --- recall_remembered(): validates what it reads --------------------------------------------------
 

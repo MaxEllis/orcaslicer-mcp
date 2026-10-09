@@ -3,8 +3,11 @@ printer's own words, and for common Klipper messages a plain-English hint. A mes
 in the table passes through word for word with no hint: never guess a cause."""
 from __future__ import annotations
 
-# (lower-case needle, hint). First match wins, so the specific "move out of range" sits before the
-# temperature entries that also contain "out of range".
+# (lower-case needle, hint): the first needle found in the message wins. The needles are distinctive
+# phrases from Klipper's own wording and none contains another, so the order is not load-bearing.
+# Keep them specific: a broad needle would attach a wrong hint to an unrelated message, such as the
+# config error "Option 'max_temp' in section 'extruder' must be specified". A message that matches
+# nothing is better left without a hint.
 HINTS: tuple[tuple[str, str], ...] = (
     ("lost communication with mcu",
      "The printer's control board isn't talking to the Pi: usually the printer is switched off or its "
@@ -67,18 +70,26 @@ def klippy_problem(webhooks: dict) -> dict | None:
 def job_problem(print_stats: dict) -> dict | None:
     if (print_stats or {}).get("state") != "error":
         return None
-    return problem("error", "job", (print_stats.get("message") or "").strip() or "The print stopped with an error.")
+    msg = trim_klipper_message(print_stats.get("message") or "") or "The print stopped with an error."
+    return problem("error", "job", msg)
 
 
 def console_problems(store: list[dict], since: float) -> list[dict]:
-    """Error lines (Klipper prefixes them with '!!') at or after `since`, newest five."""
-    out = []
+    """Error lines (Klipper prefixes them with '!!') at or after `since`, newest five. The store is
+    oldest first. Messages are trimmed like the rest of Klipper's text, a line with nothing left
+    (just the restart boilerplate) is dropped, and identical messages collapse into their newest
+    occurrence, so a fault that repeats cannot push every other error out of the five."""
+    newest: dict[str, dict] = {}
     for line in store or []:
         msg, t = str(line.get("message") or ""), line.get("time")
         if not msg.startswith("!!") or not isinstance(t, (int, float)) or t < since:
             continue
-        out.append(problem("error", "console", msg[2:].strip(), at=float(t)))
-    return out[-5:]
+        text = trim_klipper_message(msg[2:])
+        if not text:
+            continue
+        newest.pop(text, None)  # re-inserting moves it to the end: the newest occurrence stays
+        newest[text] = problem("error", "console", text, at=float(t))
+    return list(newest.values())[-5:]
 
 
 def moonraker_warnings(server_info: dict, config_warnings: list | None = None) -> list[dict]:

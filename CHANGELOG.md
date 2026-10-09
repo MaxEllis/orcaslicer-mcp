@@ -15,10 +15,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - A damaged or hand-edited `printer.json` can no longer break a status call: the remembered address, protocol and time are checked when read, and the file is written in one atomic step.
 - Errors from finding the printer (a bad `ORCA_PRINTER_URL`, a profile with no address, an unsupported connection type, OrcaSlicer not reachable) now carry a `printer` entry saying where the address came from.
 - A printer address with port 0 is refused as not valid.
+- While Klipper is starting up (right after a firmware restart, say), `get_printer_status` no longer shows 0 °C for the heaters and a warning count. It leaves the temperatures empty, because the sensors haven't been read yet, and the headline is "Klipper is starting up; check again in a minute."
+- Console errors in the status lose Klipper's repeated restart instructions, as other Klipper messages already did, and an error that repeats shows once (its newest occurrence) instead of filling the list of five recent errors. A job's error message is trimmed the same way.
+- Layer numbers in the job are always whole numbers or null. Text or a non-finite number from a printer no longer reaches the result.
 
 ### Changed
 - `get_printer_status` and `wait_for_printer` make one request fewer to a Klipper printer: the answer from the request that found the printer is reused once. Later polls of `wait_for_printer` still ask again.
 - A printer found through OrcaSlicer's profile is tried first with the protocol that answered last time at the same address, so a new session makes fewer attempts.
+- When a printer is heating with its job already under way (OctoPrint changing temperature mid-print), the headline reads "Printing benchy: 28%, heating to the new target.", with the time left when it is known. A Klipper job's first heat-up still reads "Heating up to print benchy."
+- The headline says "almost done" when no time is left or progress is 100 %, instead of "about 1 min left".
+- `connected` in the status is false when the state is `offline`, OctoPrint keeps the job for a cancelled or errored print as Klipper does, and `headline` comes first in the result.
 
 ## [0.1.15] - 2026-10-09
 

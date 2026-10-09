@@ -10,6 +10,7 @@ ACTIVE = frozenset({"heating", "printing", "paused"})
 DONE = frozenset({"finished", "cancelled", "error"})
 NEAR_TARGET_C = 3.0
 _PROGRESS_FLOOR = 0.05  # below 5 %, extrapolating time left from progress is noise
+STARTING_UP = "Klipper is starting up; check again in a minute."
 
 
 def _f(v, nd: int = 1) -> float | None:
@@ -55,6 +56,14 @@ def _percent(fraction) -> int | None:
     return None if v is None else int(round(v * 100))
 
 
+def _whole(v) -> int | None:
+    """A layer number: a whole number from a printer, or None for anything else (text, NaN, a bool)."""
+    if isinstance(v, bool):
+        return None
+    x = _f(v, 0)
+    return None if x is None else int(x)
+
+
 def klipper_state(webhooks: dict, print_stats: dict, nozzle: dict | None, bed: dict | None) -> str:
     ks = (webhooks or {}).get("state")
     if ks == "shutdown":
@@ -88,7 +97,9 @@ def klipper_snapshot(status: dict, server_info: dict, console: list[dict], *, si
     ds, vs = _obj(status.get("display_status")), _obj(status.get("virtual_sdcard"))
     th, gm = _obj(status.get("toolhead")), _obj(status.get("gcode_move"))
     fan, ex = _obj(status.get("fan")), _obj(status.get("extruder"))
-    nozzle, bed = _heater(ex), _heater(_obj(status.get("heater_bed")))
+    # While Klipper starts up its sensors have not been read: it reports 0, which is not a measurement.
+    starting = wh.get("state") == "startup"
+    nozzle, bed = (None, None) if starting else (_heater(ex), _heater(_obj(status.get("heater_bed"))))
     disconnected = bool(server_info) and server_info.get("klippy_connected") is False
     state = "offline" if disconnected else klipper_state(wh, ps, nozzle, bed)
     progress = ds.get("progress") if ds.get("progress") is not None else vs.get("progress")
@@ -99,7 +110,7 @@ def klipper_snapshot(status: dict, server_info: dict, console: list[dict], *, si
         rem, basis = (remaining(ps.get("print_duration"), progress, meta.get("estimated_time"))
                       if state in ACTIVE else (None, None))
         job = {"file": ps.get("filename"), "state": ps.get("state"), "progress_percent": _percent(progress),
-               "layer": {"current": info.get("current_layer"), "total": info.get("total_layer")},
+               "layer": {"current": _whole(info.get("current_layer")), "total": _whole(info.get("total_layer"))},
                "elapsed_s": _f(ps.get("print_duration"), 0), "remaining_s": rem, "remaining_basis": basis,
                "filament_used_mm": _f(ps.get("filament_used"), 0),
                "first_layer_height": _f(meta.get("first_layer_height"), 3)}
@@ -107,14 +118,14 @@ def klipper_snapshot(status: dict, server_info: dict, console: list[dict], *, si
     if disconnected:
         problems.append(problem("fatal", "moonraker",
                                 "Klipper isn't connected to Moonraker: it may be starting up or may have crashed."))
-    if wh.get("state") == "startup":
-        problems.append(problem("warning", "klipper", "Klipper is starting up; check again in a minute."))
+    if starting:
+        problems.append(problem("warning", "klipper", STARTING_UP))
     problems += [p for p in (klippy_problem(wh), job_problem(ps)) if p]
     problems += console_problems(console, since)
     problems += moonraker_warnings(server_info, _obj(status.get("configfile")).get("warnings"))
     origin, pos = _seq(gm.get("homing_origin")), _seq(th.get("position"))
-    snap = {
-        "printer": target_public, "connected": True, "state": state,
+    body = {
+        "printer": target_public, "connected": state != "offline", "state": state,
         "temps": {"nozzle": nozzle, "bed": bed}, "job": job, "problems": problems,
         "klipper": {"pressure_advance": _f(ex.get("pressure_advance"), 4),
                     "z_offset": _f(origin[2], 3) if len(origin) > 2 else None,
@@ -122,8 +133,8 @@ def klipper_snapshot(status: dict, server_info: dict, console: list[dict], *, si
                     "fan_percent": _percent(fan.get("speed")), "homed_axes": th.get("homed_axes"),
                     "z_mm": _f(pos[2], 2) if len(pos) > 2 else None},
     }
-    snap["headline"] = headline(snap)
-    return snap
+    # While starting up the one sentence is the whole answer: no temperatures, no warning count.
+    return {"headline": STARTING_UP if starting else headline(body), **body}
 
 
 def octoprint_snapshot(printer: dict | None, job: dict | None, *, target_public: dict) -> dict:
@@ -158,7 +169,7 @@ def octoprint_snapshot(printer: dict | None, job: dict | None, *, target_public:
         else:
             state = "idle"
     out_job = None
-    if fname and (state in ACTIVE or state == "finished"):
+    if fname and (state in ACTIVE or state in DONE):
         left = _f(pr.get("printTimeLeft"), 0)
         out_job = {"file": fname, "state": job.get("state"),
                    "progress_percent": None if completion is None else int(round(completion)),
@@ -166,10 +177,9 @@ def octoprint_snapshot(printer: dict | None, job: dict | None, *, target_public:
                    "remaining_s": None if left is None or state not in ACTIVE else int(left),
                    "remaining_basis": "printer_estimate" if left is not None and state in ACTIVE else None,
                    "filament_used_mm": None, "first_layer_height": None}
-    snap = {"printer": target_public, "connected": True, "state": state,
+    body = {"printer": target_public, "connected": state != "offline", "state": state,
             "temps": {"nozzle": nozzle, "bed": bed}, "job": out_job, "problems": problems}
-    snap["headline"] = headline(snap)
-    return snap
+    return {"headline": headline(body), **body}
 
 
 def _name(file: str | None) -> str:
@@ -201,22 +211,48 @@ def _temps_text(temps: dict) -> str | None:
     return text[0].upper() + text[1:] + "."
 
 
+def _left_text(job: dict) -> str | None:
+    """The end of a job reads "almost done"; a rounded-up "about 1 min left" would be wrong there."""
+    if job.get("remaining_s") == 0 or (job.get("progress_percent") or 0) >= 100:
+        return "almost done"
+    if job.get("remaining_s") is not None:
+        return f"about {_dur(job['remaining_s'])} left"
+    return None
+
+
+def _job_line(verb: str, name: str, job: dict, *, left: bool, tail: str = "") -> str:
+    line = f"{verb} {name}"
+    if job.get("progress_percent") is not None:
+        line += f": {job['progress_percent']}%"
+    layer = job.get("layer") or {}
+    if layer.get("current") and layer.get("total"):
+        line += f" (layer {layer['current']}/{layer['total']})"
+    if left and (text := _left_text(job)):
+        line += f", {text}"
+    return line + tail + "."
+
+
+def _heating_mid_job(job: dict) -> bool:
+    """Heating with the job already under way: a heater is catching up to a new target (OctoPrint
+    cannot tell this from its start G-code still heating). Klipper reports exactly 0 mm of filament
+    before the first extrusion, so a Klipper job at 0 mm is the first heat-up, even when the file
+    position is above 0 because of a large header."""
+    return (job.get("progress_percent") or 0) > 0 and job.get("filament_used_mm") != 0
+
+
 def headline(snap: dict) -> str:
     state = snap.get("state")
     job = snap.get("job") or {}
     name = _name(job.get("file"))
-    if state in ("printing", "paused"):
-        first = f"{'Printing' if state == 'printing' else 'Paused'} {name}"
-        if job.get("progress_percent") is not None:
-            first += f": {job['progress_percent']}%"
-        layer = job.get("layer") or {}
-        if layer.get("current") and layer.get("total"):
-            first += f" (layer {layer['current']}/{layer['total']})"
-        if state == "printing" and job.get("remaining_s") is not None:
-            first += f", about {_dur(job['remaining_s'])} left"
-        first += "."
+    if state == "printing":
+        first = _job_line("Printing", name, job, left=True)
+    elif state == "paused":
+        first = _job_line("Paused", name, job, left=False)
     elif state == "heating":
-        first = f"Heating up to print {name}."
+        if _heating_mid_job(job):
+            first = _job_line("Printing", name, job, left=True, tail=", heating to the new target")
+        else:
+            first = f"Heating up to print {name}."
     elif state == "finished":
         first = f"Finished {name}."
     elif state == "cancelled":

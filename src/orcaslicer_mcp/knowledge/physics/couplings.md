@@ -33,8 +33,8 @@ but no published source validates these slopes; CNC Kitchen's V6 skip-point
 data suggests a shallower slope (~0.2 mm³/s per °C) for the SKIPPING
 threshold. These rules are deliberately steeper/more conservative because
 they target QUALITY-grade extrusion (strong layer bonds), which degrades
-well before the extruder skips, and they match the real 2026-07-18
-Sidewinder incident (205 °C weak layers at ~14 mm³/s; 215 °C sound). Two
+well before the extruder skips, and they match a real case (205 °C weak
+layers at ~14 mm³/s; 215 °C sound). Two
 structural limits apply regardless: sustainable flow can never exceed the
 hotend's melt-capacity ceiling (heater power bound — see flow-limits.md),
 and the profile's own `filament_max_volumetric_speed` gate catches demand
@@ -59,7 +59,7 @@ for PLA, 220 °C for PETG, 225 °C for ABS/ASA) the material isn't reliably
 above its melt threshold and sustainable flow is effectively zero,
 regardless of what the linear formula evaluates to.
 
-## Worked example (real case, 2026-07-18 Sidewinder X2)
+## Worked example (a real case)
 
 A profile ran PLA at `nozzle_temperature = 205 °C` with a 0.8 mm nozzle at
 0.4 mm layers. Sustainable flow at that temperature:

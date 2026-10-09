@@ -295,7 +295,7 @@ async def test_preset_config_redacts_secrets(monkeypatch):
 
 
 @pytest.mark.parametrize("url", [
-    "", "klipper.local", "192.0.2.5", "http://192.0.2.5", "http://192.0.2.10:7125/",
+    "", "printer.local", "192.0.2.5", "http://192.0.2.5", "http://192.0.2.10:7125/",
     "https://[2001:db8::1]:7125/server/info", "http://192.0.2.10/octoprint/?a=1#top",
     "http://192.0.2.10/files/a%40b",  # an encoded "@" is not a delimiter
 ])

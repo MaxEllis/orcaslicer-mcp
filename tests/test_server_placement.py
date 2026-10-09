@@ -10,8 +10,8 @@ def _env(m):
 async def test_check_placement_live(monkeypatch):
     _env(monkeypatch)
     objs = {"count": 1, "objects": [
-        {"id": 91, "index": 0, "name": "Case Bottom.stl", "size_mm": [249.9, 269.9, 94.0],
-         "instances": 1, "transform": {"offset": [150, 150, 47], "rotation": [0, 0, 0], "scale": [1, 1, 1]}}]}
+        {"id": 91, "index": 0, "name": "enclosure.stl", "size_mm": [250.0, 270.0, 90.0],
+         "instances": 1, "transform": {"offset": [150, 150, 45], "rotation": [0, 0, 0], "scale": [1, 1, 1]}}]}
     cfg = {"config": {"printable_area": "0x0,300x0,300x300,0x300", "brim_type": "outer_only",
                       "brim_width": "10", "brim_object_gap": "0.1", "skirt_loops": "0"}}
     respx.get(url__regex=r"http://x:13130/api/v1/objects.*").mock(

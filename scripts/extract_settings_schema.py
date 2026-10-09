@@ -7,7 +7,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from orcaslicer_mcp.schema_extract import parse_print_config  # noqa: E402
 
-DEFAULT_SRC = Path("/home/max/projects/3d-printer/orca-relay/src/libslic3r/PrintConfig.cpp")
 DEFAULT_OUT = Path(__file__).resolve().parents[1] / "src/orcaslicer_mcp/data/print_settings_schema.json"
 
 
@@ -22,7 +21,8 @@ def git_sha(src: Path) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", type=Path, default=DEFAULT_SRC)
+    ap.add_argument("--src", type=Path, required=True,
+                    help="OrcaSlicer source file src/libslic3r/PrintConfig.cpp")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     ap.add_argument("--min-count", type=int, default=600)
     ap.add_argument("--date", default=None, help="override extraction date (YYYY-MM-DD)")

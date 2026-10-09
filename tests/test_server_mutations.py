@@ -72,9 +72,9 @@ async def test_duplicate_object(monkeypatch):
 async def test_set_object_config(monkeypatch):
     _env(monkeypatch)
     respx.put("http://x:13130/api/v1/objects/9/config").mock(
-        return_value=httpx.Response(200, json={"applied": ["wall_loops"], "errors": {}, "object": "cube20"}))
+        return_value=httpx.Response(200, json={"applied": ["wall_loops"], "errors": {}, "object": "cube"}))
     out = await srv.set_object_config(9, {"wall_loops": 4})
-    assert out["applied"] == ["wall_loops"] and out["object"] == "cube20"
+    assert out["applied"] == ["wall_loops"] and out["object"] == "cube"
 
 
 @respx.mock

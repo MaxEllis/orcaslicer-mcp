@@ -1,6 +1,6 @@
 # describe_plate: machine-readable plate facts for the model
 
-Date: 2026-09-08. Status: design approved in conversation (grill-me session), spec pending Max's review.
+Date: 2026-09-08. Status: design approved in conversation (grill-me session), spec pending review.
 Supersedes the same-day "MCP App plate viewer" draft, which was withdrawn after the grill: an
 interactive viewer helps the human, and the human already has the OrcaSlicer GUI. The party that
 cannot see the plate is the model.
@@ -11,12 +11,12 @@ After a slice the model is asked, and repeatedly gets wrong, four questions it c
 by staring at one `render_plate` PNG or by inferring from Euler angles and role lists:
 
 1. **Orientation.** Which way is the part standing (flat, tilted, on an edge or corner)? Misread twice
-   on the tube connector before `render_plate` existed; a PNG still needs the model to read a picture.
+   on a real part before `render_plate` existed; a PNG still needs the model to read a picture.
 2. **Plate contact.** How big is the first-layer footprint and how does it compare with the part's
    widest cross-section? `on_plate` is a boolean; footprint area was never available.
 3. **Where support went.** Inferred from "a support role exists in the breakdown". That says support
    exists, not that it is under the barbs rather than under the arm.
-4. **Seam and overhang location.** Never answered. The wavy-wall speckle and the Body6 barb scarring
+4. **Seam and overhang location.** Never answered. Speckle on a textured wall and scarring on small barbs
    were about where the seam and the overhang extrusions landed.
 
 All four are toolpath questions once a slice exists, and Orca's G-code carries the data: `;TYPE:` roles
@@ -98,7 +98,7 @@ robust to Orca splitting a wall loop across travel moves and needs no geometry l
 Per-object output shape:
 
 ```json
-{"name": "Body4.stl", "copies": 3, "summary": "...",
+{"name": "bracket.stl", "copies": 3, "summary": "...",
  "orientation": {"class": "edge_or_corner", "contact_ratio": 0.08},
  "footprint": {"area_mm2": 142, "bbox": [..], "islands": [{"area_mm2": 47, "bbox": [..]}, ...]},
  "overhang": {"bands": [{"z0": 0, "z1": 10, "share": 0.31}, ...], "total_mm": 1534},
@@ -114,7 +114,7 @@ Top level: `per_object`, `objects: [...]`, `plate: {printable_area, layer_count,
 
 Written server-side so the wording is stable and the model relays instead of computing:
 
-> Body4.stl (3 copies) stands on an edge or corner: first-layer contact is 8% of its widest layer,
+> bracket.stl (3 copies) stands on an edge or corner: first-layer contact is 8% of its widest layer,
 > in 3 islands of about 47 mm2 each. Overhang extrusions concentrate at Z 0 to 20 mm. Tree support
 > is present from Z 0.4 to 56.8 mm, touching the part in 6 zones (listed). Seams align on the +Y side
 > (82%), matching seam_position=back.
@@ -140,10 +140,11 @@ Written server-side so the wording is stable and the model relays instead of com
 
 ## Testing
 
-- Real fixtures under `tests/fixtures/`, stored as `.gcode.xz` (raw `.gcode` is gitignored, rule 4):
-  - `cube20_flat.gcode.xz` (27 KB): one object, flat, no support, no overhang, seam `back`.
+- Real fixtures under `tests/fixtures/`, stored as `.gcode.xz` (raw `.gcode` is gitignored). Thumbnails, profile names and the start macro are
+  stripped; the toolpaths and five generic config keys stay:
+  - `cube_flat.gcode.xz`: one object, flat, no support, no overhang, seam `back`.
     Expect class `flat`, contact ratio about 1.0, one island about 400 mm2, no support, seam `+Y`.
-  - `body4_corner_x3_support.gcode.xz` (827 KB): three copies of the Body4 connector rotated Z -45 then
+  - `bracket_corner_x3_support.gcode.xz`: three copies of a three-armed bracket rotated Z -45 then
     Y -54.7 (the corner stance), tree_slim support, 0.6 mm layers, sliced on the fork 2026-09-08
     (2h48m, 127 g, roles include Overhang wall, Support, Support interface). Expect class
     `edge_or_corner`, three footprint islands, overhang share highest in the 0 to 20 mm band, support
@@ -161,7 +162,7 @@ Written server-side so the wording is stable and the model relays instead of com
 
 - New tool `describe_plate` (read-only annotation), README section, CHANGELOG entry, tool count
   43 -> 44 in `lhm.plugin.json` at the next publish.
-- Prompt `slice-a-model` and the 3d-printer `print-loop` skill gain one line: after slicing, call
+- Prompt `slice-a-model` gains one line: after slicing, call
   `describe_plate` before proposing orientation or support changes.
 - Ships in orcaslicer-mcp 0.1.11 together with the mcp 2.x move.
 
@@ -170,4 +171,3 @@ Written server-side so the wording is stable and the model relays instead of com
 - `load_model` on a path that does not exist returned "not available on this OrcaSlicer build (needs
   M4a)". The fork answers a missing file with a route-level-looking 404, so `_m4_err` misclassifies it.
   Backlog item F18: distinguish missing file from missing route (fork side, or check the body text).
-- The Neutron `Body6.stl` is gone from `G:\orca-dev\tmp\Neutron`; `Body4.stl` is in Max's Downloads.

@@ -67,9 +67,9 @@ capability is actually used before spending a fork build cycle.
 
 ### Components
 
-1. **`scripts/extract_settings_schema.py`** — dev/build step, run on the relay
-   box. Input: path to `PrintConfig.cpp` (default: the relay checkout at
-   `/home/max/orca-relay/src/libslic3r/PrintConfig.cpp`; overridable by arg/env).
+1. **`scripts/extract_settings_schema.py`** — dev/build step, run against an
+   OrcaSlicer source checkout. Input: path to `src/libslic3r/PrintConfig.cpp`
+   (`--src`, required).
    Parses `def = this->add("<key>", co<Type>);` blocks and the following
    `def-><field> = ...;` lines until the next `add(`, accumulating:
    `label, category, tooltip, unit (from sidetext), type, min, max, mode,

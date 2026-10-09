@@ -1,8 +1,8 @@
 # tests/test_scenarios.py
-"""Canonical regression scenarios. The 2026-07-18 Sidewinder X2 0.8mm case."""
+"""Canonical regression scenario: a 0.8 mm nozzle profile that under-extruded at 205C."""
 from orcaslicer_mcp.physics_check import run_checks
 
-PRE_TUNE = {  # as found on the PC before optimization
+PRE_TUNE = {  # as found before tuning
     "nozzle_diameter": "0.8", "layer_height": "0.4", "line_width": "0.85",
     "inner_wall_line_width": "0.88", "inner_wall_speed": "45",
     "outer_wall_line_width": "0.8", "outer_wall_speed": "35",

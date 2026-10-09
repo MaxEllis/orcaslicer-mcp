@@ -26,7 +26,7 @@ def test_absent_store_is_a_no_op(monkeypatch, tmp_path):
 
 def test_record_slice_then_recall(monkeypatch, tmp_path):
     monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path))
-    rid = oc.record_slice("cube_x.gcode", "cube20", "h1", {"layer_height": "0.5", "junk": "1"})
+    rid = oc.record_slice("cube_x.gcode", "cube", "h1", {"layer_height": "0.5", "junk": "1"})
     rows = oc.recall(model_name="cube")
     assert rows[0]["id"] == rid and rows[0]["result"] is None
     assert rows[0]["settings_summary"] == {"layer_height": "0.5"}

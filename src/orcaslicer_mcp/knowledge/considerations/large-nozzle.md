@@ -28,8 +28,8 @@ Because demanded flow rises so sharply, `nozzle_temperature` must rise
 with it: the sustainable-flow-vs-temperature relationship in
 `physics/couplings.md` is the mechanism, and a 0.8 mm profile that keeps
 a 0.4 mm-era temperature will under-extrude even though the temperature
-"looks normal" for the material on paper. This was the real failure in
-the 2026-07-18 Sidewinder X2 session: PLA at 205°C with a 0.8 mm nozzle
+"looks normal" for the material on paper. A real case shows it: PLA at
+205°C with a 0.8 mm nozzle
 at 0.4 mm layers demanded roughly 13.8 mm³/s against a sustainable
 ceiling of only ~8.3 mm³/s at that temperature — under-extruding the
 walls — and raising `nozzle_temperature` to 215°C raised the ceiling to

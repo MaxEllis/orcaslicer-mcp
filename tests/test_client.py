@@ -21,13 +21,13 @@ async def test_get_status_normalizes_filaments_key_to_singular():
     respx.get("http://x:13130/api/v1/status").mock(
         return_value=httpx.Response(200, json={
             "app": "OrcaSlicer",
-            "presets": {"filaments": ["PLA Fast"], "print": "0.5mm", "printer": "SWX2"},
+            "presets": {"filaments": ["Generic PLA"], "print": "0.20mm Standard", "printer": "Test Printer 0.4 nozzle"},
         }))
     async with OrcaClient(CFG) as c:
         r = await c.get_status()
-    assert r["presets"]["filament"] == ["PLA Fast"]
+    assert r["presets"]["filament"] == ["Generic PLA"]
     assert "filaments" not in r["presets"]
-    assert r["presets"]["print"] == "0.5mm" and r["presets"]["printer"] == "SWX2"
+    assert r["presets"]["print"] == "0.20mm Standard" and r["presets"]["printer"] == "Test Printer 0.4 nozzle"
 
 @respx.mock
 async def test_get_status_without_presets_is_untouched():
@@ -105,7 +105,7 @@ async def test_load_model_uses_extended_timeout():
     route = respx.post("http://x:13130/api/v1/model").mock(
         return_value=httpx.Response(200, json={"loaded": True, "objects": []}))
     async with OrcaClient(CFG) as c:
-        out = await c.load_model("G:/parts/bracket.step")
+        out = await c.load_model("C:/parts/bracket.step")
     assert out["loaded"] is True
     ext = route.calls.last.request.extensions["timeout"]
     assert ext["read"] == 130.0

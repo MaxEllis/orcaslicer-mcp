@@ -10,13 +10,13 @@ def _env(m):
 async def test_list_objects_live(monkeypatch):
     _env(monkeypatch)
     payload = {"count": 1, "objects": [
-        {"id": 42, "index": 0, "name": "cube20", "size_mm": [20, 20, 20],
+        {"id": 42, "index": 0, "name": "cube", "size_mm": [20, 20, 20],
          "instances": 1, "transform": {"offset": [0, 0, 10], "rotation": [0, 0, 0], "scale": [1, 1, 1]}}]}
     respx.get("http://x:13130/api/v1/objects").mock(return_value=httpx.Response(200, json=payload))
     out = await srv.list_objects()
     assert out["count"] == 1
     assert out["objects"][0]["id"] == 42
-    assert out["objects"][0]["name"] == "cube20"
+    assert out["objects"][0]["name"] == "cube"
 
 
 @respx.mock

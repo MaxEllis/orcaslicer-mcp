@@ -61,7 +61,6 @@ def test_build_breakdown_unavailable_when_absent():
 # Orca feature token. Only the subset that overlaps predicted_flows participates in
 # prediction_check; if EITHER side renames, prediction_check would silently return []
 # for those roles. This test turns that silent failure into a loud one.
-# See docs/superpowers/plans/2026-07-20-fork-slice-breakdown.md (token contract table).
 FORK_MATCHABLE_TOKENS = {
     "outer_wall", "inner_wall", "sparse_infill", "internal_solid_infill",
     "top_surface", "gap_infill", "bridge",

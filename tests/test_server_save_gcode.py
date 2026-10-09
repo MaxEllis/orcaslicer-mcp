@@ -3,7 +3,7 @@ import orcaslicer_mcp.server as srv
 from orcaslicer_mcp import outcomes as oc
 
 B = "http://x:13130"
-OBJS = {"count": 1, "objects": [{"id": 1, "index": 0, "name": "cube20", "size_mm": [20, 20, 20], "instances": 1,
+OBJS = {"count": 1, "objects": [{"id": 1, "index": 0, "name": "cube", "size_mm": [20, 20, 20], "instances": 1,
                                  "transform": {"offset": [0, 0, 10], "rotation": [0, 0, 0], "scale": [1, 1, 1]}}]}
 CFG = {"config": {"layer_height": "0.5", "fan_max_speed": "60", "unrelated": "x"}}
 STATUS = {"presets": {"printer": "Test Printer", "print": "p", "filaments": ["f"]}}
@@ -30,8 +30,8 @@ async def test_save_gcode_writes_file_and_records_slice(monkeypatch, tmp_path):
     out = await srv.save_gcode("cube_test.gcode")
     assert out["filename"] == "cube_test.gcode" and out["bytes"] == 10
     assert (tmp_path / "gcode" / "cube_test.gcode").read_bytes() == b"G28\nG1 X1\n"
-    assert out["outcome_recorded"] is True and out["model_name"] == "cube20"
-    row = oc.recall(model_name="cube20")[0]
+    assert out["outcome_recorded"] is True and out["model_name"] == "cube"
+    row = oc.recall(model_name="cube")[0]
     assert row["gcode_filename"] == "cube_test.gcode"
     assert row["settings_summary"] == {"layer_height": "0.5", "fan_max_speed": "60"}
     assert row["geometry_hash"] == oc.geometry_hash_for(OBJS["objects"])
@@ -105,7 +105,7 @@ async def test_save_gcode_still_records_without_an_estimate(monkeypatch, tmp_pat
 async def test_save_gcode_default_name_and_sanitising(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     out = await srv.save_gcode()
-    assert out["filename"].startswith("cube20_") and out["filename"].endswith(".gcode")
+    assert out["filename"].startswith("cube_") and out["filename"].endswith(".gcode")
     out2 = await srv.save_gcode("../evil name?.gcode")
     assert "/" not in out2["filename"] and ".." not in out2["filename"] and " " not in out2["filename"]
 

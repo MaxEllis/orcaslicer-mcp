@@ -46,8 +46,8 @@ def _status(valid=True):
 
 def _objects():
     return {"count": 1, "objects": [
-        {"id": 91, "index": 0, "name": "Case Bottom.stl", "size_mm": [249.9, 269.9, 94.0],
-         "instances": 1, "transform": {"offset": [150, 150, 47], "rotation": [0, 0, 0], "scale": [1, 1, 1]}}]}
+        {"id": 91, "index": 0, "name": "enclosure.stl", "size_mm": [250.0, 270.0, 90.0],
+         "instances": 1, "transform": {"offset": [150, 150, 45], "rotation": [0, 0, 0], "scale": [1, 1, 1]}}]}
 
 def _cfg():
     # config values arrive as strings from the fork

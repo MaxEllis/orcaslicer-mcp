@@ -2,49 +2,49 @@ import math
 from orcaslicer_mcp import placement
 
 
-def _objs(size, offset, instances=1, oid=91, name="Case Bottom.stl"):
+def _objs(size, offset, instances=1, oid=91, name="enclosure.stl"):
     return {"count": 1, "objects": [
         {"id": oid, "index": 0, "name": name, "size_mm": size, "instances": instances,
          "transform": {"offset": offset, "rotation": [0, 0, 0], "scale": [1, 1, 1]}}]}
 
 
 BED = "0x0,300x0,300x300,0x300"  # live fork returns comma-separated
-LIVE_SIZE = [249.927, 269.924, 94.0]
-LIVE_OFFSET = [150.0, 150.0, 47.0]
+PART_SIZE = [250.0, 270.0, 90.0]
+PART_OFFSET = [150.0, 150.0, 45.0]
 
 
 def test_bed_parse_comma_and_semicolon():
     for s in ("0x0,300x0,300x300,0x300", "0x0;300x0;300x300;0x300"):
-        out = placement.check_placement(_objs(LIVE_SIZE, LIVE_OFFSET), {"printable_area": s})
+        out = placement.check_placement(_objs(PART_SIZE, PART_OFFSET), {"printable_area": s})
         assert out["bed"]["min"] == [0.0, 0.0]
         assert out["bed"]["max"] == [300.0, 300.0]
 
 
 def test_state_a_outer_brim_only_fits():
-    # brim 10 (+0.1 gap), no skirt -> ring 10.1; tight Y edge clears ~4.94mm
+    # brim 10 (+0.1 gap), no skirt -> ring 10.1; tight Y edge clears ~4.9mm
     cfg = {"printable_area": BED, "brim_type": "outer_only", "brim_width": "10",
            "brim_object_gap": "0.1", "skirt_loops": "0"}
-    out = placement.check_placement(_objs(LIVE_SIZE, LIVE_OFFSET), cfg)
+    out = placement.check_placement(_objs(PART_SIZE, PART_OFFSET), cfg)
     assert out["all_fit"] is True
     assert math.isclose(out["ring_mm"], 10.1, abs_tol=1e-6)
     o = out["objects"][0]
     assert o["fits"] is True
-    assert math.isclose(o["clearances"]["back"], 4.938, abs_tol=0.05)
-    assert math.isclose(o["clearances"]["front"], 4.938, abs_tol=0.05)
-    assert math.isclose(o["clearances"]["left"], 14.9365, abs_tol=0.05)
+    assert math.isclose(o["clearances"]["back"], 4.9, abs_tol=0.05)
+    assert math.isclose(o["clearances"]["front"], 4.9, abs_tol=0.05)
+    assert math.isclose(o["clearances"]["left"], 14.9, abs_tol=0.05)
 
 
 def test_state_b_documents_accuracy_floor():
-    # brim 5 + 2 skirt loops @ dist 3, line 0.9 -> ring 9.9; predicts +5.14mm (FITS)
+    # brim 5 + 2 skirt loops @ dist 3, line 0.9 -> ring 9.9; predicts +5.1mm (FITS)
     # even though the real slice ERRORED. The static check cannot arbitrate ~mm margins.
     cfg = {"printable_area": BED, "brim_type": "auto_brim", "brim_width": "5",
            "brim_object_gap": "0.1", "skirt_loops": "2", "skirt_distance": "3",
            "skirt_line_width": "0.9"}
-    out = placement.check_placement(_objs(LIVE_SIZE, LIVE_OFFSET), cfg)
+    out = placement.check_placement(_objs(PART_SIZE, PART_OFFSET), cfg)
     assert math.isclose(out["ring_mm"], 9.9, abs_tol=1e-6)
     o = out["objects"][0]
     assert o["fits"] is True  # <-- under-flags the real error; B1 warnings are the arbiter
-    assert math.isclose(o["clearances"]["back"], 5.138, abs_tol=0.05)
+    assert math.isclose(o["clearances"]["back"], 5.1, abs_tol=0.05)
 
 
 def test_object_over_edge_flagged():
@@ -59,7 +59,7 @@ def test_object_over_edge_flagged():
 
 
 def test_missing_bed_degrades():
-    out = placement.check_placement(_objs(LIVE_SIZE, LIVE_OFFSET), {"brim_type": "no_brim"})
+    out = placement.check_placement(_objs(PART_SIZE, PART_OFFSET), {"brim_type": "no_brim"})
     assert out["bed"] is None
     assert out["all_fit"] is None
 

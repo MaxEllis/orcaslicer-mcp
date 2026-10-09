@@ -53,10 +53,8 @@ dependency. Both pieces ship together or neither matters.
 - Repo hygiene before flipping public:
   - History scan result (done 2026-07-20): no tokens and no `.env` in any of the
     66 commits. Safe to publish without history rewrite.
-  - Redact-in-place commit: three internal docs contain private LAN/VPN IPs
-    (`docs/superpowers/2026-07-19-e2e-verification-results.md`,
-    `docs/superpowers/plans/2026-07-19-e2e-verification.md`,
-    `docs/test-run-findings-2026-07-19.md`). Replace with placeholders in a
+  - Redact-in-place commit: three internal test docs contain private LAN/VPN
+    IPs. Replace with placeholders in a
     normal commit; no history rewrite needed (IPs without tokens are not
     exploitable, and the VPN address is unreachable outside the private
     network).

@@ -71,11 +71,11 @@ def test_absolute_e_extrusion_and_g92_reset():
 
 
 def test_real_fixtures_parse(gcode_fixture):
-    cube = pd.parse_gcode(gcode_fixture("cube20_flat"))
-    assert len(cube.layers) == 34 and cube.per_object is True and list(cube.objects) == ["cube20.stl"]
-    body = pd.parse_gcode(gcode_fixture("body4_corner_x3_support"))
-    assert len(body.layers) == 194 and list(body.objects) == ["Body4.stl"]
-    assert body.copy_labels == {"Body4.stl": {0}}  # Orca labels every duplicate copy 0 (spec: per-copy limitation)
+    cube = pd.parse_gcode(gcode_fixture("cube_flat"))
+    assert len(cube.layers) == 34 and cube.per_object is True and list(cube.objects) == ["cube.stl"]
+    body = pd.parse_gcode(gcode_fixture("bracket_corner_x3_support"))
+    assert len(body.layers) == 194 and list(body.objects) == ["bracket.stl"]
+    assert body.copy_labels == {"bracket.stl": {0}}  # Orca labels every duplicate copy 0 (spec: per-copy limitation)
     assert body.config["support_type"] == "tree(auto)" and body.config["seam_position"] == "back"
 
 
@@ -184,12 +184,12 @@ def test_overhang_bands_by_z():
 
 
 def test_real_fixture_grid_facts(gcode_fixture):
-    cube = pd.parse_gcode(gcode_fixture("cube20_flat")).objects["cube20.stl"]
+    cube = pd.parse_gcode(gcode_fixture("cube_flat")).objects["cube.stl"]
     c = pd.contact(cube)
     assert c["class"] == "flat" and c["contact_ratio"] == 1.0
     assert 380 <= c["footprint_area_mm2"] <= 420
     assert len(pd.islands(cube.layer(0).cells)) == 1
-    body = pd.parse_gcode(gcode_fixture("body4_corner_x3_support")).objects["Body4.stl"]
+    body = pd.parse_gcode(gcode_fixture("bracket_corner_x3_support")).objects["bracket.stl"]
     c = pd.contact(body)
     assert c["class"] == "edge_or_corner" and 0.05 <= c["contact_ratio"] <= 0.15
     assert len(pd.islands(body.layer(0).cells)) == 3       # three copies, stragglers filtered
@@ -266,12 +266,12 @@ def test_seam_scattered_and_unknown_config():
 
 
 def test_real_fixture_support_and_seams(gcode_fixture):
-    cube = pd.parse_gcode(gcode_fixture("cube20_flat"))
-    s = pd.seam(cube.objects["cube20.stl"], cube.config.get("seam_position"))
+    cube = pd.parse_gcode(gcode_fixture("cube_flat"))
+    s = pd.seam(cube.objects["cube.stl"], cube.config.get("seam_position"))
     assert s["dominant"] == "+Y" and s["agrees"] is True
-    assert pd.support(cube.objects["cube20.stl"], cube.layers)["present"] is False
-    body = pd.parse_gcode(gcode_fixture("body4_corner_x3_support"))
-    obj = body.objects["Body4.stl"]
+    assert pd.support(cube.objects["cube.stl"], cube.layers)["present"] is False
+    body = pd.parse_gcode(gcode_fixture("bracket_corner_x3_support"))
+    obj = body.objects["bracket.stl"]
     sup = pd.support(obj, body.layers)
     assert sup["present"] is True and sup["z_range"][0] < 1.0 and sup["z_range"][1] > 50.0
     assert len(sup["islands"]) >= 3 and 3 <= len(sup["interface_zones"]) <= 40
@@ -281,14 +281,14 @@ def test_real_fixture_support_and_seams(gcode_fixture):
 
 
 def test_describe_assembles_objects_copies_and_not_in_gcode(gcode_fixture):
-    parsed = pd.parse_gcode(gcode_fixture("body4_corner_x3_support"))
-    meta = [{"name": "Body4.stl", "instances": 3}, {"name": "ghost.stl", "instances": 1}]
+    parsed = pd.parse_gcode(gcode_fixture("bracket_corner_x3_support"))
+    meta = [{"name": "bracket.stl", "instances": 3}, {"name": "ghost.stl", "instances": 1}]
     out = pd.describe(parsed, meta)
     assert out["per_object"] is True and out["not_in_gcode"] == ["ghost.stl"]
     assert out["plate"]["layer_count"] == 194 and out["plate"]["printable_area"][2] == [300.0, 300.0]
     assert out["plate"]["layer_height"] == "0.6" and 55 < out["plate"]["height_mm"] < 62
     (o,) = out["objects"]
-    assert o["name"] == "Body4.stl" and o["copies"] == 3
+    assert o["name"] == "bracket.stl" and o["copies"] == 3
     assert o["orientation"]["class"] == "edge_or_corner"
     assert len(o["footprint"]["islands"]) == 3 and o["footprint"]["bbox"][0] < o["footprint"]["bbox"][2]
     assert o["support"]["present"] is True and o["seam"]["dominant"] == "+Y"
@@ -305,7 +305,7 @@ def test_describe_without_meta_defaults_copies_to_one_and_whole_plate_when_unlab
 
 
 def test_summarize_overhang_names_contiguous_runs_only():
-    desc = {"name": "Body4.stl", "copies": 1,
+    desc = {"name": "bracket.stl", "copies": 1,
             "orientation": {"class": "flat", "contact_ratio": 1.0},
             "footprint": {"area_mm2": 400, "max_layer_area_mm2": 400, "bbox": [], "islands": [{"area_mm2": 400, "bbox": []}]},
             "overhang": {"bands": [{"z0": 0, "z1": 10, "share": 0.30, "overhang_mm": 300.0},
@@ -334,7 +334,7 @@ def test_summarize_overhang_thin_spread_mentions_largest_band():
 
 
 def test_summarize_wording_edge_case_with_support_and_aligned_seam():
-    desc = {"name": "Body4.stl", "copies": 3,
+    desc = {"name": "bracket.stl", "copies": 3,
             "orientation": {"class": "edge_or_corner", "contact_ratio": 0.1},
             "footprint": {"area_mm2": 151, "max_layer_area_mm2": 1553, "bbox": [0, 0, 1, 1],
                           "islands": [{"area_mm2": 62, "bbox": []}, {"area_mm2": 44, "bbox": []}, {"area_mm2": 43, "bbox": []}]},
@@ -346,14 +346,14 @@ def test_summarize_wording_edge_case_with_support_and_aligned_seam():
             "seam": {"count": 90, "sides": {"+Y": 0.84, "-Y": 0.1, "+X": 0.02, "-X": 0.03}, "dominant": "+Y",
                      "alignment": 0.84, "configured": "back", "agrees": True}}
     s = pd.summarize_object(desc)
-    assert s == ("Body4.stl (3 copies) stands on an edge or corner: first-layer contact is 10% of its widest "
+    assert s == ("bracket.stl (3 copies) stands on an edge or corner: first-layer contact is 10% of its widest "
                  "layer, in 3 islands of about 50 mm2 each. Overhang extrusions concentrate at Z 0 to 20 mm. "
                  "Support is present from Z 0.4 to 56.8 mm, standing in 5 places and touching the part in 6 zones. "
                  "Seams align on the +Y side (84%), matching seam_position=back.")
 
 
 def test_summarize_wording_flat_no_support_scattered_seam_disagrees():
-    desc = {"name": "cube20.stl", "copies": 1,
+    desc = {"name": "cube.stl", "copies": 1,
             "orientation": {"class": "flat", "contact_ratio": 1.0},
             "footprint": {"area_mm2": 400, "max_layer_area_mm2": 400, "bbox": [], "islands": [{"area_mm2": 400, "bbox": []}]},
             "overhang": {"bands": [{"z0": 0, "z1": 10, "share": 0.0, "overhang_mm": 0.0}], "total_mm": 0.0},
@@ -361,7 +361,7 @@ def test_summarize_wording_flat_no_support_scattered_seam_disagrees():
             "seam": {"count": 33, "sides": {"+Y": 0.3, "-Y": 0.3, "+X": 0.2, "-X": 0.2}, "dominant": "+Y",
                      "alignment": 0.3, "configured": "back", "agrees": True}}
     s = pd.summarize_object(desc)
-    assert s == ("cube20.stl lies flat: first-layer contact is 100% of its widest layer, in 1 island of about "
+    assert s == ("cube.stl lies flat: first-layer contact is 100% of its widest layer, in 1 island of about "
                  "400 mm2. No overhang extrusions. No support. Seams are scattered (largest share 30% on the +Y side), "
                  "although seam_position=back asks for one side.")
     desc["seam"] = {"count": 33, "sides": {"+Y": 0.1, "-Y": 0.8, "+X": 0.05, "-X": 0.05}, "dominant": "-Y",

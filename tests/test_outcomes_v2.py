@@ -6,7 +6,7 @@ from orcaslicer_mcp import outcomes as oc
 V1_DDL = """
 CREATE TABLE prints (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  printer_id TEXT NOT NULL DEFAULT 'swx2',
+  printer_id TEXT NOT NULL DEFAULT 'unknown',
   sliced_at REAL, model_name TEXT, geometry_hash TEXT,
   gcode_filename TEXT NOT NULL, settings_json TEXT, printed_at REAL,
   job_id TEXT UNIQUE, result TEXT, duration_s REAL, filament_g REAL, human_verdict TEXT

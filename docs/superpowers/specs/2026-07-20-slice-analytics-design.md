@@ -2,8 +2,7 @@
 
 - **Date:** 2026-07-20
 - **Status:** Design approved, pending spec review → implementation plan
-- **Finding origin:** F14, from the first real end-to-end print job (2026-07-20). See
-  `CLAUDE.local.md` backlog in the 3d-printer repo.
+- **Finding origin:** F14, from the first real end-to-end print job (2026-07-20).
 
 ## Motivation
 
@@ -160,8 +159,7 @@ this slice to this config, in-session, on any printer.
   `print_statistics` / `used_filaments_per_role`).
 - Guard cost: computed once per completed slice, cached with the slice result; not
   recomputed on each status poll.
-- Built on max-pc via the OrcaRebuild flow and relayed (see
-  `pc-build-verify-workflow` memory). Add `"breakdown"` to advertised capabilities in the
+- Built and verified on a Windows build of the fork. Add `"breakdown"` to advertised capabilities in the
   same change.
 
 ## Testing

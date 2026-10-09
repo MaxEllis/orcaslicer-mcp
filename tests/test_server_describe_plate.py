@@ -5,8 +5,8 @@ import httpx, respx
 import orcaslicer_mcp.server as srv
 
 B = "http://x:13130"
-CUBE = lzma.open(Path(__file__).parent / "fixtures" / "cube20_flat.gcode.xz", "rb").read()
-OBJECTS = {"objects": [{"id": 61, "name": "cube20.stl", "instances": 1, "size_mm": [20, 20, 20]}]}
+CUBE = lzma.open(Path(__file__).parent / "fixtures" / "cube_flat.gcode.xz", "rb").read()
+OBJECTS = {"objects": [{"id": 61, "name": "cube.stl", "instances": 1, "size_mm": [20, 20, 20]}]}
 
 
 def _env(m):
@@ -29,9 +29,9 @@ async def test_describe_plate_on_cube_and_cache_hit(monkeypatch):
     out = await srv.describe_plate()
     assert out["per_object"] is True and out["not_in_gcode"] == []
     (o,) = out["objects"]
-    assert o["name"] == "cube20.stl" and o["copies"] == 1 and o["orientation"]["class"] == "flat"
+    assert o["name"] == "cube.stl" and o["copies"] == 1 and o["orientation"]["class"] == "flat"
     assert o["seam"]["dominant"] == "+Y" and o["support"]["present"] is False
-    assert out["summary"].startswith("cube20.stl lies flat")
+    assert out["summary"].startswith("cube.stl lies flat")
     assert isinstance(out["parse_seconds"], float) and out["cached"] is False
     again = await srv.describe_plate()
     assert again["cached"] is True and again["objects"] == out["objects"]

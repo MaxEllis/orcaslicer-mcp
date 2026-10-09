@@ -18,6 +18,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - While Klipper is starting up (right after a firmware restart, say), `get_printer_status` no longer shows 0 °C for the heaters and a warning count. It leaves the temperatures empty, because the sensors haven't been read yet, and the headline is "Klipper is starting up; check again in a minute."
 - Console errors in the status lose Klipper's repeated restart instructions, as other Klipper messages already did, and an error that repeats shows once (its newest occurrence) instead of filling the list of five recent errors. A job's error message is trimmed the same way.
 - Layer numbers in the job are always whole numbers or null. Text or a non-finite number from a printer no longer reaches the result.
+- With OctoPrint, a job request that fails (or answers with something that isn't JSON) no longer fails the whole status. The status comes back with a note that the current job couldn't be read.
+- `wait_for_printer` treats a job that completes successfully while it waits for `printing` or `first_layer_done` as met, instead of stopping with "The job ended before ...". A one-layer or very short print passes both points before the next poll. A cancelled or errored job still stops the wait early, and so does a job that was already complete when the wait began.
+- `wait_for_printer` no longer sends a progress notification carrying an old status after a poll fails. The next notification comes with the next good poll.
+- A hand-edited `printer.json` holding a remembered time that isn't a usable number (an enormous integer, say) no longer breaks the "remembered printer" note. It reads "remembered earlier".
 
 ### Changed
 - `get_printer_status` and `wait_for_printer` make one request fewer to a Klipper printer: the answer from the request that found the printer is reused once. Later polls of `wait_for_printer` still ask again.

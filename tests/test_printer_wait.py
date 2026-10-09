@@ -259,6 +259,73 @@ def test_the_jobs_words_beat_a_console_line_but_not_a_fatal_problem():
     assert w.stop_reason(snap("shutdown", problems=[JOB_ERROR, FATAL])) == FATAL["message"]
 
 
+# --- a job that completes while we wait for it to get going is a success, not "ended before" ----
+
+COMPLETE = {"state": "complete"}
+
+
+@pytest.mark.parametrize("until,first", [
+    ("printing", snap("heating", (150, 215), (40, 60), job={"state": "printing", "filament_used_mm": 0})),
+    ("first_layer_done", snap("printing", job={"state": "printing", "layer": {"current": 1, "total": 1}})),
+])
+async def test_a_klipper_job_that_completes_while_waiting_for_it_to_get_going_is_met(monkeypatch, until, first):
+    # A one-layer print: it was running, and the next poll finds it complete.
+    s = Script(monkeypatch, [first, snap("finished", job=COMPLETE)])
+    out = await s.run(KL, until)
+    assert out["met"] is True and out["stopped_early"] is None and "note" not in out
+    assert out["status"]["state"] == "finished" and out["waited_s"] == 5 and s.sleeps == [5.0]
+
+
+async def test_an_octoprint_job_that_runs_to_the_end_while_waiting_for_printing_is_met(monkeypatch):
+    s = Script(monkeypatch, [snap("heating", (150, 215), (40, 60), job={"progress_percent": 5}),
+                             snap("finished", job={"progress_percent": 100})])
+    out = await s.run(OP, "printing")
+    assert out["met"] is True and out["stopped_early"] is None and out["status"]["state"] == "finished"
+
+
+async def test_a_job_seen_printing_that_completes_between_polls_counts_even_after_several_polls(monkeypatch):
+    s = Script(monkeypatch, [snap("heating", (150, 215), (40, 60), job={"state": "printing", "filament_used_mm": 0}),
+                             snap("heating", (200, 215), (60, 60), job={"state": "printing", "filament_used_mm": 0}),
+                             snap("finished", job=COMPLETE)])
+    out = await s.run(KL, "printing")
+    assert out["met"] is True and len(s.sleeps) == 2
+
+
+@pytest.mark.parametrize("until", ["printing", "first_layer_done"])
+async def test_a_klipper_job_that_errors_or_is_cancelled_is_still_not_met(monkeypatch, until):
+    running = snap("printing", job={"state": "printing", "filament_used_mm": 0, "layer": {"current": 1, "total": 80}})
+    cancelled = await Script(monkeypatch, [running, snap("cancelled", job=CANCELLED)]).run(KL, until)
+    assert cancelled["met"] is False and cancelled["stopped_early"].startswith("The job ended before")
+    errored = await Script(monkeypatch, [running, snap("error", job={"state": "error"}, problems=[JOB_ERROR])]).run(KL, until)
+    assert errored["met"] is False and errored["stopped_early"] == JOB_ERROR["message"]
+
+
+async def test_an_octoprint_job_that_stops_without_finishing_is_still_not_met(monkeypatch):
+    # Cancelled, or reset to idle (no completed job to see): neither is a success.
+    for end in (snap("cancelled"), snap("idle")):
+        s = Script(monkeypatch, [snap("heating", (150, 215), (40, 60)), end])
+        out = await s.run(OP, "printing")
+        assert out["met"] is False and out["stopped_early"] == "The job ended before extrusion started."
+
+
+@pytest.mark.parametrize("until,kind,target", [("printing", "klipper", KL), ("printing", "octoprint", OP),
+                                               ("first_layer_done", "klipper", KL)])
+async def test_a_job_that_was_already_complete_when_the_wait_began_is_not_the_one_waited_for(monkeypatch, until, kind, target):
+    done = snap("finished", job=COMPLETE) if kind == "klipper" else snap("finished", job={"progress_percent": 100})
+    s = Script(monkeypatch, [done])
+    out = await s.run(target, until, timeout_s=12)
+    assert out["met"] is False and "timed out" in out["note"] and out["stopped_early"] is None
+
+
+async def test_a_completed_job_still_ends_a_wait_for_the_heaters_as_ended_before(monkeypatch):
+    # Only "printing" and "first_layer_done" read a completed job as success: reaching the heaters'
+    # targets is not something a finished job can be said to have done.
+    s = Script(monkeypatch, [snap("heating", (150, 215), (40, 60), job={"state": "printing"}),
+                             snap("finished", (30, 0), (25, 0), job=COMPLETE)])
+    out = await s.run(KL, "heated")
+    assert out["met"] is False and out["stopped_early"] == "The job ended before the heaters reached their targets."
+
+
 def lost(code="not_reachable"):
     return PrinterError(code, "The printer didn't answer.")
 
@@ -281,6 +348,37 @@ async def test_a_good_poll_resets_the_failure_count(monkeypatch):
     s = Script(monkeypatch, [hot, lost(), hot, lost(), hot, lost(), snap("heating", (214, 215), (23, 0))])
     out = await s.run(KL, "heated")
     assert out["met"] is True and len(s.sleeps) == 6
+
+
+def headed(text, *args, **kw):
+    return {**snap(*args, **kw), "headline": text}
+
+
+async def test_no_progress_notification_goes_out_with_the_status_of_a_failed_poll(monkeypatch):
+    # After a poll fails, the snapshot in hand is the one already reported: say nothing rather than
+    # repeat it as if it were news.
+    s = Script(monkeypatch, [headed("Heating 1", "heating", (100, 215)), lost(),
+                             headed("Heating 2", "heating", (150, 215)), headed("Heating 3", "heating", (214, 215))])
+    out = await s.run(KL, "heated")
+    assert out["met"] is True and len(s.sleeps) == 3
+    assert [m for _, _, m in s.reports] == ["Heating 1", "Heating 2"]
+    assert [d for d, _, _ in s.reports] == [0.0, 10.0]  # the report after the failed poll is the one missing
+
+
+async def test_progress_resumes_after_the_blip_with_the_fresh_status(monkeypatch):
+    hot = headed("Heating", "heating", (150, 215))
+    s = Script(monkeypatch, [hot, lost(), lost(), headed("Still heating", "heating", (160, 215)),
+                             headed("Heated", "heating", (214, 215))])
+    out = await s.run(KL, "heated")
+    assert out["met"] is True
+    assert [m for _, _, m in s.reports] == ["Heating", "Still heating"]
+
+
+async def test_a_wait_that_keeps_failing_polls_still_times_out_without_notifying(monkeypatch):
+    s = Script(monkeypatch, [headed("Heating", "heating", (150, 215)), lost(), lost(), headed("Heating", "heating", (150, 215))])
+    out = await s.run(KL, "heated", timeout_s=12)
+    assert out["met"] is False and "timed out" in out["note"] and out["waited_s"] == 12
+    assert [d for d, _, _ in s.reports] == [0.0]  # nothing while the polls were failing
 
 
 async def test_three_failed_polls_in_a_row_end_the_wait_with_the_last_good_status(monkeypatch):
@@ -381,6 +479,7 @@ def test_first_layer_done_description_says_it_can_be_approximate():
 def test_the_tool_description_says_when_it_returns_early():
     doc = " ".join(srv.wait_for_printer.__doc__.split())
     for phrase in ("stopped_early", "when the printer reports a fault", "when the job ends before the point it waits for",
-                   "Lost contact with the printer", "A met result can carry stopped_early too"):
+                   "Lost contact with the printer", "A met result can carry stopped_early too",
+                   "completes successfully while the wait is for 'printing' or 'first_layer_done' counts as met"):
         assert phrase in doc
     assert chr(0x2014) not in doc

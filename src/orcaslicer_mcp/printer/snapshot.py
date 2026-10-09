@@ -13,9 +13,18 @@ IDLE_CONSOLE_WINDOW_S = 600.0
 
 
 async def take_snapshot(target, client, *, now: float | None = None) -> dict:
-    if target.kind == "octoprint":
-        return octoprint_snapshot(await client.printer(), await client.job(), target_public=target.public())
     notes: list[str] = []
+    if target.kind == "octoprint":
+        printer = await client.printer()  # the state itself: without it there is no snapshot
+        job: dict = {}
+        try:
+            job = await client.job()
+        except PrinterError as e:
+            notes.append(f"The current job couldn't be read: {e.message}")
+        snap = octoprint_snapshot(printer, job, target_public=target.public())
+        if notes:
+            snap["notes"] = notes
+        return snap
     # The probe that found this printer already asked /server/info: use that reply once, ask again after.
     info: dict | None = client.take_probe_info()
     if info is None:

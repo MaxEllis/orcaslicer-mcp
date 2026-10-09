@@ -1233,11 +1233,23 @@ def _printer_api_key() -> str | None:
     return os.environ.get("ORCA_PRINTER_API_KEY", "").strip() or None
 
 
+def _remembered_age(at) -> str | None:
+    """How long ago a remembered time was, in words, or None when it is no usable time: not a number,
+    NaN or Infinity (json.loads accepts both), an integer too big for a float, or a number no calendar
+    can hold (all of which a hand-edited printer.json can contain). Asking the calendar to read the
+    time is the test: it refuses each of those with OverflowError, OSError or ValueError."""
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        return None
+    try:
+        datetime.datetime.fromtimestamp(at, datetime.timezone.utc)
+        age = time.time() - at
+    except (OverflowError, OSError, ValueError):
+        return None
+    return f"{_duration_text(max(0.0, age))} ago"
+
+
 def _remembered_note(target) -> str:
-    at = target.remembered_at
-    # A hand-edited printer.json can hold NaN or Infinity (json.loads accepts them): that is no time at all.
-    known = isinstance(at, (int, float)) and not isinstance(at, bool) and math.isfinite(at)
-    age = f"{_duration_text(max(0.0, time.time() - at))} ago" if known else "earlier"
+    age = _remembered_age(target.remembered_at) or "earlier"
     return f"OrcaSlicer isn't running or can't be reached, so this uses the printer remembered {age}."
 
 
@@ -1293,9 +1305,10 @@ async def wait_for_printer(
     it happens (met: true), or at the timeout with the latest status (met: false). It also returns
     early, with stopped_early saying why, when the printer reports a fault, when the job ends before
     the point it waits for (a cancelled print, say), or after losing contact ("Lost contact with the
-    printer"). A met result can carry stopped_early too, for example a job that finished with an
-    error. Waiting for 'finished' when nothing is printing returns at once with the note 'nothing is
-    printing'. Read-only: it never sends commands."""
+    printer"). A job that completes successfully while the wait is for 'printing' or 'first_layer_done'
+    counts as met (a one-layer print passes both at once). A met result can carry stopped_early too,
+    for example a job that finished with an error. Waiting for 'finished' when nothing is printing
+    returns at once with the note 'nothing is printing'. Read-only: it never sends commands."""
     async def report(done: float, total: float, message: str) -> None:
         if ctx is not None:
             await ctx.report_progress(done, total, message)

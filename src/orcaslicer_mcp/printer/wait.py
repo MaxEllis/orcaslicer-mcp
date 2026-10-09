@@ -72,6 +72,14 @@ def _job_done(snap: dict) -> bool:
     return bool(job) and job.get("state") in JOB_DONE
 
 
+def completed(snap: dict, kind: str | None) -> bool:
+    """The job ran to its end and succeeded: Klipper's own job state "complete", or OctoPrint's
+    "finished" (the job at 100 % and no longer running). Cancelled and errored jobs are not this."""
+    if kind == "octoprint":
+        return snap.get("state") == "finished"
+    return (snap.get("job") or {}).get("state") == "complete"
+
+
 def finished(snap: dict, start_state: str | None, kind: str | None) -> bool:
     if kind == "octoprint":
         # OctoPrint has no "complete" state of its own: only a job that was running when the call
@@ -107,13 +115,17 @@ def ended_early(until: str, snap: dict, kind: str | None) -> str | None:
 
 
 def condition_met(until: str, snap: dict, start_state: str | None, kind: str | None,
-                  prev: dict | None = None) -> bool:
+                  prev: dict | None = None, was_running: bool = False) -> bool:
+    """was_running: a job has been seen running during this wait. A job that then completes
+    successfully has passed the point being waited for, however short it was (one layer, say), so it
+    counts for "printing" and "first_layer_done". One already complete when the wait began does not:
+    that is the previous job, not the one being waited for."""
     if until == "heated":
         return heated(snap)
     if until == "printing":
-        return printing(snap, kind)
+        return printing(snap, kind) or (was_running and completed(snap, kind))
     if until == "first_layer_done":
-        return first_layer_done(snap, prev)
+        return first_layer_done(snap, prev) or (was_running and completed(snap, kind))
     return finished(snap, start_state, kind)
 
 
@@ -146,8 +158,9 @@ async def run_wait(target, client, until: str, timeout_s: int, report=None, *,
             target.kind != "octoprint" and _job_done(snap)):
         reason = stop_reason(snap)
         return result(False, stopped_early=reason, note=None if reason else "nothing is printing")
+    news = True  # the snapshot in hand has not been reported yet (False after a poll that failed)
     while True:
-        if condition_met(until, snap, start_state, target.kind, prev):
+        if condition_met(until, snap, start_state, target.kind, prev, was_running):
             return result(True, stopped_early=stop_reason(snap))  # met, but a fault is still worth saying
         reason = stop_reason(snap)
         if reason:
@@ -161,7 +174,7 @@ async def run_wait(target, client, until: str, timeout_s: int, report=None, *,
         elapsed = clock() - start
         if elapsed >= timeout_s:
             return result(False, note=f"timed out after {timeout_s} s; call again to keep waiting")
-        if report is not None:
+        if report is not None and news:
             try:
                 await report(elapsed, timeout_s, snap.get("headline") or "")
             except Exception:
@@ -173,8 +186,10 @@ async def run_wait(target, client, until: str, timeout_s: int, report=None, *,
             # Keep the last good snapshot: the answer so far is not lost to one bad poll.
             failures += 1
             if e.code in TRANSIENT_CODES and failures < MAX_POLL_FAILURES:
+                news = False  # the next pass holds the same snapshot: don't announce it twice
                 continue
             return result(False, stopped_early=f"Lost contact with the printer: {e.message}")
         failures = 0
+        news = True
         prev, snap = snap, fresh
         was_running = was_running or snap.get("state") in ACTIVE

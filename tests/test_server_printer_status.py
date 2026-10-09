@@ -171,6 +171,45 @@ async def test_a_non_finite_remembered_timestamp_reads_as_a_missing_one(monkeypa
     assert any("remembered earlier" in n and "ago" not in n for n in out["notes"])
 
 
+def _note_for(at):
+    return srv._remembered_note(ptarget.PrinterTarget(url=P, source="remembered", kind="klipper", remembered_at=at))
+
+
+@pytest.mark.parametrize("at", [
+    10 ** 400, -(10 ** 400),              # too big for a float: float() and arithmetic raise OverflowError
+    float("nan"), float("inf"), float("-inf"),
+    1e300, -1e300, -1.7976931348623157e308,   # finite, but no calendar holds them (and no sane age)
+    True, "yesterday", None,              # not a time at all
+], ids=["huge-int", "huge-negative-int", "nan", "inf", "minus-inf", "huge-float", "huge-negative-float",
+        "most-negative-float", "bool", "text", "none"])
+def test_a_remembered_time_that_is_not_a_usable_number_reads_as_earlier(at):
+    note = _note_for(at)
+    assert "remembered earlier" in note and "ago" not in note
+    assert note == "OrcaSlicer isn't running or can't be reached, so this uses the printer remembered earlier."
+
+
+@pytest.mark.parametrize("at,text", [(120, "2 min ago"), (3 * 3600 + 60, "3 h 1 min ago"), (1.5, "1 min ago")])
+def test_a_remembered_time_that_is_a_number_says_how_long_ago(monkeypatch, at, text):
+    monkeypatch.setattr(srv.time, "time", lambda: 1_000_000.0)
+    note = _note_for(1_000_000.0 - at)
+    assert note == f"OrcaSlicer isn't running or can't be reached, so this uses the printer remembered {text}."
+
+
+def test_a_remembered_time_in_the_future_does_not_go_negative(monkeypatch):
+    monkeypatch.setattr(srv.time, "time", lambda: 1_000_000.0)
+    assert _note_for(1_000_500.0).endswith("remembered 1 min ago.")  # a skewed clock: never a negative age
+
+
+@respx.mock
+async def test_a_huge_integer_remembered_time_does_not_break_the_reply(monkeypatch):
+    _orca_down(monkeypatch)
+    ptarget.REMEMBERED_PATH.write_text('{"url": "%s", "kind": "klipper", "found_at": %s}' % (P, "9" * 400))
+    printer_routes()
+    out = await srv.get_printer_status()
+    assert out["state"] == "idle" and out["printer"]["source"] == "remembered"
+    assert any("remembered earlier" in n and "ago" not in n for n in out["notes"])
+
+
 @respx.mock
 async def test_an_unreachable_remembered_printer_is_named_in_the_error(monkeypatch):
     _orca_down(monkeypatch)

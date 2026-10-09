@@ -144,3 +144,22 @@ def test_basic_auth_refusal_wording_never_echoes_credentials():
     assert "profile" not in e.hint  # credentials in OrcaSlicer's own address are redacted and never read
     text = e.message + " " + e.hint + json.dumps(e.as_dict())
     assert "—" not in text and "–" not in text
+
+
+@pytest.mark.parametrize("raw,shown", [
+    ("http://192.0.2.10:7125", "http://192.0.2.10:7125"),
+    ("http://test-user:pa/ss@192.0.2.10", "http://<redacted>@192.0.2.10"),
+    ("  https://test-user:p@ss@192.0.2.10/  ", "https://<redacted>@192.0.2.10/"),
+    ("test-user:pa/ss@192.0.2.10", "<redacted>@192.0.2.10"),
+    # No scheme, and the password holds "://": "test-user:pa" must not be shown as one.
+    ("test-user:pa://ss@192.0.2.10", "<redacted>@192.0.2.10"),
+])
+def test_shown_address_never_carries_the_login(raw, shown):
+    assert t._shown(raw) == shown
+
+
+def test_unreadable_address_error_never_echoes_the_login():
+    with pytest.raises(PrinterError) as e:
+        t._parse_address("test-user:pa://ss@192.0.2.10", "override")
+    text = json.dumps(e.value.as_dict())
+    assert "<redacted>@192.0.2.10" in text and "test-user" not in text and "pa:" not in text

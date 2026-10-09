@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from ..errors import ApiError, ConfigError, Unauthorized
+from ..guard import _strip_userinfo
 from .errors import PrinterError
 from .moonraker import MoonrakerClient
 from .octoprint import OctoPrintClient
@@ -150,14 +151,10 @@ _PROBE_CACHE: dict[str, tuple[str, str]] = {}
 
 
 def _shown(raw: str) -> str:
-    """The address as it may appear in a message: everything between '://' and the last '@' is
-    hidden, so a password can never reach the model or a log line."""
-    s = (raw or "").strip()
-    if "@" not in s:
-        return s
-    scheme, sep, rest = s.partition("://")
-    tail = rest.rsplit("@", 1)[1] if sep else s.rsplit("@", 1)[1]
-    return f"{scheme}://<redacted>@{tail}" if sep else f"<redacted>@{tail}"
+    """The address as it may appear in a message: everything between the scheme and the last '@'
+    is hidden, so a password can never reach the model or a log line. Same rule as
+    get_preset_config, so a scheme only counts at the start ('user:pa://ss@host' shows no login)."""
+    return _strip_userinfo((raw or "").strip())
 
 
 def _origin(source: str, profile: str | None) -> str:

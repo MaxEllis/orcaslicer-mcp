@@ -340,6 +340,28 @@ async def test_wait_for_printer_tool_reports_progress(monkeypatch):
     assert out["met"] is True and len(ctx.calls) == 1
 
 
+@respx.mock
+async def test_wait_for_printer_tool_returns_when_the_print_is_cancelled_while_heating(monkeypatch):
+    # The whole path with real snapshot shapes: Klipper reports "printing" with the heaters short of
+    # their targets (heating), then print_stats goes to "cancelled" and the targets drop to zero.
+    P = "http://192.0.2.10"
+    monkeypatch.setenv("ORCA_PRINTER_URL", P)
+    monkeypatch.setattr(w, "POLL_S", 0.0)
+    cancelled = heat_query(140.0)
+    cancelled["result"]["status"]["print_stats"]["state"] = "cancelled"
+    cancelled["result"]["status"]["extruder"]["target"] = 0.0
+    cancelled["result"]["status"]["heater_bed"]["target"] = 0.0
+    respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO))
+    respx.get(url__startswith=f"{P}/server/gcode_store").mock(
+        return_value=httpx.Response(200, json={"result": {"gcode_store": []}}))
+    respx.get(url__startswith=f"{P}/server/files/metadata").mock(return_value=httpx.Response(404))
+    query = respx.get(url__startswith=f"{P}/printer/objects/query").mock(
+        side_effect=[httpx.Response(200, json=heat_query(150.0)), httpx.Response(200, json=cancelled)])
+    out = await srv.wait_for_printer("heated", 2)  # a regression fails in 2 s, not 30 minutes
+    assert out["met"] is False and out["stopped_early"] == "The job ended before the heaters reached their targets."
+    assert out["status"]["state"] == "cancelled" and query.call_count == 2 and "note" not in out
+
+
 def test_first_layer_done_description_says_it_can_be_approximate():
     props = srv.mcp._tool_manager._tools["wait_for_printer"].parameters["properties"]
     desc = props["until"]["description"]

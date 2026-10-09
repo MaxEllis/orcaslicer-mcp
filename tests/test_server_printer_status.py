@@ -64,6 +64,9 @@ async def test_status_found_through_the_orcaslicer_profile(monkeypatch):
     assert "pw-secret" not in dumped and "test-user" not in dumped
     assert ptarget.recall_remembered().url == P
     assert "pw-secret" not in ptarget.REMEMBERED_PATH.read_text()
+    # credentials in OrcaSlicer's own address are never used: nothing sent to the printer carries them
+    sent = [c.request for c in respx.calls if c.request.url.host == "192.0.2.10"]
+    assert sent and all("authorization" not in r.headers for r in sent)
 
 
 @respx.mock

@@ -164,9 +164,15 @@ def _origin(source: str, profile: str | None) -> str:
 
 def _bad_address(raw: str, source: str, profile: str | None = None, *, encoding: bool = False) -> PrinterError:
     shown, origin = _shown(raw), _origin(source, profile)
-    if encoding:
+    if encoding and source == "override":
         message = (f"The user name or password in the printer address '{shown}' from {origin} contains "
                    "characters that must be percent-encoded (for example / ? # @).")
+    elif encoding:
+        # OrcaSlicer's own address: its credentials are never read, so encoding them would not help.
+        message = (f"The printer address '{shown}' from {origin} contains a user name or password that "
+                   "can't be read. Credentials in OrcaSlicer's printer address aren't used: remove them "
+                   "there, and set ORCA_PRINTER_URL or ORCA_PRINTER_API_KEY in this MCP server's "
+                   "settings instead.")
     else:
         message = f"The printer address '{shown}' from {origin} isn't a valid URL."
     hint = _OVERRIDE_ADDRESS_HINT if source == "override" else _PROFILE_ADDRESS_HINT
@@ -233,9 +239,11 @@ async def resolve_target(fork_factory) -> PrinterTarget:
         raise PrinterError("not_configured", f"The printer profile '{name}' has no connection set up.",
                            hint=_PROFILE_ADDRESS_HINT)
     check_host_type(host_type)
-    url, auth = _parse_address(host, "profile", name)
+    # Any user name or password in OrcaSlicer's own address is dropped, even one that slipped past
+    # redaction: credentials come only from ORCA_PRINTER_URL or ORCA_PRINTER_API_KEY (spec section 10).
+    url, _ = _parse_address(host, "profile", name)
     return PrinterTarget(url=url, source="profile", profile=name, host_type=host_type,
-                         printer_model=model, auth=auth)
+                         printer_model=model, auth=None)
 
 
 def _candidates(url: str, kind_hint: str | None) -> list[tuple[str, str]]:

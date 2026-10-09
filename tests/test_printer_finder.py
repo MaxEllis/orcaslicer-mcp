@@ -78,6 +78,52 @@ async def test_redacted_userinfo_is_dropped():
     assert tgt.url == P and tgt.auth is None
 
 
+# Credentials in OrcaSlicer's own printer address are never read (spec section 10). get_preset_config
+# redacts most of them, but a form the redaction misses (a password with a space) must not be used
+# either. FakeFork hands resolve_target the address exactly as written, so it stands in for a miss.
+
+@pytest.mark.parametrize("host", [
+    "http://test-user:pw secret@192.0.2.10",   # whitespace: the guard's pattern does not match it
+    "http://test-user:pw-secret@192.0.2.10",   # in the clear, as if it had slipped past redaction
+])
+async def test_credentials_in_the_profile_address_are_never_used(host):
+    tgt = await t.resolve_target(factory(FakeFork(preset=profile(print_host=host))))
+    assert (tgt.source, tgt.url, tgt.auth) == ("profile", P, None)
+    with respx.mock:
+        route = respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO))
+        found, client = await t.open_printer(tgt)
+        await client.identify()
+        await client.aclose()
+    assert route.call_count >= 1
+    assert all("authorization" not in c.request.headers for c in route.calls)
+    assert found.auth is None
+
+
+async def test_the_override_still_carries_its_credentials(monkeypatch):
+    monkeypatch.setenv("ORCA_PRINTER_URL", "http://test-user:pw-secret@192.0.2.10")
+    tgt = await t.resolve_target(never)
+    with respx.mock:
+        route = respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO))
+        _, client = await t.open_printer(tgt)
+        await client.aclose()
+    assert tgt.auth == ("test-user", "pw-secret")
+    assert route.calls[0].request.headers["authorization"].startswith("Basic ")
+
+
+async def test_a_profile_address_with_a_loose_at_sign_says_credentials_there_are_not_used():
+    fork = FakeFork(preset=profile(print_host="http://user:pa/ss-secret@192.0.2.10"))
+    with pytest.raises(PrinterError) as e:
+        await t.resolve_target(factory(fork))
+    assert e.value.code == "not_configured"
+    text = json.dumps(e.value.as_dict())
+    assert "ss-secret" not in text and "pa/ss" not in text
+    assert "<redacted>@192.0.2.10" in e.value.message and "'Test Printer'" in e.value.message
+    assert "percent-encode" not in text
+    assert "aren't used" in e.value.message and "can't be read" in e.value.message
+    assert "ORCA_PRINTER_URL" in e.value.message and "ORCA_PRINTER_API_KEY" in e.value.message
+    assert "remove" in e.value.message.lower() and chr(0x2014) not in text
+
+
 @pytest.mark.parametrize("preset,code", [
     (profile(print_host=""), "not_configured"),
     (profile(print_host="", printer_model="Bambu Lab X1 Carbon"), "unsupported_connection"),

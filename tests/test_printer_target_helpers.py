@@ -88,6 +88,34 @@ def test_printer_id_never_raises_on_an_unusable_printer_url(monkeypatch, raw):
     assert t.printer_id(None) == "unknown"
 
 
+@pytest.mark.parametrize("raw", [
+    "http://user:pa/ss@192.0.2.10",
+    "http://test-user:123?x@192.0.2.10",
+    "http://tok/en@192.0.2.10",
+])
+def test_printer_id_never_contains_part_of_a_login(monkeypatch, raw):
+    # An unencoded '/', '?' or '#' in the user name or password makes urllib read the credentials as
+    # the host ('user', 'test-user', 'tok'). The address is rejected, so the id falls through.
+    monkeypatch.setenv("ORCA_PRINTER_URL", raw)
+    assert t.printer_id("Test Printer") == "Test Printer"
+    assert t.printer_id(None) == "unknown"
+    assert t.printer_id(None, fallback_url=raw) == "unknown"
+
+
+def test_printer_id_still_reads_the_host_of_a_well_formed_login(monkeypatch):
+    monkeypatch.setenv("ORCA_PRINTER_URL", "http://test-user:pw@192.0.2.10")
+    assert t.printer_id("Test Printer") == "192.0.2.10"
+    monkeypatch.delenv("ORCA_PRINTER_URL")
+    assert t.printer_id(None, fallback_url="http://test-user:pw@192.0.2.10") == "192.0.2.10"
+
+
+def test_printer_id_ignores_a_profile_name_that_is_not_text():
+    # a hand-edited printer.json can say "profile": 5
+    assert t.printer_id(5) == "unknown"
+    assert t.printer_id(["Test Printer"]) == "unknown"
+    assert t.printer_id(5, fallback_url="http://192.0.2.10:7125") == "192.0.2.10"
+
+
 def test_printer_id_for_follows_the_same_rule(monkeypatch):
     monkeypatch.setenv("ORCA_PRINTER_URL", "http://user:pw@192.0.2.10:7125")
     override = t.PrinterTarget(url="http://192.0.2.10:7125", source="override")

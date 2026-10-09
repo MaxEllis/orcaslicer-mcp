@@ -95,11 +95,17 @@ def recall_remembered() -> PrinterTarget | None:
 
 
 def _host_of(raw: str | None) -> str | None:
-    """The host name of an address, never its user name or password; None when there isn't one."""
-    try:
-        return urlsplit(normalise_url(raw or "")[0]).hostname or None
-    except ValueError:
+    """The host name of an address, never any part of its user name or password. None when there
+    isn't one, and also when the address is malformed: an unencoded '/', '?' or '#' in a user name or
+    password makes urllib read part of the login as the host, so such an address is refused (the same
+    check the printer tools use) rather than guessed at."""
+    if not isinstance(raw, str) or not raw.strip():
         return None
+    try:
+        url, _auth = _parse_address(raw, "override")
+    except PrinterError:
+        return None
+    return urlsplit(url).hostname or None
 
 
 def printer_id(profile_name: str | None = None, *, fallback_url: str | None = None) -> str:
@@ -112,7 +118,7 @@ def printer_id(profile_name: str | None = None, *, fallback_url: str | None = No
     host = _host_of(os.environ.get("ORCA_PRINTER_URL", ""))
     if host:
         return host
-    if profile_name and profile_name.strip():
+    if isinstance(profile_name, str) and profile_name.strip():
         return profile_name
     return _host_of(fallback_url) or "unknown"
 

@@ -17,6 +17,12 @@ TRANSIENT_CODES = frozenset({"not_reachable", "protocol_error"})
 MAX_POLL_FAILURES = 3
 # Klipper's own words for a job that has ended (print_stats.state, kept in snap["job"]["state"]).
 JOB_DONE = frozenset({"complete", "cancelled", "error"})
+# What to say when the job ends before the point being waited for and the printer gave no reason.
+ENDED_BEFORE = {
+    "heated": "The job ended before the heaters reached their targets.",
+    "printing": "The job ended before extrusion started.",
+    "first_layer_done": "The job ended before the first layer was done.",
+}
 
 
 def heated(snap: dict) -> bool:
@@ -73,12 +79,27 @@ def finished(snap: dict, start_state: str | None, kind: str | None) -> bool:
 
 
 def stop_reason(snap: dict) -> str | None:
-    for p in snap.get("problems") or []:
+    problems = snap.get("problems") or []
+    for p in problems:
         if p.get("severity") == "fatal":
             return p.get("message")
     if snap.get("state") in ("error", "shutdown"):
+        # No fatal problem, but the job errored: say it in the job's own words when it gave any.
+        for p in problems:
+            if p.get("source") == "job" and p.get("message"):
+                return p["message"]
         return "the printer reports an error"
     return None
+
+
+def ended_early(until: str, snap: dict, kind: str | None) -> str | None:
+    """Why a wait that watched the job run should stop now that it has left the active states, or
+    None when the wait should carry on. The caller has already checked that the condition is not met."""
+    if until != "finished":
+        return ENDED_BEFORE[until]
+    if kind == "octoprint":
+        return None  # OctoPrint's "finished" is exactly "was active, is not any more": already met
+    return f"The job stopped without finishing (the printer is now {snap.get('state')})."
 
 
 def condition_met(until: str, snap: dict, start_state: str | None, kind: str | None,
@@ -107,6 +128,7 @@ async def run_wait(target, client, until: str, timeout_s: int, report=None, *,
     start_state = snap.get("state")
     prev: dict | None = None  # the poll before this one, for conditions judged on two polls in a row
     failures = 0              # consecutive failed polls
+    was_running = start_state in ACTIVE  # a job has been seen running: if it stops, the wait is over
 
     def result(met: bool, stopped_early: str | None = None, note: str | None = None) -> dict:
         out = {"met": met, "until": until, "waited_s": int(round(clock() - start)),
@@ -126,6 +148,12 @@ async def run_wait(target, client, until: str, timeout_s: int, report=None, *,
         reason = stop_reason(snap)
         if reason:
             return result(False, stopped_early=reason)
+        if was_running and snap.get("state") not in ACTIVE:
+            # The job ended (cancelled, finished or reset by a firmware restart) before the point
+            # being waited for, and nothing says why: waiting out the timeout could only report this.
+            stopped = ended_early(until, snap, target.kind)
+            if stopped:
+                return result(False, stopped_early=stopped)
         elapsed = clock() - start
         if elapsed >= timeout_s:
             return result(False, note=f"timed out after {timeout_s} s; call again to keep waiting")
@@ -145,3 +173,4 @@ async def run_wait(target, client, until: str, timeout_s: int, report=None, *,
             return result(False, stopped_early=f"Lost contact with the printer: {e.message}")
         failures = 0
         prev, snap = snap, fresh
+        was_running = was_running or snap.get("state") in ACTIVE

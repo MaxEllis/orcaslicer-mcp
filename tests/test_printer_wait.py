@@ -168,6 +168,87 @@ async def test_finished_on_octoprint_with_an_old_finished_job_is_not_met(monkeyp
     assert out["met"] is False and out["note"] == "nothing is printing" and s.sleeps == []
 
 
+# --- the wait ends when the job ends -----------------------------------------------------------
+
+CANCELLED = {"state": "cancelled"}
+JOB_ERROR = {"severity": "error", "source": "job", "message": "Heater extruder not heating at expected rate",
+             "hint": None, "at": None}
+
+
+@pytest.mark.parametrize("until,first,text", [
+    ("heated", snap("heating", (150, 215), (40, 60), job={"state": "printing"}),
+     "The job ended before the heaters reached their targets."),
+    ("printing", snap("heating", (150, 215), (40, 60), job={"state": "printing", "filament_used_mm": 0}),
+     "The job ended before extrusion started."),
+    ("first_layer_done", snap("printing", job={"state": "printing", "layer": {"current": 1, "total": 80}}),
+     "The job ended before the first layer was done."),
+])
+async def test_a_cancelled_job_ends_the_wait_at_once(monkeypatch, until, first, text):
+    s = Script(monkeypatch, [first, snap("cancelled", job=CANCELLED)])
+    out = await s.run(KL, until)
+    assert out["met"] is False and out["stopped_early"] == text
+    assert out["status"]["state"] == "cancelled" and out["waited_s"] == 5
+    assert s.sleeps == [5.0] and "note" not in out
+
+
+async def test_a_cancel_that_clears_the_heater_targets_still_ends_a_heated_wait(monkeypatch):
+    # After a cancel the targets drop to zero, so heated() is False for ever: only the job-ended
+    # rule can end this wait.
+    s = Script(monkeypatch, [snap("heating", (150, 215), (40, 60)), snap("cancelled", (140, 0), (38, 0), job=CANCELLED)])
+    out = await s.run(KL, "heated", timeout_s=1800)
+    assert out["met"] is False and out["stopped_early"].startswith("The job ended") and s.sleeps == [5.0]
+
+
+async def test_a_cancelled_octoprint_job_ends_a_printing_wait_too(monkeypatch):
+    s = Script(monkeypatch, [snap("heating", (150, 215), (40, 60)), snap("cancelled")])
+    out = await s.run(OP, "printing")
+    assert out["met"] is False and out["stopped_early"] == "The job ended before extrusion started."
+
+
+async def test_the_job_ended_text_gives_way_to_the_printers_own_fault_words(monkeypatch):
+    s = Script(monkeypatch, [snap("heating", (150, 215)), snap("error", job={"state": "error"}, problems=[JOB_ERROR])])
+    out = await s.run(KL, "heated")
+    assert out["met"] is False and out["stopped_early"] == JOB_ERROR["message"]
+
+
+async def test_an_idle_printer_is_not_a_job_that_ended(monkeypatch):
+    # The job may simply not have started yet: keep waiting until it has, then wait for the point.
+    s = Script(monkeypatch, [snap("idle"), snap("idle"), snap("heating", (150, 215), (40, 60)),
+                             snap("heating", (214, 215), (60, 60))])
+    out = await s.run(KL, "heated")
+    assert out["met"] is True and out["stopped_early"] is None and len(s.sleeps) == 3
+
+
+async def test_an_old_cancelled_job_does_not_end_a_wait_for_the_next_one(monkeypatch):
+    s = Script(monkeypatch, [snap("cancelled", job=CANCELLED), snap("cancelled", job=CANCELLED)])
+    out = await s.run(KL, "printing", timeout_s=12)
+    assert out["met"] is False and "timed out" in out["note"] and out["stopped_early"] is None
+
+
+async def test_a_firmware_restart_ends_a_wait_for_finished(monkeypatch):
+    # print_stats goes back to standby: Klipper reports no job at all, and "idle" is not "finished".
+    s = Script(monkeypatch, [snap("printing", job={"state": "printing"}), snap("idle")])
+    out = await s.run(KL, "finished")
+    assert out["met"] is False and out["status"]["state"] == "idle" and s.sleeps == [5.0]
+    assert out["stopped_early"] == "The job stopped without finishing (the printer is now idle)."
+    assert "note" not in out
+
+
+async def test_a_klipper_job_error_uses_the_jobs_own_words(monkeypatch):
+    s = Script(monkeypatch, [snap("printing", job={"state": "printing"}),
+                             snap("error", job={"state": "error"}, problems=[JOB_ERROR])])
+    out = await s.run(KL, "finished")
+    assert out["met"] is True and out["stopped_early"] == JOB_ERROR["message"]
+
+
+def test_the_jobs_words_beat_a_console_line_but_not_a_fatal_problem():
+    console = {"severity": "error", "source": "console", "message": "Move out of range", "hint": None, "at": 1.0}
+    job_error = snap("error", job={"state": "error"}, problems=[console, JOB_ERROR])
+    assert w.stop_reason(job_error) == JOB_ERROR["message"]
+    assert w.stop_reason(snap("error", problems=[console])) == "the printer reports an error"
+    assert w.stop_reason(snap("shutdown", problems=[JOB_ERROR, FATAL])) == FATAL["message"]
+
+
 def lost(code="not_reachable"):
     return PrinterError(code, "The printer didn't answer.")
 
@@ -263,3 +344,11 @@ def test_first_layer_done_description_says_it_can_be_approximate():
     props = srv.mcp._tool_manager._tools["wait_for_printer"].parameters["properties"]
     desc = props["until"]["description"]
     assert "judged from the nozzle height, so it is approximate" in desc and chr(0x2014) not in desc
+
+
+def test_the_tool_description_says_when_it_returns_early():
+    doc = " ".join(srv.wait_for_printer.__doc__.split())
+    for phrase in ("stopped_early", "when the printer reports a fault", "when the job ends before the point it waits for",
+                   "Lost contact with the printer", "A met result can carry stopped_early too"):
+        assert phrase in doc
+    assert chr(0x2014) not in doc

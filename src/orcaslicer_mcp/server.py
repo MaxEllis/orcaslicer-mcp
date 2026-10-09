@@ -1280,9 +1280,12 @@ async def wait_for_printer(
     ctx: Context | None = None,
 ) -> dict:
     """Wait until the printer reaches a point in a print, checking every 5 seconds. Returns as soon as
-    it happens (met: true), early if the printer reports a fault (stopped_early says why), or at the
-    timeout with the latest status (met: false). Waiting for 'finished' when nothing is printing
-    returns at once with the note 'nothing is printing'. Read-only: it never sends commands."""
+    it happens (met: true), or at the timeout with the latest status (met: false). It also returns
+    early, with stopped_early saying why, when the printer reports a fault, when the job ends before
+    the point it waits for (a cancelled print, say), or after losing contact ("Lost contact with the
+    printer"). A met result can carry stopped_early too, for example a job that finished with an
+    error. Waiting for 'finished' when nothing is printing returns at once with the note 'nothing is
+    printing'. Read-only: it never sends commands."""
     async def report(done: float, total: float, message: str) -> None:
         if ctx is not None:
             await ctx.report_progress(done, total, message)

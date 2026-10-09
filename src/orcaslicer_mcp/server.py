@@ -1156,9 +1156,11 @@ async def recall_prints(model_name: str | None = None, limit: int = 5) -> dict:
     (success/cancelled/error), your recorded verdict (e.g. 'warped'), and the settings it was sliced
     with. Call this BEFORE slicing and tell the user anything relevant (a past warp, a failed layer
     height). Each row also carries failure_reason (the printer's own words, when known) and OrcaSlicer's
-    estimates (est_time_s, est_filament_g). duration_s is the real job time; filament_g comes from
-    the G-code file's own estimate, because printers don't report grams. Call list_print_history
-    first to pull in recent results. Read-only. Returns available=false and nothing else when no
+    estimates (est_time_s, est_filament_g). duration_s is Moonraker's whole job time, including heating
+    up and any pauses, so beside the estimates it overstates an overrun; list_print_history compares the
+    print time (without heating or pauses) with the estimate. filament_g comes from the G-code file's
+    own estimate, because printers don't report grams. Call list_print_history first to pull in recent
+    results. Read-only. Returns available=false and nothing else when no
     outcome store exists yet.
     If neither geometry nor name matches, it returns the most recent prints of ANY model with
     matched_by='recent'; never attribute those to the current model."""

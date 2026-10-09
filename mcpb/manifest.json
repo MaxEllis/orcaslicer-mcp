@@ -87,7 +87,7 @@
     "printer_id": {
       "type": "string",
       "title": "Printer name",
-      "description": "The name the outcome store gives this printer. Leave blank to use the printer profile's name.",
+      "description": "The name the outcome store gives this printer. Leave blank to use the host name of the Printer address when you set one, otherwise the printer profile's name, otherwise unknown.",
       "required": false
     }
   },

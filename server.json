@@ -49,7 +49,7 @@
         },
         {
           "name": "ORCA_PRINTER_ID",
-          "description": "Optional printer name for the outcome store; defaults to the printer profile's name.",
+          "description": "Optional printer name for the outcome store; defaults to the host name of ORCA_PRINTER_URL when that is set, otherwise the printer profile's name, otherwise unknown.",
           "isRequired": false
         }
       ]

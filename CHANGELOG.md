@@ -8,12 +8,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [Unreleased]
 
 ### Added
-- Printer feedback: `get_printer_status`, `wait_for_printer`, `list_print_history` and `check_printer_match`. The server finds the printer from OrcaSlicer's active printer profile, or `ORCA_PRINTER_URL`. Klipper (Moonraker) printers get all four tools; OctoPrint gets status and waiting, with `ORCA_PRINTER_API_KEY` when it needs a key. Read-only: nothing is ever sent to the printer. Requested in orcaslicer-mcp#12.
+- Printer feedback: `get_printer_status`, `wait_for_printer`, `list_print_history` and `check_printer_match`. The server finds the printer from OrcaSlicer's active printer profile, or `ORCA_PRINTER_URL`. Klipper (Moonraker) printers get all four tools; OctoPrint gets status and waiting, with `ORCA_PRINTER_API_KEY` when it needs a key. Read-only: no command, G-code or file is ever sent to the printer. The server only reads, with HTTP GET requests (carrying the API key, or the user name and password from `ORCA_PRINTER_URL`, when you set them). `wait_for_printer` also returns early when the job ends before the point it waits for, as when a print is cancelled while it heats. Requested in orcaslicer-mcp#12.
 - The Claude Desktop extension has settings for the printer address, its API key and the printer name used in the outcome store.
 
 ### Changed
 - The outcome store is now owned by this project (klipper-mcp carries a copy) and works without klipper-mcp. `save_gcode` always records the slice, with OrcaSlicer's time and filament estimates, and `list_print_history` adds finished prints with the printer's failure reason. New default location `~/.orcaslicer-mcp/outcomes/`; an existing `~/projects/_shared/print-outcomes/` is still used. The store upgrades itself in place by adding columns, so older versions can still read it.
-- `recall_prints` rows include the failure reason and OrcaSlicer's estimates. `duration_s` is the real job time; `filament_g` is the G-code file's own estimate, because printers report filament in millimetres, not grams.
+- `recall_prints` rows include the failure reason and OrcaSlicer's estimates. `duration_s` is Moonraker's whole job time, including heating up and any pauses, so beside the estimates it overstates an overrun; `list_print_history` compares the print time, which leaves both out, with the estimate. `filament_g` is the G-code file's own estimate, because printers report filament in millimetres, not grams.
 
 ### Documentation
 - README: the introduction, security notes and privacy policy now name the printer as the one other place the server connects to, read-only, and the data-retention entry lists the outcome store and `printer.json`.

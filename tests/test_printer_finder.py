@@ -1,3 +1,5 @@
+import asyncio
+import base64
 import json
 
 import httpx
@@ -8,6 +10,8 @@ from orcaslicer_mcp.errors import ConfigError, NotReachable, Unauthorized
 from orcaslicer_mcp.printer import http as phttp
 from orcaslicer_mcp.printer import target as t
 from orcaslicer_mcp.printer.errors import PrinterError
+from orcaslicer_mcp.printer.moonraker import MoonrakerClient
+from orcaslicer_mcp.printer.octoprint import OctoPrintClient
 
 P = "http://192.0.2.10"
 STATUS = {"presets": {"printer": "Test Printer", "print": "p", "filament": ["f"]}}
@@ -261,6 +265,7 @@ def test_connect_timeout_is_short():
     "http://192.0.2.10:abc",      # non-numeric port
     "http://[2001:db8::1",        # unclosed IPv6 bracket
     "http://192.0.2.10:99999",    # port out of range
+    "http://192.0.2.10:0",        # port zero is in urllib's range but nothing listens there
     "http://",                    # no host at all
 ])
 async def test_a_malformed_override_is_not_configured(monkeypatch, bad):
@@ -303,3 +308,301 @@ async def test_a_malformed_target_url_is_caught_before_any_request():
             with pytest.raises(PrinterError) as e:
                 await t.open_printer(target(url=bad))
             assert e.value.code == "not_configured" and bad in e.value.message
+
+
+# --- the probe clients are closed on every path ----------------------------------------------------------
+
+@pytest.fixture
+def closed(monkeypatch):
+    """Spies on both client classes: the list holds the base URL of every client that was closed."""
+    log: list[str] = []
+
+    class SpyMoonraker(MoonrakerClient):
+        async def aclose(self):
+            log.append(self.base_url)
+            await super().aclose()
+
+    class SpyOctoPrint(OctoPrintClient):
+        async def aclose(self):
+            log.append(self.base_url + " (octoprint)")
+            await super().aclose()
+
+    monkeypatch.setattr(t, "MoonrakerClient", SpyMoonraker)
+    monkeypatch.setattr(t, "OctoPrintClient", SpyOctoPrint)
+    return log
+
+
+async def test_probe_clients_that_failed_are_closed_and_the_returned_one_is_not(closed):
+    with respx.mock:
+        respx.get(f"{P}:7125/server/info").mock(side_effect=httpx.ConnectError("refused"))
+        respx.get(f"{P}/server/info").mock(return_value=httpx.Response(404))
+        respx.get(f"{P}/api/version").mock(return_value=httpx.Response(200, json=OCTO))
+        found, client = await t.open_printer(target())
+        assert found.kind == "octoprint"
+        assert sorted(closed) == sorted([P, f"{P}:7125"])  # the two Moonraker probes; OctoPrint stays open
+        await client.aclose()
+    assert closed[-1] == P + " (octoprint)"
+
+
+async def test_every_probe_client_is_closed_when_nothing_answers(closed):
+    with respx.mock:
+        for url in (f"{P}:7125/server/info", f"{P}/server/info", f"{P}/api/version"):
+            respx.get(url).mock(side_effect=httpx.ConnectError("refused"))
+        with pytest.raises(PrinterError):
+            await t.open_printer(target())
+    assert len(closed) == 3
+
+
+async def test_every_probe_client_is_closed_when_the_printer_is_locked(closed):
+    with respx.mock:
+        respx.get(f"{P}:7125/server/info").mock(side_effect=httpx.ConnectError("refused"))
+        respx.get(f"{P}/server/info").mock(return_value=httpx.Response(401))
+        respx.get(f"{P}/api/version").mock(return_value=httpx.Response(401))
+        with pytest.raises(PrinterError) as e:
+            await t.open_printer(target())
+    assert e.value.code == "auth_required" and len(closed) == 3
+
+
+async def test_the_probe_client_is_closed_when_an_unexpected_exception_escapes(closed):
+    with respx.mock:
+        respx.get(f"{P}/server/info").mock(side_effect=RuntimeError("test failure"))
+        with pytest.raises(RuntimeError):
+            await t.open_printer(target())
+    assert closed == [P]
+
+
+async def test_the_probe_client_is_closed_when_the_call_is_cancelled(closed):
+    started = asyncio.Event()
+
+    async def hang(request):
+        started.set()
+        await asyncio.Event().wait()  # never answers
+
+    with respx.mock:
+        respx.get(f"{P}/server/info").mock(side_effect=hang)
+        task = asyncio.create_task(t.open_printer(target()))
+        await asyncio.wait_for(started.wait(), 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert closed == [P]
+
+
+async def test_the_client_is_closed_if_remembering_the_printer_blows_up(closed, monkeypatch):
+    def boom(found):
+        raise RuntimeError("test failure")
+    monkeypatch.setattr(t, "remember", boom)
+    with respx.mock:
+        respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO))
+        with pytest.raises(RuntimeError):
+            await t.open_printer(target(source="profile", profile="Test Printer"))
+    assert closed == [P]
+
+
+# --- the API key and the login really reach the probe requests ------------------------------------------
+
+async def test_the_api_key_and_login_reach_every_probe_request():
+    basic = "Basic " + base64.b64encode(b"test-user:pw-secret").decode()
+    with respx.mock:
+        routes = [respx.get(f"{P}:7125/server/info").mock(side_effect=httpx.ConnectError("refused")),
+                  respx.get(f"{P}/server/info").mock(return_value=httpx.Response(404)),
+                  respx.get(f"{P}/api/version").mock(return_value=httpx.Response(200, json=OCTO))]
+        found, client = await t.open_printer(target(auth=("test-user", "pw-secret")), api_key="test-key")
+        await client.aclose()
+    sent = [c.request for r in routes for c in r.calls]
+    assert len(sent) == 3  # Moonraker (given), Moonraker 7125, OctoPrint: each one carried both
+    assert all(r.headers["X-Api-Key"] == "test-key" and r.headers["Authorization"] == basic for r in sent)
+
+
+async def test_a_pasted_api_key_is_trimmed_on_the_way_to_the_probes():
+    with respx.mock:
+        route = respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO))
+        _, client = await t.open_printer(target(), api_key="  test-key \n")
+        await client.aclose()
+    assert route.calls[0].request.headers["X-Api-Key"] == "test-key"
+
+
+async def test_no_key_and_no_login_means_no_credential_headers():
+    with respx.mock:
+        route = respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO))
+        _, client = await t.open_printer(target())
+        await client.aclose()
+    sent = route.calls[0].request.headers
+    assert "x-api-key" not in sent and "authorization" not in sent
+
+
+# --- the remembered protocol is tried first for the same address -----------------------------------------
+
+def _all_answer():
+    return (respx.get(f"{P}:7125/server/info").mock(return_value=httpx.Response(200, json=INFO)),
+            respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO)),
+            respx.get(f"{P}/api/version").mock(return_value=httpx.Response(200, json=OCTO)))
+
+
+async def test_a_profile_target_probes_the_remembered_protocol_first():
+    t.remember(t.PrinterTarget(url=P, source="profile", profile="Test Printer", kind="octoprint"))
+    with respx.mock:
+        alt, given, octo = _all_answer()
+        found, client = await t.open_printer(target(source="profile", profile="Test Printer"))
+        await client.aclose()
+    assert found.kind == "octoprint"
+    assert given.call_count == 0 and alt.call_count == 0 and octo.call_count == 1
+
+
+async def test_a_remembered_protocol_for_another_address_is_not_a_hint():
+    t.remember(t.PrinterTarget(url="http://192.0.2.99", source="profile", profile="Test Printer", kind="octoprint"))
+    with respx.mock:
+        alt, given, octo = _all_answer()
+        found, client = await t.open_printer(target(source="profile", profile="Test Printer"))
+        await client.aclose()
+    assert found.kind == "klipper" and octo.call_count == 0  # the default order
+
+
+async def test_the_override_ignores_the_remembered_protocol():
+    t.remember(t.PrinterTarget(url=P, source="profile", profile="Test Printer", kind="octoprint"))
+    with respx.mock:
+        alt, given, octo = _all_answer()
+        found, client = await t.open_printer(target(source="override"))
+        await client.aclose()
+    assert found.kind == "klipper" and octo.call_count == 0
+
+
+async def test_a_remembered_protocol_is_only_a_hint_when_it_stops_answering():
+    t.remember(t.PrinterTarget(url=P, source="profile", profile="Test Printer", kind="octoprint"))
+    with respx.mock:
+        respx.get(f"{P}/api/version").mock(side_effect=httpx.ConnectError("refused"))
+        respx.get(f"{P}:7125/server/info").mock(side_effect=httpx.ConnectError("refused"))
+        respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO))
+        found, client = await t.open_printer(target(source="profile", profile="Test Printer"))
+        await client.aclose()
+    assert found.kind == "klipper"
+    assert t.recall_remembered().kind == "klipper"  # and the file now says so
+
+
+async def test_a_corrupt_remembered_kind_is_no_hint():
+    t.REMEMBERED_PATH.write_text(json.dumps({"url": P, "kind": "bambu"}))
+    with respx.mock:
+        alt, given, octo = _all_answer()
+        found, client = await t.open_printer(target(source="profile", profile="Test Printer"))
+        await client.aclose()
+    assert found.kind == "klipper"
+
+
+# --- a stale cached probe falls through to the other candidates -------------------------------------------
+
+async def test_a_stale_cached_address_falls_through_to_the_others():
+    t._PROBE_CACHE[P] = ("klipper", f"{P}:7125")  # answered once, gone now
+    with respx.mock:
+        stale = respx.get(f"{P}:7125/server/info").mock(side_effect=httpx.ConnectError("refused"))
+        given = respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO))
+        found, client = await t.open_printer(target())
+        await client.aclose()
+    assert (found.kind, found.url) == ("klipper", P)
+    assert stale.call_count == 1 and given.call_count == 1
+    assert t._PROBE_CACHE[P] == ("klipper", P)  # the cache is corrected
+
+
+async def test_a_stale_cached_protocol_falls_through_to_the_other_protocol():
+    t._PROBE_CACHE[P] = ("octoprint", P)  # the printer was reflashed to Klipper since
+    with respx.mock:
+        respx.get(f"{P}/api/version").mock(return_value=httpx.Response(404))
+        respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json=INFO))
+        found, client = await t.open_printer(target())
+        await client.aclose()
+    assert found.kind == "klipper" and t._PROBE_CACHE[P] == ("klipper", P)
+
+
+async def test_a_stale_cached_entry_that_still_locks_us_out_reports_it_when_nothing_else_answers():
+    t._PROBE_CACHE[P] = ("klipper", f"{P}:7125")
+    with respx.mock:
+        respx.get(f"{P}:7125/server/info").mock(return_value=httpx.Response(401))
+        respx.get(f"{P}/server/info").mock(side_effect=httpx.ConnectError("refused"))
+        respx.get(f"{P}/api/version").mock(side_effect=httpx.ConnectError("refused"))
+        with pytest.raises(PrinterError) as e:
+            await t.open_printer(target())
+    assert e.value.code == "auth_required"
+
+
+# --- IPv6 -----------------------------------------------------------------------------------------------
+
+async def test_an_ipv6_address_gets_its_7125_variant_in_brackets():
+    v6 = "http://[2001:db8::1]"
+    with respx.mock:
+        for url in (f"{v6}:7125/server/info", f"{v6}/server/info", f"{v6}/api/version"):
+            respx.get(url).mock(side_effect=httpx.ConnectError("refused"))
+        with pytest.raises(PrinterError) as e:
+            await t.open_printer(target(url=v6))
+    assert e.value.details["tried"] == [f"{v6} (Klipper)", f"{v6}:7125 (Klipper)", f"{v6} (OctoPrint)"]
+
+
+# --- every unsupported connection type -------------------------------------------------------------------
+
+UNSUPPORTED = ["prusalink", "prusaconnect", "duet", "flashair", "astrobox", "repetier", "mks", "esp3d",
+               "obico", "flashforge", "simplyprint", "3dprinteros"]
+
+
+def test_the_unsupported_list_is_exactly_the_twelve_in_the_constraints():
+    assert set(t.UNSUPPORTED_HOST_TYPES) == set(UNSUPPORTED) and len(UNSUPPORTED) == 12
+
+
+@pytest.mark.parametrize("ht", UNSUPPORTED)
+async def test_each_unsupported_connection_type_stops_the_profile_before_any_probe(ht):
+    with respx.mock:  # no routes: any request would fail the test
+        with pytest.raises(PrinterError) as e:
+            await t.resolve_target(factory(FakeFork(preset=profile(host_type=ht))))
+    assert e.value.code == "unsupported_connection" and e.value.details["host_type"] == ht
+    assert t.UNSUPPORTED_HOST_TYPES[ht] in e.value.message
+    assert e.value.details["printer"] == {"source": "profile", "profile": "Test Printer"}
+
+
+@pytest.mark.parametrize("ht", ["moonraker", "octoprint", "elegoolink", "crealityprint", "", "something-new"])
+async def test_the_probeable_connection_types_resolve(ht):
+    tgt = await t.resolve_target(factory(FakeFork(preset=profile(host_type=ht))))
+    assert tgt.source == "profile" and tgt.url == P
+
+
+# --- errors from resolve_target say where the address came from ------------------------------------------
+
+@pytest.mark.parametrize("bad", ["http://192.0.2.10:abc", "http://", "http://user:pa/ss-secret@192.0.2.10"])
+async def test_a_bad_override_carries_the_override_source(monkeypatch, bad):
+    monkeypatch.setenv("ORCA_PRINTER_URL", bad)
+    with pytest.raises(PrinterError) as e:
+        await t.resolve_target(never)
+    assert e.value.details["printer"] == {"source": "override"}
+    assert e.value.as_dict()["printer"] == {"source": "override"}
+
+
+@pytest.mark.parametrize("preset", [
+    profile(print_host=""),
+    profile(print_host="", printer_model="Bambu Lab X1 Carbon"),
+    profile(host_type="duet"),
+    profile(print_host="http://192.0.2.10:abc"),
+    profile(print_host="http://user:pa/ss-secret@192.0.2.10"),
+])
+async def test_a_profile_that_cannot_be_used_names_the_profile(preset):
+    with pytest.raises(PrinterError) as e:
+        await t.resolve_target(factory(FakeFork(preset=preset)))
+    assert e.value.details["printer"] == {"source": "profile", "profile": "Test Printer"}
+    assert "ss-secret" not in json.dumps(e.value.as_dict())
+
+
+async def test_no_active_profile_says_the_source_is_the_profile_without_a_name():
+    with pytest.raises(PrinterError) as e:
+        await t.resolve_target(factory(FakeFork(status={"presets": {}})))
+    assert e.value.details["printer"] == {"source": "profile"}
+
+
+async def test_orca_unreachable_says_the_source_is_the_profile_without_a_name():
+    with pytest.raises(PrinterError) as e:
+        await t.resolve_target(factory(FakeFork(exc=NotReachable("down"))))
+    assert e.value.code == "orca_unreachable"
+    assert e.value.details["printer"] == {"source": "profile"}
+
+
+async def test_an_error_that_already_names_a_printer_keeps_its_own_block():
+    class Fork(FakeFork):
+        async def get_status(self):
+            raise PrinterError("not_configured", "x", printer={"source": "elsewhere"})
+    with pytest.raises(PrinterError) as e:
+        await t.resolve_target(factory(Fork()))
+    assert e.value.details["printer"] == {"source": "elsewhere"}

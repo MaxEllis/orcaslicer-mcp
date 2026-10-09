@@ -163,3 +163,154 @@ def test_unreadable_address_error_never_echoes_the_login():
         t._parse_address("test-user:pa://ss@192.0.2.10", "override")
     text = json.dumps(e.value.as_dict())
     assert "<redacted>@192.0.2.10" in text and "test-user" not in text and "pa:" not in text
+
+
+# --- PrinterError.as_dict: the core keys always win ---------------------------------------------
+
+def test_as_dict_core_keys_win_over_a_detail_of_the_same_name():
+    e = PrinterError("not_reachable", "No answer.", hint="Switch it on.", error="shadow-code", tried=["a"])
+    e.details.update(message="shadow message", hint="shadow hint")
+    assert e.as_dict() == {"error": "not_reachable", "message": "No answer.", "hint": "Switch it on.",
+                           "tried": ["a"]}
+
+
+def test_a_detail_named_hint_never_stands_in_for_a_missing_hint():
+    e = PrinterError("not_reachable", "No answer.", error="shadow-code")
+    e.details["hint"] = "a guess"
+    assert e.as_dict() == {"error": "not_reachable", "message": "No answer."}  # hints never guess
+
+
+# --- normalise_url: query, fragment, IPv6 --------------------------------------------------------
+
+@pytest.mark.parametrize("raw,url,auth", [
+    ("http://192.0.2.10/octo?x=1#frag", "http://192.0.2.10/octo", None),
+    ("192.0.2.10:7125?x=1", "http://192.0.2.10:7125", None),
+    ("http://192.0.2.10/#only-a-fragment", "http://192.0.2.10", None),
+    ("http://[2001:db8::1]:7125/", "http://[2001:db8::1]:7125", None),
+    ("[2001:db8::1]", "http://[2001:db8::1]", None),
+    ("http://test-user:pw@[2001:db8::1]:7125/path/?q=1#f", "http://[2001:db8::1]:7125/path",
+     ("test-user", "pw")),
+])
+def test_normalise_url_drops_query_and_fragment_and_handles_ipv6(raw, url, auth):
+    assert t.normalise_url(raw) == (url, auth)
+
+
+def test_an_ipv6_address_passes_the_address_check():
+    assert t._parse_address("http://[2001:db8::1]:7125", "override") == ("http://[2001:db8::1]:7125", None)
+
+
+def test_a_redacted_login_marker_is_the_guards_placeholder():
+    from orcaslicer_mcp.guard import REDACTED
+    assert t.normalise_url(f"http://{REDACTED}@192.0.2.10") == ("http://192.0.2.10", None)
+
+
+# --- remember(): atomic ---------------------------------------------------------------------------
+
+def _remembered_target(url="http://192.0.2.10", kind="klipper"):
+    return t.PrinterTarget(url=url, source="profile", profile="Test Printer", host_type="moonraker", kind=kind)
+
+
+def test_remember_goes_through_a_temp_file_and_a_replace(monkeypatch):
+    import os
+    seen = []
+    real = os.replace
+
+    def spy(src, dst):
+        seen.append((str(src), str(dst), os.path.exists(src)))
+        return real(src, dst)
+    monkeypatch.setattr(t.os, "replace", spy)
+    t.remember(_remembered_target())
+    assert len(seen) == 1
+    src, dst, src_existed = seen[0]
+    assert dst == str(t.REMEMBERED_PATH) and src != dst and src_existed
+    assert os.path.dirname(src) == os.path.dirname(dst)  # same folder, so the replace is atomic
+    assert json.loads(t.REMEMBERED_PATH.read_text())["url"] == "http://192.0.2.10"
+    assert [p.name for p in t.REMEMBERED_PATH.parent.iterdir()] == ["printer.json"]
+
+
+def test_a_failed_remember_leaves_the_old_file_whole_and_no_temp_file(monkeypatch):
+    t.remember(_remembered_target(url="http://192.0.2.10"))
+    before = t.REMEMBERED_PATH.read_text()
+
+    def boom(src, dst):
+        raise OSError("disk full")
+    monkeypatch.setattr(t.os, "replace", boom)
+    t.remember(_remembered_target(url="http://192.0.2.99"))  # a convenience: never raises
+    assert t.REMEMBERED_PATH.read_text() == before
+    assert [p.name for p in t.REMEMBERED_PATH.parent.iterdir()] == ["printer.json"]
+
+
+# --- recall_remembered(): validates what it reads --------------------------------------------------
+
+GOOD = {"url": "http://192.0.2.10", "kind": "klipper", "profile": "Test Printer", "host_type": "moonraker",
+        "printer_model": "Test Model", "found_at": 1_700_000_000.0}
+
+
+def _saved(**over):
+    d = dict(GOOD)
+    d.update(over)
+    t.REMEMBERED_PATH.write_text(json.dumps(d))
+
+
+def test_recall_returns_a_well_formed_file_whole():
+    _saved()
+    back = t.recall_remembered()
+    assert (back.url, back.kind, back.profile, back.host_type, back.printer_model, back.remembered_at) == (
+        "http://192.0.2.10", "klipper", "Test Printer", "moonraker", "Test Model", 1_700_000_000.0)
+    assert back.source == "remembered" and back.auth is None
+
+
+@pytest.mark.parametrize("url", ["http://192.0.2.10:abc", "http://192.0.2.10:99999", "http://", "", "   ", 5, None,
+                                 ["http://192.0.2.10"], "http://user:pa/ss-secret@192.0.2.10"])
+def test_recall_refuses_an_address_that_would_not_pass_the_address_check(url):
+    _saved(url=url)
+    assert t.recall_remembered() is None
+
+
+def test_recall_normalises_the_address_and_never_keeps_a_login():
+    _saved(url="test-user:pw-secret@192.0.2.10:7125/")
+    back = t.recall_remembered()
+    assert back.url == "http://192.0.2.10:7125" and back.auth is None
+    assert "pw-secret" not in repr(back) and "test-user" not in repr(back)
+
+
+@pytest.mark.parametrize("bad", ['"soon"', "true", "null", "[1]", '{"a": 1}', "NaN", "Infinity", "-Infinity",
+                                 "1" + "0" * 400])
+def test_recall_reads_a_found_at_that_is_not_a_finite_number_as_missing(bad):
+    rest = json.dumps({k: v for k, v in GOOD.items() if k != "found_at"})
+    t.REMEMBERED_PATH.write_text(rest[:-1] + ', "found_at": ' + bad + "}")  # raw text: NaN is not valid JSON
+    back = t.recall_remembered()
+    assert back is not None and back.remembered_at is None and back.url == "http://192.0.2.10"
+
+
+@pytest.mark.parametrize("good,expected", [(1_700_000_000, 1_700_000_000.0), (0, 0.0), (1.5, 1.5)])
+def test_recall_keeps_a_finite_found_at(good, expected):
+    _saved(found_at=good)
+    assert t.recall_remembered().remembered_at == expected
+
+
+@pytest.mark.parametrize("kind", ["bambu", "Klipper", "", 5, True, None, ["klipper"]])
+def test_recall_reads_an_unknown_kind_as_missing(kind):
+    _saved(kind=kind)
+    back = t.recall_remembered()
+    assert back is not None and back.kind is None
+
+
+@pytest.mark.parametrize("kind", ["klipper", "octoprint"])
+def test_recall_keeps_a_known_kind(kind):
+    _saved(kind=kind)
+    assert t.recall_remembered().kind == kind
+
+
+@pytest.mark.parametrize("field", ["profile", "host_type", "printer_model"])
+@pytest.mark.parametrize("bad", [5, True, ["Test Printer"], {"name": "x"}])
+def test_recall_reads_a_text_field_that_is_not_text_as_missing(field, bad):
+    _saved(**{field: bad})
+    back = t.recall_remembered()
+    assert back is not None and getattr(back, field) is None
+
+
+@pytest.mark.parametrize("content", ["[]", '"text"', "null", "5"])
+def test_recall_ignores_a_file_that_is_not_an_object(content):
+    t.REMEMBERED_PATH.write_text(content)
+    assert t.recall_remembered() is None

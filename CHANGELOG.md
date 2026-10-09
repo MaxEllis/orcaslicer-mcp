@@ -7,6 +7,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+- The printer tools no longer fail with a raw error when a printer sends a reply that can't be decoded, redirects, or holds JSON of the wrong shape. They return `protocol_error` (or `not_reachable` when the connection drops) with a message.
+- An `ORCA_PRINTER_API_KEY` pasted with a trailing space or newline is trimmed before it is sent.
+- A user name and password in the printer address are dropped from the address a message can echo, as a second guard after the existing redaction.
+- Looking for the printer no longer leaves an HTTP client open when the call is cancelled or fails in an unexpected way.
+- A damaged or hand-edited `printer.json` can no longer break a status call: the remembered address, protocol and time are checked when read, and the file is written in one atomic step.
+- Errors from finding the printer (a bad `ORCA_PRINTER_URL`, a profile with no address, an unsupported connection type, OrcaSlicer not reachable) now carry a `printer` entry saying where the address came from.
+- A printer address with port 0 is refused as not valid.
+
+### Changed
+- `get_printer_status` and `wait_for_printer` make one request fewer to a Klipper printer: the answer from the request that found the printer is reused once. Later polls of `wait_for_printer` still ask again.
+- A printer found through OrcaSlicer's profile is tried first with the protocol that answered last time at the same address, so a new session makes fewer attempts.
+
 ## [0.1.15] - 2026-10-09
 
 ### Added

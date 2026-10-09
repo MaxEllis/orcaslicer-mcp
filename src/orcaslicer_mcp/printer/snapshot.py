@@ -16,11 +16,14 @@ async def take_snapshot(target, client, *, now: float | None = None) -> dict:
     if target.kind == "octoprint":
         return octoprint_snapshot(await client.printer(), await client.job(), target_public=target.public())
     notes: list[str] = []
-    info: dict = {}
-    try:
-        info = await client.server_info()
-    except PrinterError as e:
-        notes.append(f"Moonraker's own warnings couldn't be read: {e.message}")
+    # The probe that found this printer already asked /server/info: use that reply once, ask again after.
+    info: dict | None = client.take_probe_info()
+    if info is None:
+        info = {}
+        try:
+            info = await client.server_info()
+        except PrinterError as e:
+            notes.append(f"Moonraker's own warnings couldn't be read: {e.message}")
     status: dict = {}
     if info.get("klippy_connected") is not False:  # Moonraker refuses object queries while Klipper is down
         status = await client.objects_query(STATUS_OBJECTS)

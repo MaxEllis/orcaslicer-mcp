@@ -5,14 +5,16 @@ the printer that last answered (remembered in ~/.orcaslicer-mcp/printer.json and
 OrcaSlicer can't be reached)."""
 from __future__ import annotations
 import json
+import math
 import os
+import tempfile
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from ..errors import ApiError, ConfigError, Unauthorized
-from ..guard import _strip_userinfo
+from ..guard import REDACTED, _strip_userinfo
 from .errors import PrinterError
 from .moonraker import MoonrakerClient
 from .octoprint import OctoPrintClient
@@ -46,7 +48,7 @@ class PrinterTarget:
 
 def normalise_url(raw: str) -> tuple[str, tuple[str, str] | None]:
     """'192.0.2.10' -> ('http://192.0.2.10', None). Userinfo comes back separately; a '<redacted>@'
-    left by credential redaction is dropped. Query strings and the trailing slash are dropped."""
+    left by credential redaction is dropped. Query strings, fragments and the trailing slash are dropped."""
     s = (raw or "").strip()
     if not s:
         return "", None
@@ -56,7 +58,7 @@ def normalise_url(raw: str) -> tuple[str, tuple[str, str] | None]:
     netloc, auth = parts.netloc, None
     if "@" in netloc:
         userinfo, netloc = netloc.rsplit("@", 1)
-        if userinfo and "<redacted>" not in userinfo:
+        if userinfo and REDACTED not in userinfo:
             user, _, password = userinfo.partition(":")
             auth = (unquote(user), unquote(password))
     return urlunsplit((parts.scheme, netloc, parts.path.rstrip("/"), "", "")), auth
@@ -73,26 +75,65 @@ def check_host_type(host_type: str | None) -> None:
 
 
 def remember(target: PrinterTarget) -> None:
-    """Save the printer that answered, without credentials. A convenience: failures are ignored."""
+    """Save the printer that answered, without credentials. A convenience: failures are ignored.
+    Written to a temp file beside the real one and renamed over it, so a crash or a full disk never
+    leaves a half-written file for the next start to read."""
+    tmp = None
     try:
         REMEMBERED_PATH.parent.mkdir(parents=True, exist_ok=True)
-        REMEMBERED_PATH.write_text(json.dumps({
-            "url": target.url, "kind": target.kind, "profile": target.profile,
-            "host_type": target.host_type, "printer_model": target.printer_model, "found_at": time.time()}))
+        fd, tmp = tempfile.mkstemp(dir=REMEMBERED_PATH.parent, prefix=REMEMBERED_PATH.name + ".", suffix=".tmp")
+        with os.fdopen(fd, "w") as f:
+            json.dump({"url": target.url, "kind": target.kind, "profile": target.profile,
+                       "host_type": target.host_type, "printer_model": target.printer_model,
+                       "found_at": time.time()}, f)
+        os.replace(tmp, REMEMBERED_PATH)
+        tmp = None
     except OSError:
         pass
+    finally:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def _text_or_none(v) -> str | None:
+    return v if isinstance(v, str) else None
+
+
+def _finite_number_or_none(v) -> float | None:
+    """v as a float when it is a real, finite number: not a bool, not NaN or Infinity (json.loads
+    accepts both), not an integer too big for a float."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    try:
+        f = float(v)
+    except OverflowError:
+        return None
+    return f if math.isfinite(f) else None
 
 
 def recall_remembered() -> PrinterTarget | None:
+    """The printer that last answered, or None. The file is hand-editable, so every field is checked:
+    the address must pass the same check as any other, and a field of the wrong type reads as unknown."""
     try:
         d = json.loads(REMEMBERED_PATH.read_text())
     except (OSError, ValueError):
         return None
-    url = d.get("url") if isinstance(d, dict) else None
-    if not isinstance(url, str) or not url:
+    raw = d.get("url") if isinstance(d, dict) else None
+    if not isinstance(raw, str):
         return None
-    return PrinterTarget(url=url, source="remembered", profile=d.get("profile"), host_type=d.get("host_type"),
-                         printer_model=d.get("printer_model"), kind=d.get("kind"), remembered_at=d.get("found_at"))
+    try:
+        url, _ = _parse_address(raw, "remembered")  # a login typed into the file is dropped, never used
+    except PrinterError:
+        return None
+    kind = d.get("kind")
+    return PrinterTarget(url=url, source="remembered", profile=_text_or_none(d.get("profile")),
+                         host_type=_text_or_none(d.get("host_type")),
+                         printer_model=_text_or_none(d.get("printer_model")),
+                         kind=kind if kind in ("klipper", "octoprint") else None,
+                         remembered_at=_finite_number_or_none(d.get("found_at")))
 
 
 def _host_of(raw: str | None) -> str | None:
@@ -198,8 +239,8 @@ def _parse_address(raw: str, source: str, profile: str | None = None) -> tuple[s
     try:
         url, auth = normalise_url(raw)
         checked = urlsplit(url)
-        checked.port  # raises ValueError for a non-numeric or out-of-range port
-        valid = bool(checked.hostname)
+        port = checked.port  # raises ValueError for a non-numeric port or one outside 0-65535
+        valid = bool(checked.hostname) and (port is None or 1 <= port <= 65535)
     except ValueError:
         valid = False
     if not valid:
@@ -209,11 +250,23 @@ def _parse_address(raw: str, source: str, profile: str | None = None) -> tuple[s
 
 async def resolve_target(fork_factory) -> PrinterTarget:
     """Find the printer: ORCA_PRINTER_URL, else OrcaSlicer's active printer profile, else the
-    printer remembered from the last time OrcaSlicer could be read."""
+    printer remembered from the last time OrcaSlicer could be read. An error raised on the way
+    carries a partial `printer` block ({"source", and "profile" once known}) so the reply still says
+    where the address came from."""
+    where: dict = {"source": "override"}
+    try:
+        return await _resolve_target(fork_factory, where)
+    except PrinterError as e:
+        e.details.setdefault("printer", dict(where))
+        raise
+
+
+async def _resolve_target(fork_factory, where: dict) -> PrinterTarget:
     override = os.environ.get("ORCA_PRINTER_URL", "").strip()
     if override:
         url, auth = _parse_address(override, "override")
         return PrinterTarget(url=url, source="override", auth=auth)
+    where["source"] = "profile"
     try:
         async with fork_factory() as fork:
             status = await fork.get_status()
@@ -221,6 +274,7 @@ async def resolve_target(fork_factory) -> PrinterTarget:
             if not name:
                 raise PrinterError("not_configured", "OrcaSlicer reports no active printer profile.",
                                    hint="Select a printer in OrcaSlicer, or " + SET_URL_HINT)
+            where["profile"] = str(name)
             preset = await fork.get_preset_config("printer", name)
     except ApiError as e:
         remembered = recall_remembered()
@@ -271,9 +325,17 @@ def _unreachable_hint(target: PrinterTarget) -> str:
 
 async def open_printer(target: PrinterTarget, api_key: str | None = None):
     """Return (target with kind and url set to what answered, an open client). The caller closes the
-    client. Tries Moonraker as given, Moonraker on 7125, then OctoPrint, cached per target URL."""
+    client. Tries Moonraker as given, Moonraker on 7125, then OctoPrint, cached per target URL. A
+    client that is not returned is closed on every path, including cancellation."""
+    kind_hint = target.kind
+    if kind_hint is None and target.source == "profile":
+        # A new process has no probe cache: the protocol that answered at this very address last time
+        # (printer.json) goes first. Only a hint: a printer that has changed is still found.
+        remembered = recall_remembered()
+        if remembered is not None and remembered.url == target.url:
+            kind_hint = remembered.kind
     try:
-        candidates = _candidates(target.url, target.kind)
+        candidates = _candidates(target.url, kind_hint)
     except ValueError:  # a bad port or bracket in a target that did not come through resolve_target
         raise _bad_address(target.url, target.source, target.profile) from None
     cached = _PROBE_CACHE.get(target.url)
@@ -284,18 +346,23 @@ async def open_printer(target: PrinterTarget, api_key: str | None = None):
     for kind, base in candidates:
         cls = MoonrakerClient if kind == "klipper" else OctoPrintClient
         client = cls(base, api_key=api_key, auth=target.auth)
+        keep = False
         try:
-            ok = await client.identify()
-        except PrinterError as e:  # only auth errors escape identify()
-            ok = False
-            auth_err = auth_err or e
-        if ok:
-            _PROBE_CACHE[target.url] = (kind, base)
-            found = replace(target, kind=kind, url=base)
-            if target.source == "profile":
-                remember(found)
-            return found, client
-        await client.aclose()
+            try:
+                ok = await client.identify()
+            except PrinterError as e:  # only auth errors escape identify()
+                ok = False
+                auth_err = auth_err or e
+            if ok:
+                _PROBE_CACHE[target.url] = (kind, base)
+                found = replace(target, kind=kind, url=base)
+                if target.source == "profile":
+                    remember(found)
+                keep = True
+                return found, client
+        finally:
+            if not keep:
+                await client.aclose()
         tried.append(f"{base} ({'Klipper' if kind == 'klipper' else 'OctoPrint'})")
     if auth_err is not None:
         raise auth_err

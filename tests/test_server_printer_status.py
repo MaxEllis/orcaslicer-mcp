@@ -252,3 +252,102 @@ async def test_a_missing_file_record_is_not_remembered(monkeypatch):
     second = await srv.get_printer_status()
     assert first["job"]["remaining_basis"] != "slicer_estimate"
     assert second["job"]["remaining_s"] == 900 and second["job"]["remaining_basis"] == "slicer_estimate"
+
+
+# --- the snapshot reuses the /server/info reply the probe just got ----------------------------------------
+
+def _info_gets():
+    return sum(1 for c in respx.calls if c.request.url.path == "/server/info")
+
+
+@respx.mock
+async def test_get_printer_status_asks_for_server_info_once(monkeypatch):
+    monkeypatch.setenv("ORCA_PRINTER_URL", P)
+    info = {"result": {**INFO["result"], "warnings": ["Test setup warning"]}}
+    printer_routes(info=info)
+    out = await srv.get_printer_status()
+    assert _info_gets() == 1  # the probe's own request, not a second one for the snapshot
+    assert any(p["message"] == "Test setup warning" for p in out["problems"])  # and its content was used
+
+
+@respx.mock
+async def test_a_wait_that_returns_at_once_asks_for_server_info_once(monkeypatch):
+    monkeypatch.setenv("ORCA_PRINTER_URL", P)
+    printer_routes()
+    out = await srv.wait_for_printer("finished", 5)
+    assert out["note"] == "nothing is printing"
+    assert _info_gets() == 1
+
+
+@respx.mock
+async def test_only_the_first_snapshot_on_a_client_reuses_the_probes_reply():
+    printer_routes()
+    found, client = await ptarget.open_printer(ptarget.PrinterTarget(url=P, source="override"))
+    async with client:
+        await take_snapshot(found, client)
+        assert _info_gets() == 1
+        await take_snapshot(found, client)  # a later wait poll must see the printer as it is now
+        assert _info_gets() == 2
+
+
+@respx.mock
+async def test_a_later_poll_sees_klipper_go_down_not_the_probes_old_reply():
+    printer_routes()
+    found, client = await ptarget.open_printer(ptarget.PrinterTarget(url=P, source="override"))
+    async with client:
+        first = await take_snapshot(found, client)
+        assert first["state"] == "idle"
+        respx.get(f"{P}/server/info").mock(return_value=httpx.Response(200, json={"result": {
+            "klippy_state": "disconnected", "klippy_connected": False, "warnings": []}}))
+        objects = respx.get(url__startswith=f"{P}/printer/objects/query")
+        before = objects.call_count
+        second = await take_snapshot(found, client)
+    assert second["state"] == "offline" and objects.call_count == before
+
+
+@respx.mock
+async def test_a_snapshot_on_a_client_that_never_probed_still_asks():
+    printer_routes()
+    target = ptarget.PrinterTarget(url=P, source="override", kind="klipper")
+    async with MoonrakerClient(P) as c:
+        await take_snapshot(target, c)
+    assert _info_gets() == 1
+
+
+@respx.mock
+async def test_a_server_info_failure_after_the_probe_is_still_only_a_note():
+    printer_routes()
+    found, client = await ptarget.open_printer(ptarget.PrinterTarget(url=P, source="override"))
+    async with client:
+        await take_snapshot(found, client)  # spends the probe's reply
+        respx.get(f"{P}/server/info").mock(return_value=httpx.Response(500))
+        out = await take_snapshot(found, client)
+    assert out["state"] == "idle" and any("warnings" in n for n in out["notes"])
+
+
+# --- errors found before the printer is known still say where the address came from -----------------------
+
+@respx.mock
+async def test_a_bad_override_error_names_the_override(monkeypatch):
+    monkeypatch.setenv("ORCA_PRINTER_URL", "http://192.0.2.10:abc")
+    out = await srv.get_printer_status()
+    assert out["error"] == "not_configured" and out["printer"] == {"source": "override"}
+
+
+@respx.mock
+async def test_orca_down_and_nothing_remembered_names_the_profile_as_the_source(monkeypatch):
+    _orca_down(monkeypatch)
+    out = await srv.get_printer_status()
+    assert out["error"] == "orca_unreachable" and out["printer"] == {"source": "profile"}
+
+
+@respx.mock
+async def test_an_unsupported_profile_names_the_profile_in_the_error(monkeypatch):
+    monkeypatch.setenv("ORCA_API_TOKEN", "tok")
+    monkeypatch.setenv("ORCA_API_URL", F)
+    respx.get(f"{F}/api/v1/status").mock(return_value=httpx.Response(200, json={"presets": {"printer": "Test Printer"}}))
+    respx.post(f"{F}/api/v1/preset/config").mock(return_value=httpx.Response(200, json={
+        "name": "Test Printer", "system": False, "config": {"print_host": P, "host_type": "duet"}}))
+    out = await srv.get_printer_status()
+    assert out["error"] == "unsupported_connection"
+    assert out["printer"] == {"source": "profile", "profile": "Test Printer"}

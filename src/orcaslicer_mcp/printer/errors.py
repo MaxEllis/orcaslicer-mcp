@@ -6,6 +6,8 @@ CODES = frozenset({
     "auth_rejected", "orca_unreachable", "unsupported_for_connection", "protocol_error",
 })
 
+_CORE_KEYS = frozenset({"error", "message", "hint"})
+
 
 class PrinterError(Exception):
     def __init__(self, code: str, message: str, hint: str | None = None, **details):
@@ -21,7 +23,9 @@ class PrinterError(Exception):
         out = {"error": self.code, "message": self.message}
         if self.hint:
             out["hint"] = self.hint
-        out.update(self.details)
+        # The core keys always win: a detail of the same name must not replace the code or the
+        # message, or stand in for a hint the error does not have.
+        out.update({k: v for k, v in self.details.items() if k not in _CORE_KEYS})
         return out
 
 

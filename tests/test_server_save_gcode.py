@@ -159,6 +159,15 @@ async def test_save_gcode_falls_back_to_home_dotfolder_when_no_shared_store(monk
     assert (tmp_path / ".orcaslicer-mcp" / "outcomes" / "outcomes.db").exists()
     assert not fake_shared.exists()
 
+    # The first save created the store folder. The G-code folder must not flip to it: the rule is
+    # "the shared folder exists", not "a store folder exists", so a second save lands beside the first.
+    second = await srv.save_gcode("b.gcode")
+
+    assert second["outcome_recorded"] is True
+    assert (tmp_path / ".orcaslicer-mcp" / "gcode" / "b.gcode").exists()
+    assert not (tmp_path / ".orcaslicer-mcp" / "outcomes" / "gcode").exists()
+    assert not fake_shared.exists()
+
 
 @respx.mock
 async def test_whitespace_only_outcomes_dir_counts_as_unset(monkeypatch, tmp_path):

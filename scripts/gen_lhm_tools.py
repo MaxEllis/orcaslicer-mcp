@@ -19,9 +19,11 @@ from pathlib import Path
 
 LISTING = Path(__file__).resolve().parents[1] / "lhm.plugin.json"
 MAX_CHARS = 300
-# A sentence ends at . ! or ? followed by a capital, digit, quote or bracket, so "e.g. 0 to 5 mm" and
-# "Z 0.4" stay in one piece.
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9`'\"(])")
+# A sentence ends at . ! or ? followed by whitespace and a capital, digit, quote or bracket. A period
+# that closes e.g. / i.e. / etc. / vs. does not end one ("(e.g. 0 to 5 mm)" and "(e.g. 'warped')"
+# have a digit or quote after it), and "Z 0.4" has no whitespace after its period.
+_SENTENCE_END = re.compile(
+    r"(?<=[.!?])(?<!\b[eE]\.g\.)(?<!\b[iI]\.e\.)(?<!\b[eE]tc\.)(?<!\b[vV]s\.)\s+(?=[A-Z0-9`'\"(])")
 
 
 def summarize(description: str, limit: int = MAX_CHARS) -> str:

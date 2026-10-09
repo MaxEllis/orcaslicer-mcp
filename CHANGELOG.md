@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-10-09
+
 ### Fixed
 - The printer tools no longer fail with a raw error when a printer sends a reply that can't be decoded, redirects, or isn't the JSON object expected at the top level. They return `protocol_error` (or `not_reachable` when the connection drops) with a message.
 - An `ORCA_PRINTER_API_KEY` pasted with a trailing space or newline is trimmed before it is sent.

@@ -210,6 +210,21 @@ async def test_a_huge_integer_remembered_time_does_not_break_the_reply(monkeypat
     assert any("remembered earlier" in n and "ago" not in n for n in out["notes"])
 
 
+@pytest.mark.parametrize("bad", ["-1e300", "1e300", "-1.7976931348623157e308"])
+@respx.mock
+async def test_an_absurd_finite_remembered_time_does_not_put_a_huge_age_in_the_note(monkeypatch, bad):
+    # This one survives recall_remembered (it is a finite float) and used to become a ~310-character age.
+    _orca_down(monkeypatch)
+    ptarget.REMEMBERED_PATH.write_text('{"url": "%s", "kind": "klipper", "found_at": %s}' % (P, bad))
+    printer_routes()
+    out = await srv.get_printer_status()
+    assert out["state"] == "idle" and out["printer"]["source"] == "remembered"
+    assert ptarget.recall_remembered().remembered_at == float(bad)  # it did reach the note as a number
+    note = next(n for n in out["notes"] if "remembered" in n)
+    assert note == "OrcaSlicer isn't running or can't be reached, so this uses the printer remembered earlier."
+    assert len(note) < 100
+
+
 @respx.mock
 async def test_an_unreachable_remembered_printer_is_named_in_the_error(monkeypatch):
     _orca_down(monkeypatch)
@@ -390,3 +405,18 @@ async def test_an_unsupported_profile_names_the_profile_in_the_error(monkeypatch
     out = await srv.get_printer_status()
     assert out["error"] == "unsupported_connection"
     assert out["printer"] == {"source": "profile", "profile": "Test Printer"}
+
+
+@respx.mock
+async def test_a_non_ascii_api_key_comes_back_as_a_not_configured_error_without_any_request(monkeypatch):
+    monkeypatch.setenv("ORCA_PRINTER_URL", P)
+    monkeypatch.setenv("ORCA_PRINTER_API_KEY", "test-“key”")  # a curly quote from a word processor
+    printer = respx.route(url__startswith=P).mock(return_value=httpx.Response(500))
+    out = await srv.get_printer_status()
+    assert out["error"] == "not_configured"
+    assert out["message"] == ("ORCA_PRINTER_API_KEY contains characters that can't be sent in an HTTP header "
+                              "(only plain ASCII works).")
+    assert out["printer"]["url"] == P and out["printer"]["source"] == "override"
+    assert printer.call_count == 0  # nothing was sent
+    dumped = json.dumps(out, ensure_ascii=False)
+    assert "test-" not in dumped and "“" not in dumped

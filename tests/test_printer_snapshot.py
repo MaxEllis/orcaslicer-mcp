@@ -1,5 +1,7 @@
 """take_snapshot: the requests it makes and how it turns a failed secondary one into a note.
 Everything goes through respx; the addresses and names are invented."""
+import json
+
 import httpx
 import pytest
 import respx
@@ -179,7 +181,11 @@ async def test_octoprint_not_connected_to_the_printer_is_an_offline_snapshot():
     assert snap["problems"][0]["severity"] == "fatal"
 
 
-@pytest.mark.parametrize("failure", FAILURES)
+# A refused key is not "job details that can't be read": it must surface (see the auth tests below).
+JOB_FAILURES = [f for f in FAILURES if f.id != "a refused key"]
+
+
+@pytest.mark.parametrize("failure", JOB_FAILURES)
 @respx.mock
 async def test_octoprint_job_details_that_cannot_be_read_are_a_note_not_a_failed_snapshot(failure):
     octo_routes(job=failure)
@@ -199,6 +205,74 @@ async def test_octoprint_printer_state_that_cannot_be_read_still_fails_the_snaps
         with pytest.raises(PrinterError) as e:
             await take_snapshot(OP, c)
     assert e.value.code == "protocol_error"
+
+
+# --- OctoPrint: a refused key always surfaces, whichever request it came on ----------------------------------------
+
+AUTH_CASES = [(401, None, "auth_required"), (403, None, "auth_required"),
+              (401, "test-key", "auth_rejected"), (403, "test-key", "auth_rejected")]
+
+
+@pytest.mark.parametrize("status,key,code", AUTH_CASES)
+@respx.mock
+async def test_octoprint_printer_endpoint_auth_failures_keep_their_code(status, key, code):
+    octo_routes(printer=httpx.Response(status))
+    async with OctoPrintClient(P, api_key=key) as c:
+        with pytest.raises(PrinterError) as e:
+            await c.printer()
+        assert e.value.code == code
+        with pytest.raises(PrinterError) as e:  # and the snapshot does not turn it into something softer
+            await take_snapshot(OP, c)
+    assert e.value.code == code and e.value.hint
+
+
+@pytest.mark.parametrize("status,key,code", AUTH_CASES)
+@respx.mock
+async def test_octoprint_job_only_auth_failure_is_not_swallowed_into_a_note(status, key, code):
+    octo_routes(job=httpx.Response(status))  # the printer endpoint answers; only /api/job is refused
+    async with OctoPrintClient(P, api_key=key) as c:
+        with pytest.raises(PrinterError) as e:
+            await take_snapshot(OP, c)
+    assert e.value.code == code
+    assert e.value.hint and "API key" in e.value.hint + e.value.message
+
+
+@pytest.mark.parametrize("status,key,code", AUTH_CASES)
+@respx.mock
+async def test_get_printer_status_returns_the_job_only_auth_error_with_its_hint(monkeypatch, status, key, code):
+    monkeypatch.setenv("ORCA_PRINTER_URL", P)
+    if key:
+        monkeypatch.setenv("ORCA_PRINTER_API_KEY", key)
+    for url in (f"{P}/server/info", f"{P}:7125/server/info"):
+        respx.get(url).mock(return_value=httpx.Response(404))
+    respx.get(f"{P}/api/version").mock(return_value=httpx.Response(200, json={"api": "0.1", "server": "1.10.2"}))
+    octo_routes(job=httpx.Response(status))
+    out = await srv.get_printer_status()
+    assert out["error"] == code and out["hint"] and "notes" not in out
+    assert out["printer"]["kind"] == "octoprint"
+
+
+# --- OctoPrint replies of the wrong JSON shape ---------------------------------------------------------------------
+
+@pytest.mark.parametrize("body", [[1], "text", 5, True], ids=["list", "text", "number", "bool"])
+@respx.mock
+async def test_an_octoprint_printer_reply_of_the_wrong_shape_fails_the_snapshot_cleanly(body):
+    octo_routes(printer=httpx.Response(200, content=json.dumps(body)))
+    async with OctoPrintClient(P) as c:
+        with pytest.raises(PrinterError) as e:  # a PrinterError, not a raw AttributeError
+            await take_snapshot(OP, c)
+    assert e.value.code == "protocol_error" and "/api/printer" in e.value.message
+
+
+@pytest.mark.parametrize("body", [[1], "text", 5, True, None], ids=["list", "text", "number", "bool", "null"])
+@respx.mock
+async def test_an_octoprint_job_reply_of_the_wrong_shape_is_a_note(body):
+    octo_routes(job=httpx.Response(200, content=json.dumps(body)))
+    async with OctoPrintClient(P) as c:
+        snap = await take_snapshot(OP, c)
+    assert snap["state"] == "printing" and snap["job"] is None
+    assert len(snap["notes"]) == 1 and snap["notes"][0].startswith("The current job couldn't be read: ")
+    assert "/api/job" in snap["notes"][0]
 
 
 @respx.mock

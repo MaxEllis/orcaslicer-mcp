@@ -8,6 +8,7 @@ from .status import klipper_snapshot, octoprint_snapshot
 
 STATUS_OBJECTS = ["webhooks", "print_stats", "display_status", "virtual_sdcard", "extruder", "heater_bed",
                   "toolhead", "gcode_move", "fan", "configfile=warnings"]
+AUTH_CODES = ("auth_required", "auth_rejected")
 CONSOLE_LINES = 100
 IDLE_CONSOLE_WINDOW_S = 600.0
 
@@ -20,6 +21,8 @@ async def take_snapshot(target, client, *, now: float | None = None) -> dict:
         try:
             job = await client.job()
         except PrinterError as e:
+            if e.code in AUTH_CODES:
+                raise  # a refused key is not a detail that can be skipped: the fix is the key
             notes.append(f"The current job couldn't be read: {e.message}")
         snap = octoprint_snapshot(printer, job, target_public=target.public())
         if notes:

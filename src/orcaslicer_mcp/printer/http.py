@@ -12,6 +12,11 @@ from .errors import PrinterError, auth_error
 CONNECT_TIMEOUT_S = 3.0
 READ_TIMEOUT_S = 10.0
 
+# What get_json answers for a status listed in none_on ("no such thing"). Private to the printer
+# package and deliberately not None: a 200 whose body is the JSON `null` decodes to None as well, and
+# that is a malformed reply, not a missing resource.
+_ABSENT = object()
+
 
 def _without_userinfo(url: str) -> str:
     """The URL with any user name and password removed. Same cut as guard._strip_userinfo (everything
@@ -28,6 +33,13 @@ class ReadClient:
         # Credentials travel in the headers and `auth`, never in the address: messages echo base_url.
         self.base_url = _without_userinfo(base_url).rstrip("/")
         api_key = (api_key or "").strip() or None  # a pasted key often carries a trailing newline
+        if api_key is not None and not api_key.isascii():
+            # httpx encodes header values as ASCII and would raise a raw UnicodeEncodeError (a curly quote
+            # from a word processor, say). Say what is wrong without echoing the key.
+            raise PrinterError("not_configured", "ORCA_PRINTER_API_KEY contains characters that can't be sent in "
+                                                 "an HTTP header (only plain ASCII works).",
+                               hint="Copy the key again from the printer's web interface and set it as "
+                                    "ORCA_PRINTER_API_KEY in this MCP server's settings.")
         self._key_set = bool(api_key)
         self._basic_set = auth is not None
         # The printer's own clock (epoch seconds) from the Date header of the last successful reply,
@@ -48,8 +60,9 @@ class ReadClient:
 
     async def get_json(self, path: str, params: dict | None = None, *, none_on: tuple[int, ...] = (),
                        hints: dict[int, str] | None = None):
-        """GET path and decode the JSON. `hints` maps an HTTP status to the hint its protocol_error
-        carries (a route that exists only when an optional component is enabled, say)."""
+        """GET path and decode the JSON. A status listed in `none_on` answers _ABSENT instead of an error.
+        `hints` maps an HTTP status to the hint its protocol_error carries (a route that exists only when
+        an optional component is enabled, say)."""
         try:
             resp = await self._http.get(self.base_url + path, params=params)
         except httpx.TransportError as e:
@@ -59,7 +72,7 @@ class ReadClient:
         except httpx.HTTPError as e:  # DecodingError, TooManyRedirects and anything httpx adds later
             raise PrinterError("protocol_error", f"{self.service} sent a reply to {path} that couldn't be read.") from e
         if resp.status_code in none_on:
-            return None
+            return _ABSENT
         if resp.status_code in (401, 403):
             raise auth_error(self.service, self._key_set, basic_auth=self._basic_set and not self._key_set)
         if resp.status_code >= 400:
@@ -70,6 +83,12 @@ class ReadClient:
             return resp.json()
         except ValueError as e:
             raise PrinterError("protocol_error", f"{self.service} sent a reply to {path} that wasn't JSON.") from e
+
+    def _object(self, body, path: str) -> dict:
+        """body, which must be a JSON object: any other shape is a protocol_error."""
+        if not isinstance(body, dict):
+            raise PrinterError("protocol_error", f"{self.service} sent a reply to {path} that wasn't a JSON object.")
+        return body
 
     def _note_clock(self, resp: httpx.Response) -> None:
         """Remember the server's clock from the Date header; a missing or unreadable one changes nothing."""

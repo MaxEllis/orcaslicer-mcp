@@ -300,8 +300,8 @@ async def test_a_404_from_the_history_list_names_the_missing_component():
             with pytest.raises(PrinterError) as e:
                 await c.history_list(3)
     assert e.value.code == "protocol_error" and "/server/history/list" in e.value.message
-    assert e.value.hint == ("Moonraker's [history] component isn't enabled: add a [history] section to "
-                            "moonraker.conf and restart Moonraker.")
+    assert e.value.hint == ("Moonraker versions before 0.9 need a [history] section in moonraker.conf; "
+                            "add one and restart Moonraker.")
 
 
 @pytest.mark.parametrize("status", [500, 503])
@@ -317,7 +317,8 @@ async def test_other_history_failures_get_no_hint(status):
 async def test_an_empty_history_reply_is_not_mistaken_for_a_404():
     # a 200 whose body is JSON null reads as "nothing" inside the client, never as a missing component
     with respx.mock:
-        respx.get(url__startswith=f"{P}/server/history/list").mock(return_value=httpx.Response(200, json=None))
+        respx.get(url__startswith=f"{P}/server/history/list").mock(
+            return_value=httpx.Response(200, content=b"null", headers={"Content-Type": "application/json"}))
         async with MoonrakerClient(P) as c:
             with pytest.raises(PrinterError) as e:
                 await c.history_list(3)
@@ -406,3 +407,97 @@ async def test_octoprint_keeps_nothing_for_the_snapshot():
         async with OctoPrintClient(P) as c:
             assert await c.identify() is True
             assert not hasattr(c, "take_probe_info")
+
+
+# --- an API key that cannot travel in a header is refused, never echoed -------------------------------------
+
+CURLY_KEY = "test-“key”"  # what a key pasted from a word processor can look like
+NON_ASCII_KEY_MESSAGE = ("ORCA_PRINTER_API_KEY contains characters that can't be sent in an HTTP header "
+                         "(only plain ASCII works).")
+
+
+@pytest.mark.parametrize("cls", [MoonrakerClient, OctoPrintClient])
+@pytest.mark.parametrize("key", [CURLY_KEY, "tést-key", "“key"])
+def test_a_non_ascii_api_key_is_a_not_configured_error_that_never_echoes_the_key(cls, key):
+    with pytest.raises(PrinterError) as e:  # not a raw UnicodeEncodeError from httpx
+        cls(P, api_key=key)
+    assert e.value.code == "not_configured" and e.value.message == NON_ASCII_KEY_MESSAGE
+    assert e.value.hint and "ORCA_PRINTER_API_KEY" in e.value.hint
+    dumped = json.dumps(e.value.as_dict(), ensure_ascii=False)
+    assert "test-" not in dumped and "tést" not in dumped and "“" not in dumped and "”" not in dumped
+
+
+@pytest.mark.parametrize("cls", [MoonrakerClient, OctoPrintClient])
+async def test_a_plain_ascii_api_key_is_still_accepted(cls):
+    async with cls(P, api_key="Test-key_0123.~+/=") as c:
+        assert c._http.headers["X-Api-Key"] == "Test-key_0123.~+/="
+
+
+# --- a 200 whose body is JSON null is a malformed reply, not a missing file -----------------------------------
+
+def raw_json(body):
+    """A 200 carrying `body` encoded as JSON. httpx.Response(json=None) would send NO body, not `null`."""
+    return httpx.Response(200, content=json.dumps(body), headers={"Content-Type": "application/json"})
+
+
+async def test_a_200_null_for_file_metadata_is_a_protocol_error_not_a_missing_file():
+    with respx.mock:
+        route = respx.get(url__startswith=f"{P}/server/files/metadata")
+        async with MoonrakerClient(P) as c:
+            route.mock(return_value=raw_json(None))
+            with pytest.raises(PrinterError) as e:
+                await c.file_metadata("test-part.gcode")
+            assert e.value.code == "protocol_error" and "/server/files/metadata" in e.value.message
+            route.mock(return_value=httpx.Response(404))
+            assert await c.file_metadata("test-part.gcode") is None   # a real 404 is still "no such file"
+
+
+async def test_a_listed_status_with_a_hint_keeps_its_hint_and_its_none():
+    # none_on and hints are separate: the status in none_on answers None, any other status gets its hint
+    with respx.mock:
+        route = respx.get(url__startswith=f"{P}/server/history/list")
+        async with MoonrakerClient(P) as c:
+            route.mock(return_value=httpx.Response(404))
+            with pytest.raises(PrinterError) as e:
+                await c.history_list(3)
+            assert e.value.hint == phttp_hint()
+            route.mock(return_value=httpx.Response(404))
+            assert await c._result("/server/history/list", none_on=(404,), hints={404: "unused"}) is None
+
+
+def phttp_hint():
+    from orcaslicer_mcp.printer.moonraker import HISTORY_DISABLED_HINT
+    return HISTORY_DISABLED_HINT
+
+
+# --- OctoPrint replies of the wrong JSON shape are protocol errors, as Moonraker's are ------------------------
+
+OCTO_CALLS = {"/api/printer": lambda c: c.printer(), "/api/job": lambda c: c.job(),
+              "/api/version": lambda c: c.version()}
+
+
+@pytest.mark.parametrize("body", [[1, 2], "just text", None, 5, True], ids=["list", "text", "null", "number", "bool"])
+@pytest.mark.parametrize("path", list(OCTO_CALLS))
+async def test_an_octoprint_reply_that_is_not_an_object_is_a_protocol_error(path, body):
+    with respx.mock:
+        respx.get(url__startswith=f"{P}{path}").mock(return_value=raw_json(body))
+        async with OctoPrintClient(P) as c:
+            with pytest.raises(PrinterError) as e:
+                await OCTO_CALLS[path](c)
+    assert e.value.code == "protocol_error" and path in e.value.message
+
+
+async def test_an_octoprint_not_connected_reply_is_still_none_and_an_empty_object_is_still_an_answer():
+    with respx.mock:
+        respx.get(url__startswith=f"{P}/api/printer").mock(return_value=httpx.Response(409))
+        respx.get(f"{P}/api/job").mock(return_value=httpx.Response(200, json={}))
+        async with OctoPrintClient(P) as c:
+            assert await c.printer() is None
+            assert await c.job() == {}
+
+
+async def test_a_wrong_shaped_version_reply_does_not_make_a_server_identify_as_octoprint():
+    with respx.mock:
+        respx.get(f"{P}/api/version").mock(return_value=httpx.Response(200, json=["api", "server"]))
+        async with OctoPrintClient(P) as c:
+            assert await c.identify() is False

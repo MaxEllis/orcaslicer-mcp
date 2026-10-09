@@ -255,5 +255,5 @@ async def test_a_missing_history_component_says_how_to_enable_it(monkeypatch, tm
     respx.get(url__startswith=f"{P}/server/history/list").mock(return_value=httpx.Response(404))
     out = await srv.list_print_history(5)
     assert out["error"] == "protocol_error"
-    assert out["hint"] == ("Moonraker's [history] component isn't enabled: add a [history] section to "
-                           "moonraker.conf and restart Moonraker.")
+    assert out["hint"] == ("Moonraker versions before 0.9 need a [history] section in moonraker.conf; "
+                           "add one and restart Moonraker.")

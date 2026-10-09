@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 
 from .errors import PrinterError
-from .http import ReadClient
+from .http import ReadClient, _ABSENT
 
 _monotonic = time.monotonic  # a seam for tests
 
@@ -12,9 +12,11 @@ _monotonic = time.monotonic  # a seam for tests
 # probe within milliseconds; the bound only stops a client that sat unused from serving old news.
 PROBE_INFO_MAX_AGE_S = 5.0
 
-# Moonraker answers 404 on /server/history/list when its [history] component is not enabled.
-HISTORY_DISABLED_HINT = ("Moonraker's [history] component isn't enabled: add a [history] section to "
-                         "moonraker.conf and restart Moonraker.")
+# Moonraker 0.9 and later always load the history component. Older versions answer 404 on
+# /server/history/list until moonraker.conf has a [history] section. A 404 does not say which version
+# answered, so the hint names the versions it applies to instead of claiming the component is missing.
+HISTORY_DISABLED_HINT = ("Moonraker versions before 0.9 need a [history] section in moonraker.conf; "
+                         "add one and restart Moonraker.")
 
 
 class MoonrakerClient(ReadClient):
@@ -26,7 +28,7 @@ class MoonrakerClient(ReadClient):
         """Moonraker's `result` object. None only for a status listed in none_on; any other reply
         whose `result` is not an object is a protocol_error. `hints`: see get_json."""
         body = await self.get_json(path, params, none_on=none_on, hints=hints)
-        if body is None and none_on:
+        if body is _ABSENT:
             return None
         result = body.get("result") if isinstance(body, dict) else None
         if not isinstance(result, dict):

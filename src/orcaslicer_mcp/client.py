@@ -123,7 +123,7 @@ class OrcaClient:
     async def job_status(self) -> dict:
         return await self._request("GET", "/api/v1/jobs/status")
 
-    # Plates (fork builds that list "plates" in get_status capabilities).
+    # Plates (fork v2.4.2-mcp.13 and later).
     async def get_plates(self) -> dict:
         return await self._request("GET", "/api/v1/plates")
 

@@ -28,7 +28,7 @@ async def test_list_plates_needs_plates_build(monkeypatch):
     _env(monkeypatch)
     respx.get("http://x:13130/api/v1/plates").mock(return_value=httpx.Response(404, json={"error": "not_found"}))
     out = await srv.list_plates()
-    assert "plates routes" in out["error"]
+    assert "fork v2.4.2-mcp.13" in out["error"]
 
 
 @respx.mock

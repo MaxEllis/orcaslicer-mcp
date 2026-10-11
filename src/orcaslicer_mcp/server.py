@@ -428,14 +428,14 @@ def _m4c_err(e: ApiError) -> dict:
 
 
 def _plates_err(e: ApiError) -> dict:
-    return _m4_err(e, "the plates routes, fork v2.4.2-mcp.13 or later")
+    return _m4_err(e, "fork v2.4.2-mcp.13 or later")
 
 
 @mcp.tool()
 async def list_objects() -> dict:
     """List objects in the project: id (stable), name, size_mm, transform (offset/rotation/scale)
-    and, on fork builds with the plates routes, the 0-based plate each one sits on (-1 when it
-    is off every plate)."""
+    and, on fork v2.4.2-mcp.13 and later, the 0-based plate each one sits on (-1 when it is off
+    every plate)."""
     try:
         async with _client() as c:
             return await c.get_objects()
@@ -521,8 +521,7 @@ async def list_plates() -> dict:
     (max) and whether one can be added or deleted right now. Read-only.
 
     Plate numbers shown in the OrcaSlicer window are 1-based; every tool here takes the
-    0-based index from this list. Needs a fork build that lists "plates" in get_status
-    capabilities."""
+    0-based index from this list. Needs fork v2.4.2-mcp.13 or later."""
     try:
         async with _client() as c:
             return await c.get_plates()

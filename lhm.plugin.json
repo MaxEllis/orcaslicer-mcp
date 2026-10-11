@@ -111,7 +111,7 @@
     },
     {
       "name": "list_objects",
-      "description": "List objects in the project: id (stable), name, size_mm, transform (offset/rotation/scale) and, on fork builds with the plates routes, the 0-based plate each one sits on (-1 when it is off every plate)."
+      "description": "List objects in the project: id (stable), name, size_mm, transform (offset/rotation/scale) and, on fork v2.4.2-mcp.13 and later, the 0-based plate each one sits on (-1 when it is off every plate)."
     },
     {
       "name": "set_object_config",

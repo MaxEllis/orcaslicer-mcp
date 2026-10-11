@@ -70,6 +70,10 @@ It only crowns a winner when one variant genuinely beats the rest on time, filam
 
 `load_model` (`.stl`, `.obj`, `.3mf`, plus `.step` and `.stp` on fork v2.3.2-mcp.3 and later), `list_objects` with each object's world-space bounding box and an `on_plate` flag, `transform_object`, `duplicate_object`, `delete_object`, `arrange_plate`, `auto_orient`, `check_placement`, `diagnose_plate`, `get_job_status`.
 
+### Several plates
+
+`list_plates`, `add_plate`, `select_plate`, `delete_plate` and `move_object_to_plate` build a multi-plate project the way the toolbar does: one part per plate, each sliced on its own. Slicing, G-code, renders and job status always act on the current plate, so select a plate before you slice it. `list_objects` reports the plate each object sits on. These need a fork build that lists `plates` in `get_status` capabilities.
+
 ### Plate renders
 
 `render_plate` hands back a PNG, so the assistant can look instead of inferring from coordinates. A rotation reads instantly as a picture and barely at all as three Euler angles. Seven camera angles cover `iso`, `top`, `front`, `left`, `right`, `rear`, and `bottom`. Use `frame="plate"` to stand back for the whole bed, or `frame="object"` to lean in on the part. Requires fork v2.3.2-mcp.4 or later.

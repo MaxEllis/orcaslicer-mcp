@@ -123,6 +123,23 @@ class OrcaClient:
     async def job_status(self) -> dict:
         return await self._request("GET", "/api/v1/jobs/status")
 
+    # Plates (fork builds that list "plates" in get_status capabilities).
+    async def get_plates(self) -> dict:
+        return await self._request("GET", "/api/v1/plates")
+
+    async def create_plate(self, select: bool = True) -> dict:
+        return await self._request("POST", "/api/v1/plates", json={"select": select})
+
+    async def select_plate(self, index: int) -> dict:
+        return await self._request("POST", f"/api/v1/plates/{index}/select")
+
+    async def delete_plate(self, index: int) -> dict:
+        return await self._request("DELETE", f"/api/v1/plates/{index}")
+
+    async def set_object_plate(self, obj_id: int, plate: int, instance: int = 0) -> dict:
+        return await self._request("POST", f"/api/v1/objects/{obj_id}/plate",
+                                   json={"plate": plate, "instance": instance})
+
     async def get_config(self, keys: list[str] | None) -> dict:
         # The fork's /config `keys` filter splits the RAW query string on ',' without
         # URL-decoding first, so httpx's percent-encoded comma (%2C) matches nothing and

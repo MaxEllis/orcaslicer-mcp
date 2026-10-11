@@ -427,9 +427,15 @@ def _m4c_err(e: ApiError) -> dict:
     return _m4_err(e, "M4c")
 
 
+def _plates_err(e: ApiError) -> dict:
+    return _m4_err(e, "the plates routes, fork v2.4.2-mcp.13 or later")
+
+
 @mcp.tool()
 async def list_objects() -> dict:
-    """List objects on the current plate: id (stable), name, size_mm, and transform (offset/rotation/scale)."""
+    """List objects in the project: id (stable), name, size_mm, transform (offset/rotation/scale)
+    and, on fork builds with the plates routes, the 0-based plate each one sits on (-1 when it
+    is off every plate)."""
     try:
         async with _client() as c:
             return await c.get_objects()
@@ -505,6 +511,102 @@ async def auto_orient() -> dict:
             return await c.orient()
     except ApiError as e:
         return _m4b_err(e)
+
+
+@mcp.tool()
+async def list_plates() -> dict:
+    """List the plates in the project: each one's 0-based index, name, whether it is the
+    current plate (the one slice, get_gcode, render_plate and get_job_status act on), lock
+    state, build volume and the objects it holds. Also says how many plates the build allows
+    (max) and whether one can be added or deleted right now. Read-only.
+
+    Plate numbers shown in the OrcaSlicer window are 1-based; every tool here takes the
+    0-based index from this list. Needs a fork build that lists "plates" in get_status
+    capabilities."""
+    try:
+        async with _client() as c:
+            return await c.get_plates()
+    except ApiError as e:
+        return _plates_err(e)
+
+
+@mcp.tool()
+async def add_plate(
+    select: Annotated[bool, Field(description=(
+        "Make the new plate the current one, as the toolbar button does. Pass false to "
+        "keep working on the plate that is current now."))] = True,
+) -> dict:
+    """Add an empty plate to the project, the same way the toolbar's "Add plate" button
+    does. Returns the new plate's 0-based index for move_object_to_plate and select_plate.
+
+    Use it when parts should print separately: load them, add a plate, move the second
+    part across with move_object_to_plate, then select_plate and slice each one. A plate
+    cannot be added while a slice is running (409) or at the build's plate limit (422)."""
+    try:
+        async with _client() as c:
+            return await c.create_plate(select)
+    except ApiError as e:
+        return _plates_err(e)
+
+
+@mcp.tool()
+async def select_plate(
+    index: Annotated[int, Field(description=(
+        "0-based plate index from list_plates (the window shows plates 1-based)."))],
+) -> dict:
+    """Make a plate the current one, exactly like clicking it: slice_and_wait, get_gcode,
+    render_plate, get_slice_status and get_job_status then act on that plate.
+
+    Switching plates leaves unsaved config overrides alone; it changes only which plate is
+    sliced. Selecting the plate that is already current is a no-op."""
+    try:
+        async with _client() as c:
+            return await c.select_plate(index)
+    except ApiError as e:
+        return _plates_err(e)
+
+
+@mcp.tool()
+async def delete_plate(
+    index: Annotated[int, Field(description=(
+        "0-based plate index from list_plates. Later plates shift down one index."))],
+) -> dict:
+    """Delete a plate. The objects it held are NOT deleted: OrcaSlicer parks them beside
+    the bed, as the toolbar's delete does, and the reply says how many were moved off-plate
+    (objects_moved_off_plate). Use move_object_to_plate to put them somewhere printable.
+
+    The only plate cannot be deleted (422 last_plate). Call list_plates first for the index;
+    this cannot be undone through the API."""
+    try:
+        async with _client() as c:
+            return await c.delete_plate(index)
+    except ApiError as e:
+        return _plates_err(e)
+
+
+@mcp.tool()
+async def move_object_to_plate(
+    object_id: Annotated[int, Field(description=(
+        "Integer id of the object, from the 'id' field of list_objects."))],
+    plate: Annotated[int, Field(description=(
+        "0-based index of the destination plate, from list_plates or add_plate."))],
+    instance: Annotated[int, Field(description=(
+        "Which copy to move when the object has several (duplicate_object); 0 is the "
+        "original."))] = 0,
+) -> dict:
+    """Move an object onto another plate. Coming from a plate it keeps its position relative
+    to that plate (front-left of plate 1 lands front-left of plate 2); coming from off-plate
+    (parked beside the bed) it lands at the destination's centre, so run arrange_plate or
+    transform_object afterwards if it overlaps something.
+
+    list_objects reports each object's plate (-1 when off every plate). Moving leaves both
+    plates' slices invalid, so re-slice. An object already on that plate is left where it
+    is (moved: false)."""
+    try:
+        async with _client() as c:
+            return await c.set_object_plate(object_id, plate, instance)
+    except ApiError as e:
+        return _plates_err(e)
 
 
 @mcp.tool()
@@ -1371,6 +1473,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "compare_settings": ("Compare settings", True, False),
     "compare_slices": ("Compare slice variants", True, False),
     "list_objects": ("List plate objects", True, False),
+    "list_plates": ("List plates", True, False),
     "get_job_status": ("Get background job status", True, False),
     "watch_events": ("Watch OrcaSlicer events", True, False),
     "find_config_keys": ("Find config keys", True, False),
@@ -1396,6 +1499,9 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "duplicate_object": ("Duplicate object", False, False),
     "transform_object": ("Transform object", False, False),
     "arrange_plate": ("Arrange plate", False, False),
+    "add_plate": ("Add plate", False, False),
+    "select_plate": ("Select plate", False, False),
+    "move_object_to_plate": ("Move object to plate", False, False),
     "auto_orient": ("Auto-orient objects", False, False),
     "remember": ("Save a note", False, False),
     "load_model": ("Load a model file", False, False),
@@ -1406,6 +1512,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "save_preset": ("Save preset (overwrites stored settings)", False, True),
     "edit_preset": ("Edit preset (overwrites stored settings)", False, True),
     "delete_object": ("Delete object from plate", False, True),
+    "delete_plate": ("Delete plate (its objects are parked off-plate)", False, True),
     "delete_preset": ("Delete preset", False, True),
     "get_printer_status": ("Get printer status", True, False),
     "wait_for_printer": ("Wait for the printer", True, False),

@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- Plate tools, for fork builds that list `plates` in `get_status` capabilities: `list_plates` (index, name, current, locked, build volume and the objects on each plate), `add_plate`, `select_plate` (what `slice_and_wait`, `get_gcode`, `render_plate` and `get_job_status` then act on), `delete_plate` (its objects are parked beside the bed, not deleted, and the reply counts them) and `move_object_to_plate` (keeps the object's position relative to its old plate; an off-plate object lands at the destination's centre). `list_objects` passes through the new per-object `plate` field. On an older build the tools answer "not available on this OrcaSlicer build (needs the plates routes, fork v2.4.2-mcp.13 or later)".
+
 ## [0.1.16] - 2026-10-09
 
 ### Fixed

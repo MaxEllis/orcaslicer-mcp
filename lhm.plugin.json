@@ -111,7 +111,7 @@
     },
     {
       "name": "list_objects",
-      "description": "List objects on the current plate: id (stable), name, size_mm, and transform (offset/rotation/scale)."
+      "description": "List objects in the project: id (stable), name, size_mm, transform (offset/rotation/scale) and, on fork builds with the plates routes, the 0-based plate each one sits on (-1 when it is off every plate)."
     },
     {
       "name": "set_object_config",
@@ -136,6 +136,26 @@
     {
       "name": "auto_orient",
       "description": "Auto-orient all objects for printing (async job; poll get_job_status until idle)."
+    },
+    {
+      "name": "list_plates",
+      "description": "List the plates in the project: each one's 0-based index, name, whether it is the current plate (the one slice, get_gcode, render_plate and get_job_status act on), lock state, build volume and the objects it holds."
+    },
+    {
+      "name": "add_plate",
+      "description": "Add an empty plate to the project, the same way the toolbar's \"Add plate\" button does. Returns the new plate's 0-based index for move_object_to_plate and select_plate."
+    },
+    {
+      "name": "select_plate",
+      "description": "Make a plate the current one, exactly like clicking it: slice_and_wait, get_gcode, render_plate, get_slice_status and get_job_status then act on that plate."
+    },
+    {
+      "name": "delete_plate",
+      "description": "Delete a plate. The objects it held are NOT deleted: OrcaSlicer parks them beside the bed, as the toolbar's delete does, and the reply says how many were moved off-plate (objects_moved_off_plate). Use move_object_to_plate to put them somewhere printable."
+    },
+    {
+      "name": "move_object_to_plate",
+      "description": "Move an object onto another plate."
     },
     {
       "name": "get_job_status",

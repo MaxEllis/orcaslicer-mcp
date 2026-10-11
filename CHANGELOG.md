@@ -8,7 +8,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [Unreleased]
 
 ### Added
-- Plate tools, for fork v2.4.2-mcp.13 and later: `list_plates` (index, name, current, locked, build volume and the objects on each plate), `add_plate`, `select_plate` (what `slice_and_wait`, `get_gcode`, `render_plate` and `get_job_status` then act on), `delete_plate` (its objects are parked beside the bed, not deleted, and the reply counts them) and `move_object_to_plate` (keeps the object's position relative to its old plate; an off-plate object lands at the destination's centre). `list_objects` passes through the new per-object `plate` field. On an older build the tools answer "not available on this OrcaSlicer build (needs fork v2.4.2-mcp.13 or later)".
+- Plate tools for fork v2.4.2-mcp.13 and later. `list_plates` shows each plate's index, name, lock state, build volume and objects, and which one is current. `add_plate` adds one. `select_plate` picks the plate that `slice_and_wait`, `get_gcode`, `render_plate` and `get_job_status` act on. `delete_plate` removes a plate; its objects are parked beside the bed and the reply counts them. `move_object_to_plate` keeps an object's position relative to its old plate, and an object parked beside the bed lands at the plate's centre. `list_objects` shows each object's plate. On an older build these tools say they need fork v2.4.2-mcp.13 or later.
+- `arrange_plate` warns that with several plates it packs every unlocked plate together again.
 
 ## [0.1.16] - 2026-10-09
 

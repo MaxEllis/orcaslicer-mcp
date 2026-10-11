@@ -495,7 +495,11 @@ async def transform_object(object_id: int, translate: list[float] | None = None,
 
 @mcp.tool()
 async def arrange_plate() -> dict:
-    """Auto-arrange all objects on the plate (async job; poll get_job_status until idle)."""
+    """Auto-arrange all objects on the plate (async job; poll get_job_status until idle).
+
+    With several plates this is OrcaSlicer's "Arrange all": it re-packs the objects of every
+    unlocked plate together and deletes plates left empty at the end, which undoes a
+    one-part-per-plate layout. To shift one object, use transform_object instead."""
     try:
         async with _client() as c:
             return await c.arrange()
@@ -556,8 +560,10 @@ async def select_plate(
     """Make a plate the current one, exactly like clicking it: slice_and_wait, get_gcode,
     render_plate, get_slice_status and get_job_status then act on that plate.
 
-    Switching plates leaves unsaved config overrides alone; it changes only which plate is
-    sliced. Selecting the plate that is already current is a no-op."""
+    get_slice_status then reports that plate's own result: its stats if it is still sliced,
+    otherwise idle with "plate N is not sliced". Switching plates leaves unsaved config
+    overrides alone; it changes only which plate is sliced. Selecting the plate that is
+    already current is a no-op."""
     try:
         async with _client() as c:
             return await c.select_plate(index)
@@ -595,12 +601,12 @@ async def move_object_to_plate(
 ) -> dict:
     """Move an object onto another plate. Coming from a plate it keeps its position relative
     to that plate (front-left of plate 1 lands front-left of plate 2); coming from off-plate
-    (parked beside the bed) it lands at the destination's centre, so run arrange_plate or
-    transform_object afterwards if it overlaps something.
+    (parked beside the bed) it lands at the destination's centre. If it then overlaps a
+    part, shift it with transform_object; arrange_plate would re-pack every plate together.
 
     list_objects reports each object's plate (-1 when off every plate). Moving leaves both
     plates' slices invalid, so re-slice. An object already on that plate is left where it
-    is (moved: false)."""
+    is (moved: false); a locked plate at either end refuses the move (plate_locked)."""
     try:
         async with _client() as c:
             return await c.set_object_plate(object_id, plate, instance)

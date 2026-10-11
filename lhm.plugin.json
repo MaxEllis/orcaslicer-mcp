@@ -155,7 +155,7 @@
     },
     {
       "name": "move_object_to_plate",
-      "description": "Move an object onto another plate."
+      "description": "Move an object onto another plate. Coming from a plate it keeps its position relative to that plate (front-left of plate 1 lands front-left of plate 2); coming from off-plate (parked beside the bed) it lands at the destination's centre."
     },
     {
       "name": "get_job_status",

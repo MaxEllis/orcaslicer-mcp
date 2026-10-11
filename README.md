@@ -72,7 +72,7 @@ It only crowns a winner when one variant genuinely beats the rest on time, filam
 
 ### Several plates
 
-`list_plates`, `add_plate`, `select_plate`, `delete_plate` and `move_object_to_plate` build a multi-plate project the way the toolbar does: one part per plate, each sliced on its own. Slicing, G-code, renders and job status always act on the current plate, so select a plate before you slice it. `list_objects` reports the plate each object sits on. These need fork v2.4.2-mcp.13 or later.
+`list_plates`, `add_plate`, `select_plate`, `delete_plate` and `move_object_to_plate` build a multi-plate project the way the toolbar does: one part per plate, each sliced on its own. Slicing, G-code, renders and job status always act on the current plate, so select a plate before you slice it. `list_objects` reports the plate each object sits on. Keep `arrange_plate` away from a layout like this: OrcaSlicer's arrange packs every unlocked plate together again. These need fork v2.4.2-mcp.13 or later.
 
 ### Plate renders
 

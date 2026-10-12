@@ -485,7 +485,11 @@ async def delete_object(
 async def transform_object(object_id: int, translate: list[float] | None = None,
                            rotate: list[float] | None = None,
                            scale: list[float] | None = None) -> dict:
-    """Move/rotate/scale an object by id. translate=[dx,dy,dz] mm (relative), rotate=[rx,ry,rz] degrees (relative), scale=[sx,sy,sz] absolute factor. Provide at least one."""
+    """Move/rotate/scale an object by id. translate=[dx,dy,dz] mm (relative), rotate=[rx,ry,rz] degrees (relative), scale=[sx,sy,sz] absolute factor. Provide at least one.
+
+    On fork v2.4.2-mcp.13 and later the object then belongs to whichever plate it sits on,
+    as after a drag in the window; list_objects shows the plate. To send an object to
+    another plate, move_object_to_plate is simpler than working out coordinates."""
     try:
         async with _client() as c:
             return await c.transform_object(object_id, translate, rotate, scale)
@@ -579,6 +583,8 @@ async def delete_plate(
     """Delete a plate. The objects it held are NOT deleted: OrcaSlicer parks them beside
     the bed, as the toolbar's delete does, and the reply says how many were moved off-plate
     (objects_moved_off_plate). Use move_object_to_plate to put them somewhere printable.
+    OrcaSlicer parks them where the next plate appears, so an add_plate straight after a
+    delete picks them back up.
 
     The only plate cannot be deleted (422 last_plate). Call list_plates first for the index;
     this cannot be undone through the API."""

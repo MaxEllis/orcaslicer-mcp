@@ -21,6 +21,7 @@ from .physics_check import run_checks, CHECK_LAYERS
 from .breakdown import build_breakdown
 from .compare import compute_comparison
 from .guard import allow_override_warnings
+from .stdio_compat import run_stdio
 from . import notes as _notes
 from . import outcomes as _outcomes
 import hashlib
@@ -1581,7 +1582,8 @@ def main() -> None:
     _hide_windows_console()
     for w in allow_override_warnings():
         print(w, file=sys.stderr)  # stdout carries the MCP protocol; stderr reaches the client log
-    mcp.run()
+    import anyio
+    anyio.run(run_stdio, mcp._lowlevel_server)
 
 
 if __name__ == "__main__":

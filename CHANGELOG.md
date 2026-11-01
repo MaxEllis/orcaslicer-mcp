@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+- Claude Desktop could not connect: it showed the extension as failed with "connection is serving the 2026-07-28 protocol; the initialize handshake is not accepted" and no tools. The MCP SDK (2.2 and later) lets the first request on a stdio connection lock its protocol era, and a client that opens with a `server/discover` probe and then sends `initialize` on the same connection was refused. On stdio the server now answers a `server/discover` probe that arrives before any other request with METHOD_NOT_FOUND (-32601), the reply the specification tells clients to treat as "fall back to the handshake", so `initialize` opens the connection. Clients that only speak the handshake are unaffected, and clients in auto mode fall back as designed. Set `ORCA_MCP_PROTOCOL=auto` to hand the connection to the SDK untouched.
+
 ## [0.1.17] - 2026-10-12
 
 ### Added

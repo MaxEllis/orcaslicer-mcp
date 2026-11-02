@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-11-03
+
 ### Added
 - CANVAS slot tools for the Elegoo Centauri Carbon 2: `get_printer_slots` (trays, status, material, colour), `get_filament_slot_mapping` and `set_filament_slot_mapping` (which tray each filament of the current plate prints from). Setting a mapping starts nothing; the Send dialog opens pre-filled. Needs fork v2.4.2-mcp.14 or later.
 

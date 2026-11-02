@@ -140,6 +140,17 @@ class OrcaClient:
         return await self._request("POST", f"/api/v1/objects/{obj_id}/plate",
                                    json={"plate": plate, "instance": instance})
 
+    # Printer slots (CANVAS), fork v2.4.2-mcp.14 and later.
+    async def get_printer_slots(self) -> dict:
+        # The fork holds an MQTT exchange with the printer (up to ~18 s).
+        return await self._request("GET", "/api/v1/printer/slots", timeout=20.0)
+
+    async def get_slot_mapping(self) -> dict:
+        return await self._request("GET", "/api/v1/printer/slot_mapping")
+
+    async def put_slot_mapping(self, mapping: list[dict]) -> dict:
+        return await self._request("PUT", "/api/v1/printer/slot_mapping", json={"mapping": mapping})
+
     async def get_config(self, keys: list[str] | None) -> dict:
         # The fork's /config `keys` filter splits the RAW query string on ',' without
         # URL-decoding first, so httpx's percent-encoded comma (%2C) matches nothing and

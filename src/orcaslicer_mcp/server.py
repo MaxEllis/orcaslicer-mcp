@@ -432,6 +432,10 @@ def _plates_err(e: ApiError) -> dict:
     return _m4_err(e, "fork v2.4.2-mcp.13 or later")
 
 
+def _slots_err(e: ApiError) -> dict:
+    return _m4_err(e, "fork v2.4.2-mcp.14 or later")
+
+
 @mcp.tool()
 async def list_objects() -> dict:
     """List objects in the project: id (stable), name, size_mm, transform (offset/rotation/scale)
@@ -536,6 +540,68 @@ async def list_plates() -> dict:
             return await c.get_plates()
     except ApiError as e:
         return _plates_err(e)
+
+
+@mcp.tool()
+async def get_printer_slots() -> dict:
+    """Read the filament slots (trays) of the connected Elegoo Centauri Carbon 2 with a CANVAS
+    unit: which tray is active, and for each tray its label (A1, A2, ...), status, material,
+    brand and colour. Read-only. Works only for that printer; needs fork v2.4.2-mcp.14 or later.
+    The call asks the printer over the network and can take up to about 18 seconds.
+
+    Per tray: status is loaded, preloaded (filament waiting at the feeder, not yet pulled in),
+    disconnected or error. ready is true when the tray can be printed from now.
+    unknown_filament is true when the printer could not identify the spool (no tag), so the
+    material and colour are a guess or empty. Use canvas_id and tray_id from here in
+    set_filament_slot_mapping.
+
+    When the printer is not supported or not reachable the reply is supported false with a
+    reason (not_elegoo_cc2, no_canvas, unreachable, too_many_clients, registration_refused,
+    timeout, printer_error, firmware_too_old) and a message. Relay the message to the user."""
+    try:
+        async with _client() as c:
+            return await c.get_printer_slots()
+    except ApiError as e:
+        return _slots_err(e)
+
+
+@mcp.tool()
+async def get_filament_slot_mapping() -> dict:
+    """Show which CANVAS tray each filament of the current plate would use if the user clicked
+    Send now. Read-only; needs fork v2.4.2-mcp.14 or later.
+
+    Each filament has its 0-based index, type, name, colour, the tray it maps to (or null), the
+    source of that choice (saved, matched, user, api or none) and any warnings. valid is true
+    when Send would go through; if not, problems says why (an unmapped filament, a tray that
+    is not ready). Call it after slicing or changing filaments, before telling the user the
+    plate is ready to send. Nothing is sent to the printer. A supported false reply carries a
+    reason to relay, as get_printer_slots does."""
+    try:
+        async with _client() as c:
+            return await c.get_slot_mapping()
+    except ApiError as e:
+        return _slots_err(e)
+
+
+@mcp.tool()
+async def set_filament_slot_mapping(
+    mapping: Annotated[list[dict], Field(description=(
+        "One entry per project filament to map: {filament: 0-based filament index, canvas_id, "
+        "tray_id} from get_printer_slots."))],
+) -> dict:
+    """Choose which CANVAS tray each filament of the current plate prints from. Returns the same
+    reply as get_filament_slot_mapping, so check valid and problems. Needs fork v2.4.2-mcp.14
+    or later and an Elegoo Centauri Carbon 2 with a CANVAS.
+
+    This starts nothing. OrcaSlicer's own Send dialog opens pre-filled with this mapping and
+    the user still clicks Send. Each tray can serve only one filament (422 duplicate_tray), the
+    tray must be ready (422 tray_not_ready), and the indexes must exist (422 unknown_filament_index,
+    unknown_tray). Use get_printer_slots first to pick trays whose material and colour fit."""
+    try:
+        async with _client() as c:
+            return await c.put_slot_mapping(mapping)
+    except ApiError as e:
+        return _slots_err(e)
 
 
 @mcp.tool()
@@ -1513,6 +1579,9 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "arrange_plate": ("Arrange plate", False, False),
     "add_plate": ("Add plate", False, False),
     "select_plate": ("Select plate", False, False),
+    "get_printer_slots": ("Get CANVAS slots", True, False),
+    "get_filament_slot_mapping": ("Get filament slot mapping", True, False),
+    "set_filament_slot_mapping": ("Set filament slot mapping", False, False),
     "move_object_to_plate": ("Move object to plate", False, False),
     "auto_orient": ("Auto-orient objects", False, False),
     "remember": ("Save a note", False, False),

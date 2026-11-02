@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 class ApiError(Exception):
-    pass
+    body: dict = {}
 
 
 class Unauthorized(ApiError):
@@ -50,6 +50,12 @@ class Validation(ApiError):
 
 
 def error_from_status(status: int, body: dict) -> ApiError:
+    err = _error_from_status(status, body)
+    err.body = body if isinstance(body, dict) else {}
+    return err
+
+
+def _error_from_status(status: int, body: dict) -> ApiError:
     msg = body.get("error") or body.get("detail") or f"HTTP {status}"
     if status == 401:
         return Unauthorized("unauthorized (check ORCA_API_TOKEN)")

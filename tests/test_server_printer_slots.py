@@ -72,4 +72,21 @@ async def test_set_filament_slot_mapping_duplicate_tray_422(monkeypatch):
     respx.put(f"{U}/slot_mapping").mock(return_value=httpx.Response(422, json={
         "error": "duplicate_tray", "entry": {"filament": 1, "canvas_id": 0, "tray_id": 0}}))
     out = await srv.set_filament_slot_mapping([{"filament": 1, "canvas_id": 0, "tray_id": 0}])
-    assert "duplicate_tray" in out["error"]
+    assert "duplicate_tray" in out["error"] and '"filament": 1' in out["error"]
+
+
+@respx.mock
+async def test_duplicate_tray_error_shows_entry(monkeypatch):
+    _env(monkeypatch)
+    respx.put(f"{U}/slot_mapping").mock(return_value=httpx.Response(422, json={
+        "error": "slots_unavailable", "message": "printer busy",
+        "entry": {"filament": 1, "canvas_id": 0, "tray_id": 2}}))
+    out = await srv.set_filament_slot_mapping([{"filament": 1, "canvas_id": 0, "tray_id": 2}])
+    assert '"tray_id": 2' in out["error"] and "printer busy" in out["error"]
+
+
+def test_slot_timeout_at_least_25_and_keeps_larger(monkeypatch):
+    from orcaslicer_mcp.client import OrcaClient
+    from orcaslicer_mcp.config import Config
+    assert OrcaClient(Config(base_url="http://x", token="t", timeout=5.0))._slot_timeout() >= 25.0
+    assert OrcaClient(Config(base_url="http://x", token="t", timeout=60.0))._slot_timeout() == 60.0

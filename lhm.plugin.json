@@ -147,11 +147,11 @@
     },
     {
       "name": "get_filament_slot_mapping",
-      "description": "Show which CANVAS tray each filament of the current plate would use if the user clicked Send now. Read-only; needs fork v2.4.2-mcp.14 or later."
+      "description": "Show which CANVAS tray each filament would use if the user clicked Send now. The filaments listed are the ones on the plate the next Send would use. Read-only; needs fork v2.4.2-mcp.14 or later."
     },
     {
       "name": "set_filament_slot_mapping",
-      "description": "Choose which CANVAS tray each filament of the current plate prints from. Returns the same reply as get_filament_slot_mapping, so check valid and problems. Needs fork v2.4.2-mcp.14 or later and an Elegoo Centauri Carbon 2 with a CANVAS."
+      "description": "Choose which CANVAS tray each filament of the plate the next Send would use prints from. Returns the same reply as get_filament_slot_mapping, so check valid and problems. Needs fork v2.4.2-mcp.14 or later and an Elegoo Centauri Carbon 2 with a CANVAS."
     },
     {
       "name": "add_plate",

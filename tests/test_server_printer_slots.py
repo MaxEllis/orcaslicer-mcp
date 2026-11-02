@@ -41,13 +41,15 @@ async def test_slots_route_missing_names_build(monkeypatch):
     respx.get(f"{U}/slots").mock(return_value=httpx.Response(404, json={"error": "not_found"}))
     respx.get(f"{U}/slot_mapping").mock(return_value=httpx.Response(404, json={"error": "not_found"}))
     assert "fork v2.4.2-mcp.14" in (await srv.get_printer_slots())["error"]
+    respx.put(f"{U}/slot_mapping").mock(return_value=httpx.Response(404, json={"error": "not_found"}))
     assert "fork v2.4.2-mcp.14" in (await srv.get_filament_slot_mapping())["error"]
+    assert "fork v2.4.2-mcp.14" in (await srv.set_filament_slot_mapping([]))["error"]
 
 
 @respx.mock
 async def test_get_filament_slot_mapping(monkeypatch):
     _env(monkeypatch)
-    body = {"plate": 0, "filaments": [{"index": 0, "type": "PLA", "name": "x", "color": "#000000",
+    body = {"supported": True, "plate": 0, "filaments": [{"index": 0, "type": "PLA", "name": "x", "color": "#000000",
                                        "tray": {"canvas_id": 0, "tray_id": 0, "label": "A1"},
                                        "source": "matched", "warnings": []}],
             "valid": True, "problems": []}
@@ -76,13 +78,13 @@ async def test_set_filament_slot_mapping_duplicate_tray_422(monkeypatch):
 
 
 @respx.mock
-async def test_duplicate_tray_error_shows_entry(monkeypatch):
+async def test_slots_unavailable_error_shows_reason_and_message(monkeypatch):
     _env(monkeypatch)
     respx.put(f"{U}/slot_mapping").mock(return_value=httpx.Response(422, json={
-        "error": "slots_unavailable", "message": "printer busy",
-        "entry": {"filament": 1, "canvas_id": 0, "tray_id": 2}}))
+        "error": "slots_unavailable", "reason": "timeout", "message": "printer busy"}))
     out = await srv.set_filament_slot_mapping([{"filament": 1, "canvas_id": 0, "tray_id": 2}])
-    assert '"tray_id": 2' in out["error"] and "printer busy" in out["error"]
+    assert "slots_unavailable" in out["error"] and "timeout" in out["error"]
+    assert "printer busy" in out["error"] and "entry" not in out["error"]
 
 
 def test_slot_timeout_at_least_25_and_keeps_larger(monkeypatch):

@@ -440,6 +440,8 @@ def _slots_err(e: ApiError) -> dict:
     entry = body.get("entry")
     if entry:
         extra += " for entry " + json.dumps(entry)
+    if body.get("reason"):
+        extra += " (" + str(body["reason"]) + ")"
     if body.get("message"):
         extra += ": " + str(body["message"])
     if extra and "error" in out:
@@ -564,8 +566,7 @@ async def get_printer_slots() -> dict:
 
     Per tray: status is loaded, preloaded (filament waiting at the feeder, not yet pulled in),
     disconnected or error. ready is true when the tray can be printed from now.
-    unknown_filament is true when the printer could not identify the spool (no tag), so the
-    material and colour are a guess or empty. Use canvas_id and tray_id from here in
+    unknown_filament is true when the tray reports no filament type or name. Use canvas_id and tray_id from here in
     set_filament_slot_mapping.
 
     When the printer is not supported or not reachable the reply is supported false with a
@@ -586,7 +587,8 @@ async def get_filament_slot_mapping() -> dict:
     to about 18 seconds, and OrcaSlicer's API serves one request at a time meanwhile, so other
     tools wait.
 
-    Each filament has its 0-based index, type, name, colour, the tray it maps to (or null), the
+    The reply names the plate (0-based, the current plate) and supported (true, or false with
+    a reason). Each filament has its 0-based index, type, name, colour, the tray it maps to (or null), the
     source of that choice (saved, matched, user, api or none) and any warnings. valid is true
     when that Send would go through; if not, problems says why (an unmapped filament, a tray that
     is not ready). Call it after slicing or changing filaments, before telling the user the
@@ -602,7 +604,8 @@ async def get_filament_slot_mapping() -> dict:
 @mcp.tool()
 async def set_filament_slot_mapping(
     mapping: Annotated[list[dict], Field(description=(
-        "One entry per project filament to map: {filament: 0-based filament index, canvas_id, "
+        "One entry per filament of the plate the next Send uses (the indexes "
+        "get_filament_slot_mapping lists): {filament: 0-based filament index, canvas_id, "
         "tray_id} from get_printer_slots."))],
 ) -> dict:
     """Choose which CANVAS tray each filament of the plate the next Send would use prints from.
@@ -611,11 +614,16 @@ async def set_filament_slot_mapping(
     printer when no slot list is cached, so it can take up to about 18 seconds, and
     OrcaSlicer's API serves one request at a time meanwhile, so other tools wait.
 
+    The list REPLACES the whole mapping set through the API: a filament left out gets no tray
+    from the API, and an empty list clears the API choices so Send falls back to the saved
+    choices and automatic matching. Include every filament you want pinned.
+
     This starts nothing. OrcaSlicer's own Send dialog opens pre-filled with this mapping and
     the user still clicks Send. Each tray can serve only one filament (422 duplicate_tray), the
-    tray must be ready (422 tray_not_ready), and the indexes must exist (422 unknown_filament_index,
-    unknown_tray, slots_unavailable when the printer could not be read; the reply then
-    says why). Use get_printer_slots first to pick trays whose material and colour fit."""
+    tray must be ready (422 tray_not_ready), and the indexes must exist (422 unknown_filament_index, which
+    also covers a project filament that is not on the plate; unknown_tray, slots_unavailable when the printer could not be read; the reply then
+    says why). Malformed lists get 400: each filament at most once, and integers for
+    filament, canvas_id and tray_id. Use get_printer_slots first to pick trays whose material and colour fit."""
     try:
         async with _client() as c:
             return await c.put_slot_mapping(mapping)

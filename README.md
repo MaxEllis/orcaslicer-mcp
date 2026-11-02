@@ -138,6 +138,8 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first, bec
     }
     ```
 
+    > **Protocol era:** on stdio the server opens every connection with the classic `initialize` handshake, because some clients probe the 2026-07-28 protocol with `server/discover` and then send `initialize` anyway, which the MCP SDK refuses once the probe has picked the modern era. The probe gets METHOD_NOT_FOUND and the client falls back. Set `ORCA_MCP_PROTOCOL=auto` to let the client's first request choose the era instead.
+
     `ORCA_API_URL` defaults to `http://127.0.0.1:13130`. Set it only if you changed the port, or if OrcaSlicer runs on another machine with LAN access enabled there.
 
     > **Windows note:** if `uvx orcaslicer-mcp` fails with *"The process cannot access the file because it is being used by another process"* while installing `pywin32`, Windows Search or Defender grabbed a freshly written file mid-install (uv does not retry). Use a pip-based fallback, which does retry, and point `"command"` at the resulting exe:

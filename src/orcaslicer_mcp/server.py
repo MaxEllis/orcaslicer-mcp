@@ -99,7 +99,11 @@ async def get_status() -> dict:
     last slice is still valid, and whether a slice is running. Read-only.
 
     Call it first to orient before slicing or editing, to see which settings drift from their
-    preset, or to check slice_result_valid before trusting earlier stats."""
+    preset, or to check slice_result_valid before trusting earlier stats. On fork
+    v2.4.2-mcp.15 and later `project` is {name, path, dirty}: path is empty until the project
+    has been saved, and dirty says File > Save has something to write, so an agent knows when
+    to save_project and when the user has been editing in the window. Older builds report
+    `project` as the bare path string."""
     try:
         async with _client() as c:
             return await c.get_status()
@@ -433,6 +437,10 @@ def _plates_err(e: ApiError) -> dict:
     return _m4_err(e, "fork v2.4.2-mcp.13 or later")
 
 
+def _project_err(e: ApiError) -> dict:
+    return _m4_err(e, "the project routes, fork v2.4.2-mcp.15 or later")
+
+
 def _slots_err(e: ApiError) -> dict:
     out = _m4_err(e, "fork v2.4.2-mcp.14 or later")
     body = getattr(e, "body", None) or {}
@@ -715,6 +723,212 @@ async def move_object_to_plate(
 
 
 @mcp.tool()
+async def get_project() -> dict:
+    """The open project as a file: name (the window title), path (empty until it has been
+    saved), saved, dirty (File > Save has something to write), plate and object counts, the
+    preset groups with unsaved edits (modified) and how many entries File > Recent holds.
+    Read-only. Call it before save_project, open_project or new_project to see whether the
+    user has unsaved work in the window. Needs fork v2.4.2-mcp.15 or later."""
+    try:
+        async with _client() as c:
+            return await c.get_project()
+    except ApiError as e:
+        return _project_err(e)
+
+
+@mcp.tool()
+async def save_project(
+    path: Annotated[str | None, Field(description=(
+        "Where to save, a .3mf path on the OrcaSlicer host (Save As). None saves to the "
+        "project's own path (Save); that fails with no_project_path when the project has "
+        "never been saved."))] = None,
+    overwrite: Annotated[bool, Field(description=(
+        "Replace an existing file at `path`. Off by default: a collision is an error, "
+        "never a silent clobber. Saving the project back onto its own path is a plain "
+        "Save and needs no overwrite."))] = False,
+) -> dict:
+    """Save the project as a .3mf, exactly what File > Save / Save Project As writes: plates,
+    object placement, per-object and per-plate settings, height-range modifiers, slot presets
+    and colours, and unsaved config overrides. No dialog opens; OrcaSlicer's own prompts are
+    answered from the arguments. To create a new project file, call new_project and then
+    save_project with a path.
+
+    Afterwards get_status reports the new path and dirty false, and the file joins File >
+    Recent. Save early: everything set up through these tools lives only in the open session
+    until it is saved, and is lost if OrcaSlicer closes. A save is refused while a slice runs
+    (slicing). Needs fork v2.4.2-mcp.15 or later."""
+    try:
+        async with _client() as c:
+            return await c.save_project(path, overwrite)
+    except ApiError as e:
+        return _project_err(e)
+
+
+@mcp.tool()
+async def open_project(
+    path: Annotated[str, Field(description="A .3mf project on the OrcaSlicer host.")],
+    if_unsaved: Annotated[Literal["save", "discard", "fail"], Field(description=(
+        "What to do when the current project has unsaved changes: 'fail' (default) refuses "
+        "and changes nothing, 'save' writes it to its own path first (fails with "
+        "no_project_path if it has none), 'discard' throws the changes away."))] = "fail",
+    presets: Annotated[Literal["project", "keep_current"], Field(description=(
+        "'project' (default) selects the printer, print and filament presets stored in the "
+        "project, as OrcaSlicer does. 'keep_current' opens the project and then selects the "
+        "presets that were active before the call again (for names that still exist); the "
+        "project's own config overrides are not kept in that mode."))] = "project",
+) -> dict:
+    """Open a saved .3mf project the way File > Open Project does: plates, objects, per-object
+    and per-plate settings, slot presets and colours all come back. This is not load_model,
+    which only imports geometry onto the current plate. Use open_recent_project for an entry
+    of File > Recent and browse_projects to find project files in a folder.
+
+    The two prompts OrcaSlicer would show are answered from the arguments, so nothing blocks.
+    Unsaved preset overrides are dropped before the open because the project's config
+    replaces them; the reply names those groups in discarded_changes. Call get_project first
+    if you are unsure whether the user has unsaved work in the window, and pass
+    if_unsaved='save' or 'discard' deliberately. Needs fork v2.4.2-mcp.15 or later."""
+    try:
+        async with _client() as c:
+            return await c.open_project(path, if_unsaved, presets)
+    except ApiError as e:
+        return _project_err(e)
+
+
+@mcp.tool()
+async def open_recent_project(
+    index: Annotated[int, Field(description=(
+        "0-based position in list_recent_projects (0 is the most recent)."), ge=0)],
+    if_unsaved: Annotated[Literal["save", "discard", "fail"], Field(description=(
+        "What to do when the current project has unsaved changes: 'fail' (default) refuses "
+        "and changes nothing, 'save' writes it to its own path first, 'discard' throws the "
+        "changes away."))] = "fail",
+    presets: Annotated[Literal["project", "keep_current"], Field(description=(
+        "'project' (default) selects the presets stored in the project; 'keep_current' "
+        "selects the presets active before the call again."))] = "project",
+) -> dict:
+    """Open an entry of File > Recent by its position in list_recent_projects, with the same
+    behaviour and arguments as open_project. The list can change between calls (a save or an
+    open moves its file to the top), so list first and open straight after; a file no longer
+    on disk answers file_not_found and forget_recent_project removes the entry. Needs fork
+    v2.4.2-mcp.15 or later."""
+    try:
+        async with _client() as c:
+            return await c.open_project(None, if_unsaved, presets, recent=index)
+    except ApiError as e:
+        return _project_err(e)
+
+
+@mcp.tool()
+async def new_project(
+    if_unsaved: Annotated[Literal["save", "discard", "fail"], Field(description=(
+        "What to do when the current project has unsaved changes: 'fail' (default) refuses "
+        "and changes nothing, 'save' writes it to its own path first (fails with "
+        "no_project_path if it has none), 'discard' throws the changes away."))] = "fail",
+    name: Annotated[str | None, Field(description=(
+        "A title for the new project, shown in the window; 'Untitled' when omitted. The file "
+        "name is chosen when save_project is called with a path."))] = None,
+) -> dict:
+    """Start a new, empty project (File > New Project) without a dialog. The unsaved-changes
+    prompt is answered by if_unsaved. OrcaSlicer's second prompt, keep or discard modified
+    presets, is answered with Keep: unsaved preset overrides carry over into the new project
+    and the reply names them in kept_changes (select_preset drops them if that is not
+    wanted). Follow with load_model and save_project to create a project file. Needs fork
+    v2.4.2-mcp.15 or later."""
+    try:
+        async with _client() as c:
+            return await c.new_project(if_unsaved, name)
+    except ApiError as e:
+        return _project_err(e)
+
+
+@mcp.tool()
+async def list_recent_projects() -> dict:
+    """File > Recent, most recent first: for each entry its index (for open_recent_project),
+    path, project name, whether the file still exists, whether it is the open project, and
+    its size and last-modified time. Read-only. Needs fork v2.4.2-mcp.15 or later."""
+    try:
+        async with _client() as c:
+            return await c.get_recent_projects()
+    except ApiError as e:
+        return _project_err(e)
+
+
+@mcp.tool()
+async def forget_recent_project(
+    path: Annotated[str | None, Field(description=(
+        "The entry's path as list_recent_projects shows it (any spelling of the same file "
+        "works while the file exists)."))] = None,
+    index: Annotated[int | None, Field(description=(
+        "Alternatively, the entry's 0-based index from list_recent_projects."), ge=0)] = None,
+    all: Annotated[bool, Field(description="Clear the whole list instead.")] = False,
+) -> dict:
+    """Take an entry off File > Recent (by path or index), or clear the list. Nothing on disk
+    changes; the file stays where it is. Useful after a file was deleted or moved outside
+    OrcaSlicer. The reply names what was forgotten and returns the list as it is now. Needs
+    fork v2.4.2-mcp.15 or later."""
+    if not all and path is None and index is None:
+        return {"error": "nothing_to_forget", "detail": "pass path, index or all=True"}
+    try:
+        async with _client() as c:
+            return await c.forget_recent_project(path=path, index=index, all=all)
+    except ApiError as e:
+        return _project_err(e)
+
+
+@mcp.tool()
+async def browse_projects(
+    dir: Annotated[str | None, Field(description=(
+        "A folder on the OrcaSlicer host. None uses the open project's folder, or the folder "
+        "OrcaSlicer's last file dialog used."))] = None,
+) -> dict:
+    """List the .3mf project files in one folder (not recursive), newest first: path, project
+    name, size and last-modified time, and whether each is the open project. Read-only. Use it
+    to find a project to open_project, or to pick a free name before save_project. Needs fork
+    v2.4.2-mcp.15 or later."""
+    try:
+        async with _client() as c:
+            return await c.browse_projects(dir)
+    except ApiError as e:
+        return _project_err(e)
+
+
+@mcp.tool()
+async def move_project_file(
+    path: Annotated[str, Field(description="The .3mf file to move or rename, on the OrcaSlicer host.")],
+    to: Annotated[str, Field(description="Its new .3mf path (a new name in the same folder renames it).")],
+    overwrite: Annotated[bool, Field(description=(
+        "Replace an existing file at `to`. Off by default. The open project's own file is "
+        "never replaced."))] = False,
+) -> dict:
+    """Move or rename a project file on disk. When it is the open project's file the window
+    follows: title, project name and File > Recent all show the new path, and the next
+    save_project writes there. Any other recent-list entry naming the old path is pointed at
+    the new one. The file's content and the project's dirty state do not change. Fails with
+    exists when something is already at `to` and overwrite is off. Needs fork v2.4.2-mcp.15
+    or later."""
+    try:
+        async with _client() as c:
+            return await c.move_project_file(path, to, overwrite)
+    except ApiError as e:
+        return _project_err(e)
+
+
+@mcp.tool()
+async def delete_project_file(
+    path: Annotated[str, Field(description="The .3mf file to delete, on the OrcaSlicer host.")],
+) -> dict:
+    """Delete a project file from disk, permanently (there is no trash), and take it off File >
+    Recent. Only .3mf files can be deleted this way, and never the open project's own file:
+    new_project or open_project first. Confirm with the user before calling this on a file
+    they did not just ask to remove. Needs fork v2.4.2-mcp.15 or later."""
+    try:
+        async with _client() as c:
+            return await c.delete_project_file(path)
+    except ApiError as e:
+        return _project_err(e)
+
+
+@mcp.tool()
 async def get_job_status() -> dict:
     """Whether the plate's background job worker is idle or still running. Read-only.
 
@@ -960,7 +1174,8 @@ def prompt_edit_preset_safely(change: str) -> str:
 async def load_model(path: str) -> dict:
     """Load a model file (path on the OrcaSlicer host) onto the current plate.
     Accepts .stl/.obj/.3mf, plus .step/.stp on fork v2.3.2-mcp.3+. Large STEP files
-    can take a minute to tessellate; the call waits."""
+    can take a minute to tessellate; the call waits. A .3mf is imported as geometry only;
+    to bring back a saved project with its plates and settings use open_project."""
     try:
         async with _client() as c:
             return await c.load_model(path)
@@ -1579,6 +1794,9 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "compare_slices": ("Compare slice variants", True, False),
     "list_objects": ("List plate objects", True, False),
     "list_plates": ("List plates", True, False),
+    "get_project": ("Get project file state", True, False),
+    "list_recent_projects": ("List recent projects", True, False),
+    "browse_projects": ("List project files in a folder", True, False),
     "get_job_status": ("Get background job status", True, False),
     "watch_events": ("Watch OrcaSlicer events", True, False),
     "find_config_keys": ("Find config keys", True, False),
@@ -1610,6 +1828,9 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "get_filament_slot_mapping": ("Get filament slot mapping", True, False),
     "set_filament_slot_mapping": ("Set filament slot mapping", False, False),
     "move_object_to_plate": ("Move object to plate", False, False),
+    "save_project": ("Save project (.3mf)", False, False),
+    "forget_recent_project": ("Remove an entry from recent projects", False, False),
+    "move_project_file": ("Move or rename a project file", False, False),
     "auto_orient": ("Auto-orient objects", False, False),
     "remember": ("Save a note", False, False),
     "load_model": ("Load a model file", False, False),
@@ -1622,6 +1843,10 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "delete_object": ("Delete object from plate", False, True),
     "delete_plate": ("Delete plate (its objects are parked off-plate)", False, True),
     "delete_preset": ("Delete preset", False, True),
+    "open_project": ("Open project (replaces the open session)", False, True),
+    "open_recent_project": ("Open a recent project (replaces the open session)", False, True),
+    "new_project": ("New project (replaces the open session)", False, True),
+    "delete_project_file": ("Delete a project file from disk", False, True),
     "get_printer_status": ("Get printer status", True, False),
     "wait_for_printer": ("Wait for the printer", True, False),
     "list_print_history": ("List print history", False, False),

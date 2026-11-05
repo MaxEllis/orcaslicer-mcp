@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- Project files, for fork v2.4.2-mcp.15 and later. `save_project` writes the project `.3mf` as File > Save / Save As does, with no dialog, and refuses to replace an existing file unless `overwrite` is passed. `open_project` opens a saved project with its plates, objects, per-object and per-plate settings, slot presets and colours (`load_model` only imports geometry); `open_recent_project` opens an entry of File > Recent by index; `new_project` starts over, with an optional `name` for the window title. All three take `if_unsaved` (`fail` by default, `save`, `discard`) to answer OrcaSlicer's unsaved-changes prompt from the call, and the open tools take `presets` (`project` or `keep_current`). `get_project` reports the project's name, path, dirty flag and modified preset groups; `get_status` reports `project` as `{name, path, dirty}` on those builds.
+- `list_recent_projects` shows File > Recent with whether each file still exists, and `forget_recent_project` takes an entry (or the whole list) off it. `browse_projects` lists the `.3mf` files in a folder on the OrcaSlicer host. `move_project_file` renames or moves a project file, and the window follows when it is the open project; `delete_project_file` removes one from disk (permanently) and from the recent list, never the open project's own file.
+
 ## [0.1.19] - 2026-11-03
 
 ### Added

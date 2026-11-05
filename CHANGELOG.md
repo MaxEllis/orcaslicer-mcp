@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+- `load_model` on a path that does not exist now says `file_not_found` with the path, instead of claiming the build lacks model loading. Works with older fork builds too.
+
 ## [0.1.19] - 2026-11-03
 
 ### Added

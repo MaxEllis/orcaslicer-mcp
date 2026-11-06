@@ -437,8 +437,35 @@ def _plates_err(e: ApiError) -> dict:
     return _m4_err(e, "fork v2.4.2-mcp.13 or later")
 
 
+# What a project route's error reply carries besides the token, kept so the agent can
+# act on it: which file, why, the keys a policy refused, and the state of the project
+# an unsaved-changes refusal is about.
+_PROJECT_ERR_FIELDS = ("detail", "path", "keys", "index", "count", "dir", "project", "modified")
+
+
 def _project_err(e: ApiError) -> dict:
-    return _m4_err(e, "the project routes, fork v2.4.2-mcp.15 or later")
+    out = _m4_err(e, "the project routes, fork v2.4.2-mcp.15 or later")
+    if isinstance(e, NotFound) and e.route_missing:
+        return out
+    if not out.get("errors"):
+        out.pop("errors", None)
+    body = getattr(e, "body", None) or {}
+    for k in _PROJECT_ERR_FIELDS:
+        if k in body:
+            out[k] = body[k]
+    if body.get("error") == "blocked_by_remote_api_policy":
+        if body.get("keys"):
+            out["hint"] = ("OrcaSlicer refused to open this project: it brings its own script, "
+                           "G-code or connection settings (listed in keys) and Preferences > "
+                           "Remote API > 'Allow script, G-code and connection edits' is off. Tell "
+                           "the user; they can open it in the OrcaSlicer window, where OrcaSlicer "
+                           "asks about modified G-code itself.")
+        else:
+            out["hint"] = ("OrcaSlicer refused: deleting a project file, or saving or moving onto "
+                           "an existing one, needs Preferences > Remote API > 'Allow deleting and "
+                           "replacing project files', which is off. Pick a free name, or ask the "
+                           "user to do it in OrcaSlicer.")
+    return out
 
 
 def _slots_err(e: ApiError) -> dict:
@@ -756,7 +783,9 @@ async def save_project(
     Afterwards get_status reports the new path and dirty false, and the file joins File >
     Recent. Save early: everything set up through these tools lives only in the open session
     until it is saved, and is lost if OrcaSlicer closes. A save is refused while a slice runs
-    (slicing). Needs fork v2.4.2-mcp.15 or later."""
+    (slicing). Replacing an existing file also needs Preferences > Remote API > 'Allow
+    deleting and replacing project files' in OrcaSlicer (blocked_by_remote_api_policy
+    otherwise). Needs fork v2.4.2-mcp.15 or later."""
     try:
         async with _client() as c:
             return await c.save_project(path, overwrite)
@@ -786,7 +815,10 @@ async def open_project(
     Unsaved preset overrides are dropped before the open because the project's config
     replaces them; the reply names those groups in discarded_changes. Call get_project first
     if you are unsure whether the user has unsaved work in the window, and pass
-    if_unsaved='save' or 'discard' deliberately. Needs fork v2.4.2-mcp.15 or later."""
+    if_unsaved='save' or 'discard' deliberately. A project that brings its own scripts, custom
+    G-code or printer connection is refused (blocked_by_remote_api_policy, with the keys)
+    unless the user allows those edits in OrcaSlicer's Preferences; nothing changes then.
+    Needs fork v2.4.2-mcp.15 or later."""
     try:
         async with _client() as c:
             return await c.open_project(path, if_unsaved, presets)
@@ -904,8 +936,9 @@ async def move_project_file(
     follows: title, project name and File > Recent all show the new path, and the next
     save_project writes there. Any other recent-list entry naming the old path is pointed at
     the new one. The file's content and the project's dirty state do not change. Fails with
-    exists when something is already at `to` and overwrite is off. Needs fork v2.4.2-mcp.15
-    or later."""
+    exists when something is already at `to` and overwrite is off; replacing it also needs
+    Preferences > Remote API > 'Allow deleting and replacing project files' in OrcaSlicer.
+    Needs fork v2.4.2-mcp.15 or later."""
     try:
         async with _client() as c:
             return await c.move_project_file(path, to, overwrite)
@@ -920,7 +953,9 @@ async def delete_project_file(
     """Delete a project file from disk, permanently (there is no trash), and take it off File >
     Recent. Only .3mf files can be deleted this way, and never the open project's own file:
     new_project or open_project first. Confirm with the user before calling this on a file
-    they did not just ask to remove. Needs fork v2.4.2-mcp.15 or later."""
+    they did not just ask to remove. OrcaSlicer refuses it (blocked_by_remote_api_policy)
+    unless the user ticked Preferences > Remote API > 'Allow deleting and replacing project
+    files'. Needs fork v2.4.2-mcp.15 or later."""
     try:
         async with _client() as c:
             return await c.delete_project_file(path)
@@ -1828,9 +1863,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "get_filament_slot_mapping": ("Get filament slot mapping", True, False),
     "set_filament_slot_mapping": ("Set filament slot mapping", False, False),
     "move_object_to_plate": ("Move object to plate", False, False),
-    "save_project": ("Save project (.3mf)", False, False),
     "forget_recent_project": ("Remove an entry from recent projects", False, False),
-    "move_project_file": ("Move or rename a project file", False, False),
     "auto_orient": ("Auto-orient objects", False, False),
     "remember": ("Save a note", False, False),
     "load_model": ("Load a model file", False, False),
@@ -1847,6 +1880,9 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "open_recent_project": ("Open a recent project (replaces the open session)", False, True),
     "new_project": ("New project (replaces the open session)", False, True),
     "delete_project_file": ("Delete a project file from disk", False, True),
+    # overwrite=True replaces an existing file, so both can destroy data.
+    "save_project": ("Save project (.3mf, can replace a file)", False, True),
+    "move_project_file": ("Move or rename a project file (can replace a file)", False, True),
     "get_printer_status": ("Get printer status", True, False),
     "wait_for_printer": ("Wait for the printer", True, False),
     "list_print_history": ("List print history", False, False),

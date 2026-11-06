@@ -148,6 +148,8 @@ async def test_open_project_unsaved_changes_422(monkeypatch):
         "error": "unsaved_changes", "detail": "pass if_unsaved: \"save\" or \"discard\"", "modified": ["print"]}))
     out = await srv.open_project("/u/a.3mf")
     assert out["error"] == "unsaved_changes"
+    assert out["modified"] == ["print"] and "if_unsaved" in out["detail"]
+    assert "errors" not in out
 
 
 @respx.mock
@@ -326,9 +328,43 @@ def test_project_tool_annotations():
     tools = srv.mcp._tool_manager._tools
     for name in ("get_project", "list_recent_projects", "browse_projects"):
         assert tools[name].annotations.read_only_hint is True, name
-    for name in ("open_project", "open_recent_project", "new_project", "delete_project_file"):
+    for name in ("open_project", "open_recent_project", "new_project", "delete_project_file",
+                 "save_project", "move_project_file"):
         ann = tools[name].annotations
         assert ann.read_only_hint is False and ann.destructive_hint is True, name
-    for name in ("save_project", "forget_recent_project", "move_project_file"):
-        ann = tools[name].annotations
-        assert ann.read_only_hint is False and ann.destructive_hint is False, name
+    ann = tools["forget_recent_project"].annotations
+    assert ann.read_only_hint is False and ann.destructive_hint is False
+
+
+# --- policy refusals keep what the fork said ------------------------------------------
+
+@respx.mock
+async def test_open_project_policy_block_keeps_keys_and_hints(monkeypatch):
+    _env(monkeypatch)
+    respx.post("http://x:13130/api/v1/project/open").mock(return_value=httpx.Response(422, json={
+        "error": "blocked_by_remote_api_policy", "path": "/u/a.3mf",
+        "keys": ["machine_start_gcode", "post_process"], "detail": "the project brings its own ..."}))
+    out = await srv.open_project("/u/a.3mf")
+    assert out["error"] == "blocked_by_remote_api_policy"
+    assert out["keys"] == ["machine_start_gcode", "post_process"] and out["path"] == "/u/a.3mf"
+    assert "Allow script, G-code and connection edits" in out["hint"]
+
+
+@respx.mock
+async def test_delete_project_file_policy_block_hints_the_file_box(monkeypatch):
+    _env(monkeypatch)
+    respx.delete("http://x:13130/api/v1/project/file").mock(return_value=httpx.Response(422, json={
+        "error": "blocked_by_remote_api_policy", "path": "/u/old.3mf", "detail": "deleting a file needs ..."}))
+    out = await srv.delete_project_file("/u/old.3mf")
+    assert out["error"] == "blocked_by_remote_api_policy" and out["path"] == "/u/old.3mf"
+    assert "Allow deleting and replacing project files" in out["hint"]
+
+
+@respx.mock
+async def test_move_project_file_exists_keeps_detail(monkeypatch):
+    _env(monkeypatch)
+    respx.post("http://x:13130/api/v1/project/move").mock(return_value=httpx.Response(409, json={
+        "error": "exists", "path": "/u/b.3mf", "detail": "a file is already there; pass overwrite:true to replace it"}))
+    out = await srv.move_project_file("/u/a.3mf", "/u/b.3mf")
+    assert out["error"] == "exists" and out["path"] == "/u/b.3mf" and "overwrite" in out["detail"]
+    assert "hint" not in out

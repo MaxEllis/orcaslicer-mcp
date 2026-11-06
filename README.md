@@ -76,6 +76,12 @@ It only crowns a winner when one variant genuinely beats the rest on time, filam
 
 **CANVAS slots.** With an Elegoo Centauri Carbon 2 and a CANVAS unit, `get_printer_slots` reads the trays (label, status, material, colour), `get_filament_slot_mapping` shows which tray each filament of the current plate would use, and `set_filament_slot_mapping` changes that choice. Only the mapping can be changed. Nothing is sent: OrcaSlicer's Send dialog opens pre-filled and you still click Send. For any other printer, or when the printer cannot be reached, the reply is `supported: false` with a `reason` and a message. These need fork v2.4.2-mcp.14 or later.
 
+### Project files
+
+`save_project` writes the project as a `.3mf` exactly as File > Save does: plates, placement, per-object and per-plate settings, height ranges, slot presets and colours, unsaved overrides. It never replaces an existing file unless told to. `open_project` brings a saved project back as File > Open Project does (not a geometry import), `open_recent_project` does the same for an entry of File > Recent, and `new_project` starts over. OrcaSlicer's prompts ("save changes?", "keep modified presets?") would hang a remote caller, so each one is answered from an argument: `if_unsaved` is `fail` by default, so nothing is lost without being asked for. `get_project` and `get_status` report the project's name, path and whether there is something to save, so an agent knows when to save.
+
+Around the files themselves: `list_recent_projects` shows File > Recent and whether each file still exists, `forget_recent_project` tidies that list, `browse_projects` lists the `.3mf` files in a folder on the OrcaSlicer host, `move_project_file` renames or moves a project file (the window follows when it is the open project), and `delete_project_file` removes one from disk, permanently, never the open project's own file. These need fork v2.4.2-mcp.15 or later.
+
 ### Plate renders
 
 `render_plate` hands back a PNG, so the assistant can look instead of inferring from coordinates. A rotation reads instantly as a picture and barely at all as three Euler angles. Seven camera angles cover `iso`, `top`, `front`, `left`, `right`, `rear`, and `bottom`. Use `frame="plate"` to stand back for the whole bed, or `frame="object"` to lean in on the part. Requires fork v2.3.2-mcp.4 or later.

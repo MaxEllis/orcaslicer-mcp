@@ -51,6 +51,13 @@ class OrcaClient:
         presets = data.get("presets")
         if isinstance(presets, dict) and "filaments" in presets:
             presets["filament"] = presets.pop("filaments")
+        # Fork v2.4.2-mcp.15 adds project_name and project_dirty beside the path in
+        # `project`. Fold the three into one object so a caller sees name, path and
+        # dirty together; an older build keeps `project` as the bare path string.
+        if "project_dirty" in data:
+            data["project"] = {"name": data.pop("project_name", ""),
+                               "path": data.get("project") or "",
+                               "dirty": bool(data.pop("project_dirty"))}
         return data
 
     async def get_objects(self) -> dict:
@@ -150,6 +157,55 @@ class OrcaClient:
 
     async def get_slot_mapping(self) -> dict:
         return await self._request("GET", "/api/v1/printer/slot_mapping", timeout=self._slot_timeout())
+
+    # Project files (fork v2.4.2-mcp.15 and later). Paths are on the OrcaSlicer host.
+    async def get_project(self) -> dict:
+        return await self._request("GET", "/api/v1/project")
+
+    async def save_project(self, path: str | None = None, overwrite: bool = False) -> dict:
+        # export_3mf renders a thumbnail per plate; the fork holds the request up to 120 s.
+        return await self._request("POST", "/api/v1/project/save",
+                                   json={"path": path, "overwrite": overwrite}, timeout=130.0)
+
+    async def open_project(self, path: str | None = None, if_unsaved: str = "fail",
+                           presets: str = "project", recent: int | None = None) -> dict:
+        body: dict = {"if_unsaved": if_unsaved, "presets": presets}
+        if recent is not None:
+            body["recent"] = recent
+        else:
+            body["path"] = path
+        return await self._request("POST", "/api/v1/project/open", json=body, timeout=130.0)
+
+    async def new_project(self, if_unsaved: str = "fail", name: str | None = None) -> dict:
+        body: dict = {"if_unsaved": if_unsaved}
+        if name:
+            body["name"] = name
+        return await self._request("POST", "/api/v1/project/new", json=body, timeout=70.0)
+
+    async def get_recent_projects(self) -> dict:
+        return await self._request("GET", "/api/v1/project/recent")
+
+    async def forget_recent_project(self, path: str | None = None, index: int | None = None,
+                                    all: bool = False) -> dict:
+        body: dict = {}
+        if all:
+            body["all"] = True
+        elif path is not None:
+            body["path"] = path
+        elif index is not None:
+            body["index"] = index
+        return await self._request("DELETE", "/api/v1/project/recent", json=body)
+
+    async def browse_projects(self, dir: str | None = None) -> dict:
+        return await self._request("GET", "/api/v1/project/browse",
+                                   params={"dir": dir} if dir else None, timeout=40.0)
+
+    async def move_project_file(self, src: str, dst: str, overwrite: bool = False) -> dict:
+        return await self._request("POST", "/api/v1/project/move",
+                                   json={"from": src, "to": dst, "overwrite": overwrite}, timeout=70.0)
+
+    async def delete_project_file(self, path: str) -> dict:
+        return await self._request("DELETE", "/api/v1/project/file", json={"path": path}, timeout=40.0)
 
     async def put_slot_mapping(self, mapping: list[dict]) -> dict:
         return await self._request("PUT", "/api/v1/printer/slot_mapping", json={"mapping": mapping},

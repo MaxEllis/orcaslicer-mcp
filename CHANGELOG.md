@@ -12,6 +12,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `list_recent_projects` shows File > Recent with whether each file still exists, and `forget_recent_project` takes an entry (or the whole list) off it. `browse_projects` lists the `.3mf` files in a folder on the OrcaSlicer host. `move_project_file` renames or moves a project file, and the window follows when it is the open project; `delete_project_file` removes one from disk (permanently) and from the recent list, never the open project's own file.
 - OrcaSlicer guards the project routes with two Preferences > Remote API boxes, both off by default. Without "Allow deleting and replacing project files" it refuses `delete_project_file` and any save or move that would replace an existing file. Without "Allow script, G-code and connection edits" it refuses to open a project that brings its own scripts, custom G-code or printer connection, and lists those keys. The tools pass the reason, the file and the keys back with a hint, and `save_project` and `move_project_file` are marked destructive because `overwrite` can replace a file.
 
+### Fixed
+- `load_model` on a path that does not exist now says `file_not_found` with the path, instead of claiming the build lacks model loading. Works with older fork builds too.
+
 ## [0.1.19] - 2026-11-03
 
 ### Added

@@ -1213,9 +1213,27 @@ async def load_model(path: str) -> dict:
     to bring back a saved project with its plates and settings use open_project."""
     try:
         async with _client() as c:
-            return await c.load_model(path)
+            try:
+                return await c.load_model(path)
+            except NotFound as e:
+                if e.body.get("error") == "file_not_found" or (
+                        e.route_missing and await _has_capability(c, "model")):
+                    # Builds before mcp.14 answer a missing file with the same
+                    # {"error":"not_found"} as a missing route (F18); the model
+                    # capability tells them apart.
+                    return {"error": "file_not_found",
+                            "detail": f"no file at {path} on the OrcaSlicer machine"}
+                raise
     except ApiError as e:
         return _m4a_err(e)
+
+
+async def _has_capability(c, name: str) -> bool:
+    try:
+        status = await c.get_status()
+    except ApiError:
+        return False
+    return name in (status.get("capabilities") or [])
 
 
 @mcp.tool()

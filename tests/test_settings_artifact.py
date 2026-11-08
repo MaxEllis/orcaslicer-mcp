@@ -34,3 +34,13 @@ def test_known_enum_setting_has_values():
 def test_no_phantom_commented_setting():
     # adaptive_layer_height is commented out in source; must not appear
     assert "adaptive_layer_height" not in _doc()
+
+
+def test_versions_are_marked_for_both_fork_lines():
+    # Built from 2.4.2 and 2.5.0 (scripts/merge_settings_schemas.py): a 2.5-only key says so,
+    # and a key 2.5 dropped is still described, with the version that removed it.
+    doc = _doc()
+    assert set(doc["_meta"]["versions"]) == {"2.4.2", "2.5.0"}
+    assert doc["slicing_pipeline_plugin"]["since"] == "2.5.0"
+    assert doc["silent_mode"]["removed_in"] == "2.5.0"
+    assert "since" not in doc["layer_height"] and "removed_in" not in doc["layer_height"]

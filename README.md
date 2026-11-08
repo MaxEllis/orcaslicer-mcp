@@ -23,7 +23,7 @@
 
 ---
 
-OrcaSlicer MCP connects an AI assistant to a real, running OrcaSlicer. It loads your models, picks presets, changes settings, slices, and reads the result back as numbers you can question: which feature takes the time, what a setting actually does, whether a profile asks more of your printer than it can give. Every change shows up in the OrcaSlicer window while you watch, so the slicer stays yours and you learn it as you go.
+OrcaSlicer MCP connects an AI assistant to a real, running OrcaSlicer. It loads your models, picks presets, changes settings, slices, and reads the result back as numbers you can question: which feature takes the time, what a setting actually does, whether a profile asks more of your printer than it can give. Every change shows up in the OrcaSlicer window while you watch, and a panel beside the 3D view lists each one with a way to take it back, so the slicer stays yours and you learn it as you go.
 
 <table>
   <tr>
@@ -37,7 +37,7 @@ OrcaSlicer MCP connects an AI assistant to a real, running OrcaSlicer. It loads 
 
 It comes in two parts:
 
-1. **The OrcaSlicer MCP build** of OrcaSlicer 2.5.0, from the [fork's releases page](https://github.com/MaxEllis/OrcaSlicer/releases/latest). Stock OrcaSlicer has no way for another program to drive it, so this build adds a local API, off until you enable it and bound to your own computer.
+1. **OrcaSlicer, with a way in.** Stock OrcaSlicer has no way for another program to drive it. The **OrcaSlicer MCP build** of OrcaSlicer 2.5.0, from the [fork's releases page](https://github.com/MaxEllis/OrcaSlicer/releases/latest), adds a local API, off until you enable it and bound to your own computer. To try it without replacing your OrcaSlicer, the **Lite plugin** runs on stock OrcaSlicer 2.5 and covers settings and presets: see [Plugin or OrcaSlicer MCP build?](#plugin-or-orcaslicer-mcp-build)
 2. **This package**, `orcaslicer-mcp`: an [MCP](https://modelcontextprotocol.io) server that turns that API into tools your assistant can call.
 
 The package bundles no model. The model comes from your MCP client: if the client uses a hosted model, your conversation goes there as any chat does, while your models, profiles and G-code stay on the computer running OrcaSlicer. With a local model, nothing leaves your network.
@@ -88,6 +88,41 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/), which pr
 
 </details>
 
+## Plugin or OrcaSlicer MCP build?
+
+The Lite plugin is one file that runs inside stock OrcaSlicer 2.5, so you can try orcaslicer-mcp without installing another OrcaSlicer. It can only do what OrcaSlicer's plugin system allows, and that leaves out loading models, slicing and projects.
+
+| | Lite plugin on stock OrcaSlicer 2.5 | OrcaSlicer MCP build |
+|---|---|---|
+| **Settings** for the whole plate | Read and change | Read and change |
+| **Settings** for one object or a band of layers | No | Yes |
+| **Knowing what they mean** | Yes | Yes |
+| **Presets** | Read and switch | Read, switch, edit, save, rename, delete |
+| **Models** | See what is on the plate and check placement | Load, move, rotate, duplicate, arrange, orient |
+| **Slicing** | No: you press Slice yourself | Slice, read time and filament, compare settings |
+| **Seeing the plate** | No | Render and describe it |
+| **Plates** | No | Yes |
+| **Projects** | See the name and whether there is something to save | Save, open, start and browse projects |
+| **The panel** | Settings and preset changes, each with an undo | Every change, each with an undo, plus restore points |
+| **Your printer** | Yes | Yes |
+| **Learning from prints** | Recall past prints | Record each slice and recall it |
+
+22 of the 66 tools work with the plugin, including the 4 printer tools, which talk to the printer rather than to OrcaSlicer. The other 44 answer that they need the OrcaSlicer MCP build, and `get_status` says which one you are connected to, so the assistant can tell you instead of guessing.
+
+**To use the plugin:** subscribe to [OrcaSlicer MCP Lite on OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE) and install it from **File → Plugins** in OrcaSlicer, or download `orcaslicer_mcp_lite.py` from this repository's [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) and in **File → Plugins** choose **Install local plugin** from the arrow beside **Install plugin**. Tick **Activate**: OrcaSlicer asks once for network access to this computer only and for a background thread, and the plugin needs both. Its **Config** tab in the same dialog shows the token: use it as `ORCA_API_TOKEN` in step 3 of the Quickstart. Use one install or the other, not both: each keeps its own token.
+
+## You stay in charge
+
+The OrcaSlicer MCP build has a panel beside the 3D view that lists what the assistant changed, grouped by round of work, with the print time of each slice. Every change has an undo named for what it does (**Revert**, **Rotate back**, **Put back**, **Switch back**), and the restore icon on an older group puts the whole project back to that point, itself undoable. The [fork's README](https://github.com/MaxEllis/OrcaSlicer#the-mcp-panel) shows it.
+
+The assistant also hears about what you do. When you change a setting by hand, move a model, switch a preset, or undo something in the panel, the next tool reply carries a short note, so the assistant works from the project as it is now instead of what it last saw:
+
+```
+Since your last action the user changed: Wall loops 3 → 4 (0.20mm Standard); Moved bracket.stl; Reverted Sparse infill density.
+```
+
+Only the net change is listed (a value you set and set back does not appear), a preset switch or opening a project is one line, and a reply carries at most 8 entries plus a count of the rest. Nothing is added when nothing changed. Needs v2.5.0-mcp.16 or the Lite plugin, which reports settings and presets.
+
 ## What it can do
 
 66 tools, plus three ready-made prompts (`slice-a-model`, `optimize-print-time`, `edit-preset-safely`) and the settings reference as MCP resources.
@@ -96,7 +131,7 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/), which pr
 |---|---|---|
 | **Settings** | Read and change any of OrcaSlicer's settings while it runs, for the plate, one object, or a band of layers. | `get_config` `set_config` `find_config_keys` `set_layer_height` `set_height_range` `set_object_config` |
 | **Knowing what they mean** | Look settings up in OrcaSlicer's own labels and tooltips, and check a profile against your printer's physical limits before printing. | `describe_setting` `search_settings` `compare_settings` `consult` `check_profile_physics` |
-| **Presets** | Switch, edit, save, rename and delete presets. | `list_presets` `select_preset` `get_preset_config` `edit_preset` `save_preset` `rename_preset` `delete_preset` |
+| **Presets** | Switch, edit, save, rename and delete presets, and choose the filament preset of one slot on a multi-filament printer. | `list_presets` `select_preset` `get_preset_config` `edit_preset` `save_preset` `rename_preset` `delete_preset` |
 | **Models** | Load STL, OBJ, 3MF and STEP files, then move, rotate, scale, duplicate, arrange and auto-orient them. | `load_model` `list_objects` `transform_object` `duplicate_object` `delete_object` `arrange_plate` `auto_orient` `check_placement` `diagnose_plate` |
 | **Slicing** | Slice, read time, filament and OrcaSlicer's warnings, split the result by feature, and compare several settings in one go. | `slice_and_wait` `apply_and_slice` `get_slice_breakdown` `compare_slices` `get_slice_warnings` `get_gcode` `save_gcode` |
 | **Seeing the plate** | Get the plate as a picture, or as a short description of how each part stands, where support goes and where the seams sit. | `render_plate` `describe_plate` |
@@ -162,7 +197,7 @@ It recommends a variant only when one beats the rest on time, filament and warni
   | Plates | v2.4.2-mcp.13 or later |
   | CANVAS tray mapping | v2.4.2-mcp.14 or later |
   | Project files | v2.4.2-mcp.15 or later |
-  | OrcaSlicer 2.5.0 | v2.5.0-mcp.16 or later |
+  | OrcaSlicer 2.5.0, the MCP panel, notes about your edits, filament presets per slot | v2.5.0-mcp.16 or later |
 
 ## Security
 
@@ -171,12 +206,13 @@ It recommends a variant only when one beats the rest on time, filament and warni
 - **No deleting or replacing files** unless you tick **Allow deleting and replacing project files** in Preferences (v2.4.2-mcp.15 and later).
 - **Read-only printer access.** The printer tools only make GET requests. They never send G-code, change a temperature, or start or stop a job.
 - **Credentials stay out of replies.** API keys, passwords and the `user:password@` part of a printer address are removed from what the tools return.
+- **Every change can be taken back** in the OrcaSlicer MCP panel, one at a time or by going back to an earlier point.
 
 [docs/security.md](https://github.com/MaxEllis/orcaslicer-mcp/blob/main/docs/security.md) has the full list of protected settings, how to allow specific ones with `ORCA_MCP_ALLOW_KEYS`, and the exact redaction rules.
 
 ## Privacy policy
 
-The server talks to OrcaSlicer's local API at the address you configure, localhost by default, and, when you use the printer tools, to your 3D printer at the address in your OrcaSlicer printer profile (or `ORCA_PRINTER_URL`). It talks to nothing else. It has no backend, so there is no service of ours for anything to reach. Apart from those printer requests, what leaves your machine is whatever your MCP client sends its model: the conversation, plus any settings or file contents you or the assistant put into it. Their terms govern that traffic, and it is the same traffic any other use of that client produces. A local model removes it entirely.
+The server talks to OrcaSlicer's local API at the address you configure, localhost by default, and, when you use the printer tools, to your 3D printer at the address in your OrcaSlicer printer profile (or `ORCA_PRINTER_URL`). It talks to nothing else. It has no backend, so there is no service of ours for anything to reach. Apart from those printer requests, what leaves your machine is whatever your MCP client sends its model: the conversation, plus any settings or file contents you or the assistant put into it. Tool replies can include a short list of what you changed by hand in OrcaSlicer since the assistant's last call (setting names and values, object and preset names), so that joins the conversation too. Their terms govern that traffic, and it is the same traffic any other use of that client produces. A local model removes it entirely.
 
 - **Data collection:** none. The server collects nothing about you or your usage.
 - **Usage and storage:** models, settings, and G-code stay on the computer running OrcaSlicer. They pass through the server in memory while a request runs, and the server writes to disk only what the data-retention entry below lists. The API token authenticates the server to OrcaSlicer, and your MCP client stores it. The printer key, if you set `ORCA_PRINTER_API_KEY`, authenticates the server to the printer and is stored the same way. Printer status, history, and settings come back to your MCP client as tool results, so they join the conversation like any other tool output. The `.mcpb` extension keeps the settings marked sensitive (the OrcaSlicer API token and the printer key) in the operating system's credential store. A password in `ORCA_PRINTER_URL` is stored as an ordinary setting, so prefer `ORCA_PRINTER_API_KEY` where the printer accepts a key.

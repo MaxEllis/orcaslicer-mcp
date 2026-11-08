@@ -677,7 +677,9 @@ async def add_plate(
 
     Use it when parts should print separately: load them, add a plate, move the second
     part across with move_object_to_plate, then select_plate and slice each one. A plate
-    cannot be added while a slice is running (409) or at the build's plate limit (422)."""
+    cannot be added while a slice is running (409) or at the build's plate limit (422).
+    On OrcaSlicer 2.5, the 2nd, 5th and 10th plates widen the plate grid, which clears
+    every plate's slice result, as the toolbar button does: slice again afterwards."""
     try:
         async with _client() as c:
             return await c.create_plate(select)

@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h3 align="center">Ask OrcaSlicer for what you want. See what changed and what it costs. Keep it, or take it back.</h3>
+<h3 align="center">Tell your AI assistant what the print needs. It finds the OrcaSlicer settings that matter, says why, and shows what they cost before you print.</h3>
 
 <p align="center">
   <a href="https://pypi.org/project/orcaslicer-mcp/"><img alt="PyPI" src="https://img.shields.io/pypi/v/orcaslicer-mcp?color=009789"></a>
@@ -13,9 +13,9 @@
   <a href="https://lobehub.com/mcp/maxellis-orcaslicer-mcp"><img alt="MCP Badge" src="https://lobehub.com/badge/mcp/maxellis-orcaslicer-mcp"></a>
 </p>
 
-<p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/story.png" alt="Three steps. 1: you ask 'This takes 2 hours. Can it print faster?' over the sliced model. 2: the panel in OrcaSlicer lists the changes (layer height 0.28 mm, sparse infill 15%, inner wall speed 200 mm/s) and the new slice, 1h 22m, was 2h 06m. 3: you revert the layer height, and the assistant keeps your choice and re-slices: 1h 41m."></p>
+<p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/story.png" alt="Three steps, each showing your assistant app above and OrcaSlicer below. 1: in the assistant app you write that the brackets will hold up a shelf and must not snap, without doubling the print time; OrcaSlicer shows the bracket, estimated 1h 40m. 2: the assistant explains that a bracket's strength is mostly in its walls; in OrcaSlicer wall loops go from 2 to 4, sparse infill from 15% to 25% gyroid, nozzle temperature from 210 to 220 °C, each change listed and undoable. 3: the assistant compares the two slices, 1h 40m and 18 g before, 2h 05m and 23 g stronger: 25 minutes more, not double."></p>
 
-OrcaSlicer MCP lets an AI assistant work your OrcaSlicer: change settings, switch presets, load and slice models, and explain the result. It works in the window you already use, and a panel beside the 3D view lists every change with a way to undo it.
+You talk to the assistant in your usual AI app, in plain words. It makes the changes in OrcaSlicer, in the window you already use: settings, presets, models, slicing. A panel beside the 3D view lists every change it makes, with a way to undo each one.
 
 ## Two ways to run it
 
@@ -24,15 +24,15 @@ OrcaSlicer MCP lets an AI assistant work your OrcaSlicer: change settings, switc
 | **What it is** | OrcaSlicer 2.5 with the assistant's way in built in | An add-on for the OrcaSlicer you already have |
 | **The assistant can** | Change settings and presets, load and arrange models, slice, render the plate, manage plates and projects | Read your setup, change settings, switch presets |
 | **The panel** | Every change with an undo, plus restore points | Setting and preset changes with an undo |
-| **Get it** | [Download](https://github.com/MaxEllis/OrcaSlicer/releases/latest) | [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE) |
+| **Get it** | [Download](https://github.com/MaxEllis/OrcaSlicer/releases/latest) | [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE), or the `.py` file on this repo's [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) |
 
-Not sure? Start with the plugin, and move to the build when you want the assistant to slice. Either way you also need this package, `orcaslicer-mcp`, which connects your assistant app to OrcaSlicer.
+Either way you also need this package, `orcaslicer-mcp`, which connects your assistant app to OrcaSlicer.
 
 ## Get started
 
 **1. Turn on the way in.**
 - **Build:** open **Preferences → Remote API**, tick **Enable Remote API** and copy the token.
-- **Plugin:** subscribe on OrcaCloud, then in OrcaSlicer's **File → Plugins** install it, tick **Activate** and allow the two permissions it asks for. Copy the token from its **Config** tab.
+- **Plugin:** subscribe on OrcaCloud and install it from OrcaSlicer's **File → Plugins**, or there choose **Install local plugin** (the arrow beside **Install plugin**) and pick the downloaded file. Tick **Activate** and allow the two permissions it asks for, then copy the token from its **Config** tab. Use one install or the other: each keeps its own token.
 
 **2. Add orcaslicer-mcp to your assistant app.** Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then add this to the app's MCP settings:
 
@@ -54,14 +54,16 @@ In Claude Desktop, install `orcaslicer-mcp-<version>.mcpb` from the [latest rele
 
 ## What you can ask
 
-- *"Why does this take six hours?"* It splits the time by feature: walls, infill, supports.
-- *"Try 0.2, 0.28 and 0.32 mm layers and compare."* It slices each one and lays time and filament side by side.
-- *"Will this profile work on my printer?"* It checks speeds, temperatures and acceleration against the printer's limits.
-- *"What does Wall generator do?"* It answers from OrcaSlicer's own descriptions of its settings.
-- *"Put each part on its own plate and slice them."*
-- *"Is the print still heating?"* It reads a Klipper or OctoPrint printer, without ever controlling it.
+Goals, in your own words, the way you'd ask a friend who knows OrcaSlicer:
 
-The plugin answers the setting and preset questions. [All 66 tools](docs/tools.md) are listed with examples.
+- *"This lid has to press onto a 40 mm jar. What do I change so it fits first time?"*
+- *"These brackets will hold up a shelf. Make them strong enough without doubling the print time."*
+- *"It's going on a car dashboard. Will PLA survive, and what should I change if I use PETG?"*
+- *"The top of this box looks rough. How do I get it smooth?"*
+- *"Why does this take six hours, and what can I do about it?"*
+- *"Is my print still heating?"* It reads a Klipper or OctoPrint printer, without ever controlling it.
+
+The plugin handles the questions answered by settings and presets. [All 66 tools](docs/tools.md) are listed with examples.
 
 ## You stay in charge
 

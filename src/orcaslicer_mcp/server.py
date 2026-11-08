@@ -1253,9 +1253,11 @@ async def select_preset(
     """Make the named preset the active one for its group (print, filament, or printer).
 
     With `slot` (filament only), only that slot's filament preset changes, like picking it
-    in the sidebar's combo for that slot, and no unsaved edits are discarded. Needs a slicer
-    build that lists 'preset_slot' in get_status capabilities; older builds would ignore the
-    slot and switch the Filament tab instead, so this tool refuses there.
+    in the sidebar's combo for that slot, and no unsaved edits are discarded. On a
+    single-filament printer slot 1 is the Filament tab's preset, so it behaves like the call
+    without `slot` below. Needs a slicer build that lists 'preset_slot' in get_status
+    capabilities; older builds would ignore the slot and switch the Filament tab instead, so
+    this tool refuses there.
 
     Without `slot`: discards unsaved overrides in EVERY preset group, not just the one being switched: a
     filament switch also drops unsaved print and printer edits, including ones made by hand

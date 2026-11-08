@@ -48,6 +48,14 @@ def test_classification():
         assert not guard.is_sensitive(k), k
 
 
+def test_orcaslicer_25_code_and_gcode_keys_are_protected():
+    # Python slicing plugins, the plugins a preset references, and a list of start G-codes.
+    for k in ("slicing_pipeline_plugin", "plugins", "imex_mode_gcodes", "some_future_gcodes"):
+        assert guard.is_sensitive(k), k
+    for k in ("gcode_skip_config_block", "high_precision_gcode", "skip_modified_gcodes", "imex_mode_names"):
+        assert not guard.is_sensitive(k), k
+
+
 def test_printer_agent_and_flashforge_target_are_protected():
     assert guard.is_sensitive("printer_agent")
     assert guard.is_sensitive("flashforge_serial_number")

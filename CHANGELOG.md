@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Security
+- Ready for OrcaSlicer 2.5: the config guard also refuses `slicing_pipeline_plugin` (Python plugins that run at each slicing step), `plugins` (the plugins a preset brings with it) and `*_gcodes` lists of G-code such as `imex_mode_gcodes`. `high_precision_gcode`, a 2.5 on/off setting, stays writable.
+
 ## [0.1.20] - 2026-11-09
 
 ### Added

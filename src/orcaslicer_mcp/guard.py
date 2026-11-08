@@ -5,7 +5,10 @@ The OrcaSlicer MCP build's PUT /api/v1/config accepts any print, filament or pri
 Some of those keys are not slicing settings at all:
 
 - post_process: shell commands OrcaSlicer runs after export (arbitrary code execution).
-- *_gcode templates: raw G-code sent to the printer (on Klipper, macros can reach the host).
+- *_gcode templates: raw G-code sent to the printer (on Klipper, macros can reach the host),
+  and *_gcodes lists of them (imex_mode_gcodes, OrcaSlicer 2.5).
+- slicing_pipeline_plugin / plugins (OrcaSlicer 2.5): Python plugins run at each slicing
+  step, and the plugins a preset brings with it (arbitrary code execution).
 - the physical-printer keys (print_host, printhost_*, host_type, printer_agent, ...): where
   "send to printer" uploads, how it connects, and with which credentials.
 - printer_model / printer_technology: can switch OrcaSlicer onto code paths that run
@@ -49,10 +52,15 @@ PHYSICAL_PRINTER_KEYS = frozenset({
     "printhost_ssl_ignore_revoke",
 })
 
-BLOCKED_EXACT = PHYSICAL_PRINTER_KEYS | {"post_process", "printer_model", "filename_format"}
+# slicing_pipeline_plugin and plugins arrived in OrcaSlicer 2.5: Python plugins that run at each
+# slicing step, and the plugin capabilities a preset references.
+BLOCKED_EXACT = PHYSICAL_PRINTER_KEYS | {"post_process", "printer_model", "filename_format",
+                                         "slicing_pipeline_plugin", "plugins"}
 
 # Keys ending in _gcode that are plain toggles, not G-code templates.
-_GCODE_SUFFIX_EXEMPT = frozenset({"emit_machine_limits_to_gcode"})
+# high_precision_gcode is a 2.5 toggle; skip_modified_gcodes is a command-line switch.
+_GCODE_SUFFIX_EXEMPT = frozenset({"emit_machine_limits_to_gcode", "high_precision_gcode",
+                                  "skip_modified_gcodes"})
 
 # GET /config never reports these (PresetBundle::full_config_secure erases them; the G-code
 # footer bans the same list), so a write can never be shown to leave them unchanged.
@@ -80,7 +88,7 @@ class BlockedKey(ApiError):
         super().__init__(
             "blocked_by_local_policy: the MCP refuses to write "
             + ", ".join(self.keys)
-            + " (post-processing scripts, custom G-code, printer connection settings and printer "
+            + " (post-processing scripts, slicing plugins, custom G-code, printer connection settings and printer "
               "model can run code or drive the printer). Ask the user to change these in the "
               "OrcaSlicer GUI, or to allow them explicitly via ORCA_MCP_ALLOW_KEYS.")
 
@@ -117,7 +125,8 @@ def allow_override_warnings() -> list[str]:
 def is_sensitive(key: str) -> bool:
     if key in BLOCKED_EXACT or key.startswith("printhost_"):
         return True
-    return key.endswith("_gcode") and key not in _GCODE_SUFFIX_EXEMPT
+    # *_gcodes: lists of templates, e.g. imex_mode_gcodes (2.5).
+    return key.endswith(("_gcode", "_gcodes")) and key not in _GCODE_SUFFIX_EXEMPT
 
 
 def sensitive_keys(changes: dict) -> list[str]:

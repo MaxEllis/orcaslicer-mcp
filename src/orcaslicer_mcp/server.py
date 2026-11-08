@@ -1244,10 +1244,18 @@ async def select_preset(
     name: Annotated[str, Field(description=(
         "Exact name of an existing preset in that group, as returned by list_presets "
         "(e.g. '0.20mm Standard'). Unknown names are rejected."))],
+    slot: Annotated[int | None, Field(description=(
+        "Filament only: the 1-based filament slot (extruder/tool, e.g. 1-4 on a 4-head "
+        "toolchanger) to set. Omit to switch the preset open in the Filament tab."))] = None,
 ) -> dict:
     """Make the named preset the active one for its group (print, filament, or printer).
 
-    Discards unsaved overrides in EVERY preset group, not just the one being switched: a
+    With `slot` (filament only), only that slot's filament preset changes, like picking it
+    in the sidebar's combo for that slot, and no unsaved edits are discarded. Needs a slicer
+    build that lists 'preset_slot' in get_status capabilities; older builds would ignore the
+    slot and switch the Filament tab instead, so this tool refuses there.
+
+    Without `slot`: discards unsaved overrides in EVERY preset group, not just the one being switched: a
     filament switch also drops unsaved print and printer edits, including ones made by hand
     in the OrcaSlicer window. That is deliberate (OrcaSlicer consults the other groups when
     switching, and any unsaved one would open a modal dialog nothing can dismiss remotely),
@@ -1257,9 +1265,20 @@ async def select_preset(
     This also makes it the canonical way to reset dirty config. It leaves the last slice
     invalid, so re-slice afterwards. Use list_presets for valid names. Because of this, make
     filament selections and edits before print-group edits (docs/order-of-operations.md)."""
+    if slot is not None:
+        if type != "filament":
+            return {"error": "slot applies to type 'filament' only"}
+        if slot < 1:
+            return {"error": "slot is 1-based; use slot=1 for the first filament"}
     try:
         async with _client() as c:
-            return await c.select_preset(type, name)
+            if slot is None:
+                return await c.select_preset(type, name)
+            caps = (await c.get_status()).get("capabilities") or []
+            if "preset_slot" not in caps:
+                return {"error": "not available on this OrcaSlicer build (needs per-slot "
+                                 "filament select, capability 'preset_slot')"}
+            return await c.select_preset(type, name, slot - 1)
     except ApiError as e:
         return _m4a_err(e)
 

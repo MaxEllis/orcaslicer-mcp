@@ -247,8 +247,11 @@ class OrcaClient:
         return await self._request("POST", "/api/v1/model", json={"path": path},
                                    timeout=130.0)
 
-    async def select_preset(self, ptype: str, name: str) -> dict:
-        return await self._request("PUT", "/api/v1/preset", json={"type": ptype, "name": name})
+    async def select_preset(self, ptype: str, name: str, slot: int | None = None) -> dict:
+        body = {"type": ptype, "name": name}
+        if slot is not None:
+            body["slot"] = slot  # 0-based filament slot (fork build with per-slot select)
+        return await self._request("PUT", "/api/v1/preset", json=body)
 
     async def save_preset(self, ptype: str, name: str, detach: bool = False) -> dict:
         return await self._request("POST", "/api/v1/preset/save",

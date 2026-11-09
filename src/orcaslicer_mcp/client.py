@@ -128,6 +128,8 @@ class OrcaClient:
             raise UiTimeout(timeout_message(self._effective_timeout(timeout))) from e
         except httpx.TransportError as e:
             raise NotReachable(unreachable_message(self._cfg.base_url, e)) from e
+        # Any answer from this address ends a skip of panel notes begun when one timed out.
+        _NOTE_STUCK.pop(self._cfg.base_url, None)
         if resp.status_code >= 400:
             try:
                 body = resp.json()
@@ -257,7 +259,7 @@ class OrcaClient:
                          plugin=plugin)
 
     async def _live_values(self, keys: list[str]) -> dict:
-        return await self.get_config(keys)
+        return await self.get_config(keys, timeout=_NOTE_TIMEOUT_S)
 
     async def _guard_config(self, changes: dict) -> None:
         """Refuse writes that would change a sensitive key (see guard.py). Writing a key
@@ -279,7 +281,7 @@ class OrcaClient:
         check_placeholders(changes)
 
         async def stored_values(keys):
-            cfg = (await self._request("POST", "/api/v1/preset/config",
+            cfg = (await self._request("POST", "/api/v1/preset/config", timeout=_NOTE_TIMEOUT_S,
                                        json={"type": ptype, "name": name})).get("config", {})
             return {k: cfg[k] for k in keys if k in cfg}
         await self._check_ranges(changes, stored_values)
@@ -400,12 +402,12 @@ class OrcaClient:
         return await self._request("PUT", "/api/v1/printer/slot_mapping", json={"mapping": mapping},
                                    timeout=self._slot_timeout())
 
-    async def get_config(self, keys: list[str] | None) -> dict:
+    async def get_config(self, keys: list[str] | None, timeout: float | None = None) -> dict:
         # The fork's /config `keys` filter splits the RAW query string on ',' without
         # URL-decoding first, so httpx's percent-encoded comma (%2C) matches nothing and
         # returns {}. Rather than depend on that fragile path, fetch the full config
         # (~20KB on LAN) and filter locally — parser-independent. See test_client_config.
-        data = await self._request("GET", "/api/v1/config")
+        data = await self._request("GET", "/api/v1/config", timeout=timeout)
         cfg = data.get("config", {})
         if keys:
             return {k: cfg[k] for k in keys if k in cfg}

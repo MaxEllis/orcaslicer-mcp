@@ -95,7 +95,13 @@ async def test_restore_failure_changes_the_note():
     note = respx.post(NOTE).mock(return_value=httpx.Response(200, json={}))
     out = await srv.compare_slices(VARIANTS[:2])
     assert out["restored"] is False
-    assert "may not be back" in json.loads(note.calls.last.request.content)["text"]
+    bodies = [json.loads(c.request.content) for c in note.calls]
+    assert bodies[0]["kind"] == "slice" and "may not be back" in bodies[0]["text"]
+    # R45: the reply and a refused row name what wasn't put back.
+    assert out["restore_failed"]["keys"] == ["layer_height"]
+    assert out["headline"].startswith("The comparison couldn't put back Layer height (layer_height)")
+    assert bodies[1]["kind"] == "refused"
+    assert bodies[1]["text"] == "Comparison couldn't put back: Layer height"
 
 
 @respx.mock

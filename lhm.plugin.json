@@ -107,7 +107,7 @@
     },
     {
       "name": "compare_slices",
-      "description": "Slice under 2-8 named combinations of settings and compare time, filament and warnings with ready-made deltas, putting the settings back after."
+      "description": "Slice under 2-8 named combinations of settings and compare time, filament and warnings with ready-made deltas and a verdict, putting the settings back after; compare_settings only sweeps one setting."
     },
     {
       "name": "list_objects",

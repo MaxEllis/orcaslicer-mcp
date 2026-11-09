@@ -91,3 +91,11 @@ def plugin_refusal(tool: str | None) -> dict:
             f"(stock OrcaSlicer). By hand: {by_hand}. For the assistant to do this itself, the user "
             f"would need the OrcaSlicer MCP build instead: {BUILD_URL}")
     return {"error": text, "action": tool, "by_hand": by_hand[0].upper() + by_hand[1:] + "."}
+
+
+def plugin_note(tool: str | None) -> tuple[str, str, str]:
+    """The refused row for OrcaSlicer's MCP panel: (text, value, detail)."""
+    action, by_hand = _ACTIONS.get(tool or "", ("That", "ask the user to do it in the OrcaSlicer window"))
+    hand = by_hand[0].upper() + by_hand[1:]
+    return (action, "Not in the plugin",
+            f"The OrcaSlicer MCP plugin can't do this. By hand: {hand}. The OrcaSlicer MCP build can do it for the assistant.")

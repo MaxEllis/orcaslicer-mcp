@@ -11,10 +11,7 @@ from contextlib import closing
 from pathlib import Path
 
 SCHEMA_VERSION = 2
-# The original shared store. Still used whenever it exists, so nothing moves on a machine that
-# already has one (klipper-mcp's sandboxed recorder may only write there).
-LEGACY_DIR = Path.home() / "projects" / "_shared" / "print-outcomes"
-# Everyone else's store, created on first write.
+# The default store, created on first write. PRINT_OUTCOMES_DIR moves it.
 DEFAULT_DIR = Path.home() / ".orcaslicer-mcp" / "outcomes"
 # A job may join a slice row saved up to this long after the job started: the slicer machine and
 # the printer do not share a clock.
@@ -60,8 +57,6 @@ def store_dir() -> Path:
     env = os.environ.get("PRINT_OUTCOMES_DIR", "").strip()
     if env:
         return Path(env)
-    if LEGACY_DIR.exists():
-        return LEGACY_DIR
     return DEFAULT_DIR
 
 

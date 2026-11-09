@@ -2169,10 +2169,9 @@ def _unique_gcode_path(out_dir: Path, fname: str) -> tuple[Path, str]:
 
 def _gcode_base_dir() -> Path:
     """Where save_gcode writes the G-code file: PRINT_OUTCOMES_DIR if set (whitespace counts as unset),
-    else the shared print-outcomes folder if it already exists (klipper-mcp's start_print finds files
-    there), else ~/.orcaslicer-mcp (the folder `remember` already owns). The outcome store itself lives
+    else ~/.orcaslicer-mcp (the folder `remember` already owns). The outcome store itself lives
     at outcomes.store_dir(), which defaults to ~/.orcaslicer-mcp/outcomes."""
-    if os.environ.get("PRINT_OUTCOMES_DIR", "").strip() or _outcomes.LEGACY_DIR.exists():
+    if os.environ.get("PRINT_OUTCOMES_DIR", "").strip():
         return _outcomes.store_dir()
     return Path.home() / ".orcaslicer-mcp"
 
@@ -2187,9 +2186,8 @@ async def save_gcode(filename: str | None = None) -> dict:
     the finished job by filename, so the real result joins back to these settings. Returns the
     saved path; hand it to klipper-mcp's start_print. Default filename:
     <object>_<timestamp>.gcode. Never overwrites an existing file: a name collision gets a -2,
-    -3, ... suffix. Writes into a gcode folder under PRINT_OUTCOMES_DIR if set, else under the
-    shared print-outcomes folder (~/projects/_shared/print-outcomes) if it already exists, else
-    under ~/.orcaslicer-mcp; the folder is created if missing. If the store write fails, the
+    -3, ... suffix. Writes into a gcode folder under PRINT_OUTCOMES_DIR if set, else under
+    ~/.orcaslicer-mcp; the folder is created if missing. If the store write fails, the
     file is still saved and outcome_recorded is False.
     """
     try:

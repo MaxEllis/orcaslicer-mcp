@@ -3,10 +3,12 @@ import asyncio
 import contextvars
 import json
 import math
+import time
 import httpx
 import websockets
 from .config import Config
-from .errors import error_from_status, NotReachable, ApiError, UiTimeout, OutOfRange
+from .errors import error_from_status, NotReachable, NotFound, ApiError, UiTimeout, OutOfRange
+from . import settings_schema
 from .ranges import out_of_range
 from .guard import (BlockedKey, sensitive_keys, changed_keys, check_placeholders,
                     redact_secrets)
@@ -57,11 +59,27 @@ def mark_reached() -> None:
         flag[0] = True
 
 
-def check_ranges(changes: dict) -> None:
-    """Refuse values outside their setting's min/max before anything is sent (ranges.py)."""
-    found = out_of_range(changes or {})
-    if found:
-        raise OutOfRange(found)
+NOTE_PATH = "/api/v1/activity/note"
+_NOTE_TIMEOUT_S = 5.0
+_NOTE_RETRY_S = 300.0  # an address that had no note route is asked again after this
+_NOTE_UNSUPPORTED: dict[str, float] = {}
+
+
+def _label(key: str) -> str:
+    rec = settings_schema.describe(key) or {}
+    return rec.get("full_label") or rec.get("label") or key
+
+
+def refused_keys_note(keys: list[str]) -> str:
+    names = ", ".join(_label(k) for k in sorted(keys))
+    return f"Refused: {names} \u00b7 scripts, G-code and printer connection are locked"
+
+
+def refused_range_note(found: dict[str, dict]) -> str:
+    from .ranges import range_text
+    parts = [f"{_label(k)} {r['value']} (allowed: {range_text(k, r['min'], r['max'], r['unit'])})"
+             for k, r in found.items()]
+    return "Refused: " + "; ".join(parts)
 
 
 class OrcaClient:
@@ -152,25 +170,65 @@ class OrcaClient:
     async def duplicate_object(self, obj_id: int) -> dict:
         return await self._request("POST", f"/api/v1/objects/{obj_id}/duplicate")
 
+    # --- Panel notes and connector-side refusals ---------------------------------------
+
+    async def post_note(self, kind: str, text: str) -> bool:
+        """Add one row to OrcaSlicer's MCP panel (POST /api/v1/activity/note). Builds without
+        the route answer 404; that, and any other failure, is silent: a note never decides
+        what a tool reports. A trial's header is never sent with it."""
+        url = self._cfg.base_url
+        at = _NOTE_UNSUPPORTED.get(url)
+        if at is not None and time.monotonic() - at < _NOTE_RETRY_S:
+            return False
+        token = TRIAL.set(False)
+        try:
+            await self._request("POST", NOTE_PATH, json={"kind": kind, "text": text},
+                                _count=False, timeout=_NOTE_TIMEOUT_S)
+            _NOTE_UNSUPPORTED.pop(url, None)
+            return True
+        except NotFound:
+            _NOTE_UNSUPPORTED[url] = time.monotonic()
+            return False
+        except Exception:  # noqa: BLE001 - a note is never worth failing a tool over
+            return False
+        finally:
+            TRIAL.reset(token)
+
+    async def _check_ranges(self, changes: dict) -> None:
+        found = out_of_range(changes or {})
+        if found:
+            await self.post_note("refused", refused_range_note(found))
+            raise OutOfRange(found)
+
+    async def _refuse_keys(self, keys: list[str]) -> None:
+        box_on = None
+        try:
+            box_on = (await self._request("GET", "/api/v1/status", _count=False)).get(
+                "sensitive_keys_allowed")
+        except Exception:  # noqa: BLE001 - only refines the wording of the refusal
+            pass
+        await self.post_note("refused", refused_keys_note(keys))
+        raise BlockedKey(keys, preferences_box_on=box_on if isinstance(box_on, bool) else None)
+
     async def _guard_config(self, changes: dict) -> None:
         """Refuse writes that would change a sensitive key (see guard.py). Writing a key
         back to its current value is allowed."""
         check_placeholders(changes)
-        check_ranges(changes)
+        await self._check_ranges(changes)
         hits = sensitive_keys(changes or {})
         if not hits:
             return
         current = await self.get_config(hits)
         changed = changed_keys(changes, hits, current)
         if changed:
-            raise BlockedKey(changed)
+            await self._refuse_keys(changed)
 
     async def guard_preset_edit(self, ptype: str, name: str, changes: dict) -> None:
         """The same refusal for edit_preset, judged against the named preset's stored values
         and BEFORE anything is selected: selecting a preset discards the user's unsaved
         overrides, so a refusal must not come after it."""
         check_placeholders(changes)
-        check_ranges(changes)
+        await self._check_ranges(changes)
         hits = sensitive_keys(changes or {})
         if not hits:
             return
@@ -178,14 +236,14 @@ class OrcaClient:
                                       json={"type": ptype, "name": name})).get("config", {})
         changed = changed_keys(changes, hits, stored)
         if changed:
-            raise BlockedKey(changed)
+            await self._refuse_keys(changed)
 
     async def set_object_config(self, obj_id: int, changes: dict) -> dict:
         check_placeholders(changes)
-        check_ranges(changes)
+        await self._check_ranges(changes)
         hits = sensitive_keys(changes or {})
         if hits:
-            raise BlockedKey(hits)
+            await self._refuse_keys(hits)
         return await self._request("PUT", f"/api/v1/objects/{obj_id}/config", json=changes)
 
     async def transform_object(self, obj_id: int, translate=None, rotate=None, scale=None) -> dict:

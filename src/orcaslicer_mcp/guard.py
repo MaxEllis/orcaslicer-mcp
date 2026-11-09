@@ -82,15 +82,37 @@ REDACTED = "<redacted>"
 _URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 
 
+# Where a user turns on the connector's own allowed keys. The .mcpb manifest exposes
+# ORCA_MCP_ALLOW_KEYS as the user_config field titled "Allow sensitive config keys".
+ALLOW_KEYS_WHERE = (
+    "In Claude Desktop: Settings > Extensions > OrcaSlicer MCP > Configure, field 'Allow sensitive "
+    "config keys'. In other AI apps: an environment variable ORCA_MCP_ALLOW_KEYS in the "
+    "orcaslicer-mcp entry of the app's MCP configuration (the env block). Restart the app "
+    "after changing it.")
+PREFERENCES_BOX = "Allow script, G-code and connection edits"
+
+
 class BlockedKey(ApiError):
-    def __init__(self, keys: list[str]):
+    """A write this connector refuses on its own (layer one of two). The text is written for the
+    assistant to relay: the simplest route first, then both switches in plain words."""
+
+    def __init__(self, keys: list[str], preferences_box_on: bool | None = None):
         self.keys = sorted(keys)
+        self.preferences_box_on = preferences_box_on
+        listed = ", ".join(self.keys)
+        if preferences_box_on:
+            box = (f"(1) OrcaSlicer: Preferences > Remote API > '{PREFERENCES_BOX}' (already on); ")
+        else:
+            box = f"(1) OrcaSlicer: Preferences > Remote API > '{PREFERENCES_BOX}'; "
         super().__init__(
-            "blocked_by_local_policy: the MCP refuses to write "
-            + ", ".join(self.keys)
-            + " (post-processing scripts, slicing plugins, custom G-code, printer connection settings and printer "
-              "model can run code or drive the printer). Ask the user to change these in the "
-              "OrcaSlicer GUI, or to allow them explicitly via ORCA_MCP_ALLOW_KEYS.")
+            "blocked_by_local_policy: this connector refuses to change " + listed
+            + ". Scripts, custom G-code, slicing plugins, printer connection settings and the "
+              "printer model can run code or drive the printer, so they are locked by default. "
+              "Simplest: ask the user to make this change themselves in the OrcaSlicer window. "
+              "For the assistant to do it, the user has to turn on TWO separate switches: "
+            + box
+            + "(2) this connector's allowed keys, ORCA_MCP_ALLOW_KEYS, listing " + listed
+            + " (comma separated; wildcards such as *_gcode work). " + ALLOW_KEYS_WHERE)
 
 
 class RedactedValue(ApiError):

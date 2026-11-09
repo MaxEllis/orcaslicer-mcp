@@ -13,6 +13,8 @@
   <a href="https://lobehub.com/mcp/maxellis-orcaslicer-mcp"><img alt="MCP Badge" src="https://lobehub.com/badge/mcp/maxellis-orcaslicer-mcp"></a>
 </p>
 
+OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in plain words in the AI app, the changes happen in the OrcaSlicer window you already use, and a panel beside the 3D view lists each one with a way to undo it.
+
 **1. Say what the print needs**
 
 <p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/step1.png" alt="Your AI app: you write that you designed these brackets, want them as strong as possible, and ask to see the changes it would make. An arrow leads to OrcaSlicer, where the bracket stands on the plate as designed."></p>
@@ -26,8 +28,6 @@
 <p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/step3.png" alt="Your AI app: the assistant compares OrcaSlicer's two slices, 2h 57m and 33.7 g as designed against 2h 44m and 46.8 g stronger, and notes that lying flat saves 22 minutes, more than the extra walls cost. An arrow leads to OrcaSlicer's preview of the bracket sliced on its side."></p>
 
 <p align="center"><sub>Shown with the OrcaSlicer MCP build. The plugin does the settings part.</sub></p>
-
-OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in plain words in the AI app, the changes happen in the OrcaSlicer window you already use, and a panel beside the 3D view lists each one with a way to undo it.
 
 ## What you need
 

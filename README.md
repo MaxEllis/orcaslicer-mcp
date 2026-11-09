@@ -86,7 +86,7 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
 
 ## You stay in charge
 
-- **Every change shows in the OrcaSlicer MCP panel.** Undo any one there, or put the project back to an earlier point (build only). OrcaSlicer's own Ctrl+Z (⌘Z on a Mac) undoes model edits, not settings, so use the panel to take a setting back. Closed the panel? **View → OrcaSlicer MCP panel** brings it back.
+- **Every change shows in the OrcaSlicer MCP panel.** Undo any one there, or put the project back to an earlier point (build only). OrcaSlicer's own Ctrl+Z (⌘Z on a Mac) undoes model edits, not settings, so use the panel to take a setting back. Closed the panel on the build? **View → OrcaSlicer MCP panel** brings it back.
 - **It knows what you changed.** When you edit something yourself, the assistant is told with its next reply, so it doesn't undo your work.
 - **It stays on your computer.** OrcaSlicer only accepts connections from this computer, and each one needs the token. [Security details](docs/security.md)
 - **Scripts and G-code stay locked.** The assistant can't touch scripts, custom G-code or printer connections. With the plugin it never can. With the build, allowing it takes two switches: tick **Allow script, G-code and connection edits** in **Preferences → Remote API**, and list those settings in the connector's allowed keys in your AI app (`ORCA_MCP_ALLOW_KEYS`, which Claude Desktop calls **Allow sensitive config keys**).

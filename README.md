@@ -13,7 +13,12 @@
   <a href="https://lobehub.com/mcp/maxellis-orcaslicer-mcp"><img alt="MCP Badge" src="https://lobehub.com/badge/mcp/maxellis-orcaslicer-mcp"></a>
 </p>
 
-<p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/story.png" alt="Three steps: a chat in your AI app above, OrcaSlicer below. 1: you write that you designed these brackets, want them as strong as possible, and ask it to show you the changes it would make; OrcaSlicer shows the bracket standing. 2: the assistant makes three changes and says why: on its side, because standing up the layers run across the arm that takes the load; 7 walls instead of 4, which makes the arms solid; 215 °C instead of 200 so the layers fuse better. OrcaSlicer's MCP panel lists each change with Rotate back or Revert. 3: OrcaSlicer's slices compared: 2h 57m and 33.7 g as designed, 2h 44m and 46.8 g stronger; lying flat saves 22 minutes, more than the extra walls cost."></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/story-dark.png">
+    <img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/story-light.png" alt="Three steps: a chat in your AI app above, OrcaSlicer below. 1: you write that you designed these brackets, want them as strong as possible, and ask it to show you the changes it would make; OrcaSlicer shows the bracket standing. 2: the assistant makes three changes and says why: on its side, because standing up the layers run across the arm that takes the load; 7 walls instead of 4, which makes the arms solid; 215 °C instead of 200 so the layers fuse better. OrcaSlicer's MCP panel lists each change with Rotate back or Revert. 3: OrcaSlicer's slices compared: 2h 57m and 33.7 g as designed, 2h 44m and 46.8 g stronger; lying flat saves 22 minutes, more than the extra walls cost.">
+  </picture>
+</p>
 
 <p align="center"><sub>Shown with the OrcaSlicer MCP build. The plugin does the settings part.</sub></p>
 

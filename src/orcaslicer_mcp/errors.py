@@ -120,7 +120,9 @@ def error_from_status(status: int, body: dict) -> ApiError:
 def _error_from_status(status: int, body: dict) -> ApiError:
     msg = body.get("error") or body.get("detail") or f"HTTP {status}"
     if status == 401:
-        return Unauthorized("unauthorized (check ORCA_API_TOKEN)")
+        return Unauthorized("unauthorized: OrcaSlicer refused the token. Ask the user to copy it again "
+                            "from Preferences > Remote API (or the OrcaSlicer MCP plugin's Config tab) "
+                            "into this connector's ORCA_API_TOKEN setting.")
     if status == 404:
         # The fork's dispatch fallback answers {"error":"not_found"} (or nothing) for a
         # route that doesn't exist; resource-level 404s carry a specific token such as
@@ -145,7 +147,8 @@ def _error_from_status(status: int, body: dict) -> ApiError:
             return Validation(_invalid_values_message(errors), errors)
         return Validation(msg, errors)
     if status == 504:
-        return UiTimeout("OrcaSlicer GUI did not respond in time; retry")
+        return UiTimeout("ui_timeout: OrcaSlicer's window didn't answer in time; a dialog may be open "
+                         "in it, ask the user to look, then try again.")
     # The plugin answers 503 with a reason the user can act on ("paused": its panel was closed).
     if status == 503 and body.get("error") and body.get("detail"):
         return ServerError(f"{body['error']}: {body['detail']}")

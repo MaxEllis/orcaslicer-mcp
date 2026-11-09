@@ -17,6 +17,40 @@ from .guard import (BlockedKey, sensitive_keys, changed_keys, check_placeholders
 REACHED: contextvars.ContextVar = contextvars.ContextVar("orca_reached", default=None)
 
 
+# Set while compare_slices (or compare_settings) tries variants: every request then carries
+# X-Orca-Mcp-Trial: 1, so OrcaSlicer's MCP panel records none of the trial writes and slices.
+TRIAL: contextvars.ContextVar = contextvars.ContextVar("orca_trial", default=False)
+TRIAL_HEADER = "X-Orca-Mcp-Trial"
+
+# Which OrcaSlicer answered at each address, once /status has been read: "build" (the
+# OrcaSlicer MCP build) or "plugin" (the OrcaSlicer MCP plugin on stock OrcaSlicer).
+_BACKENDS: dict[str, str] = {}
+
+
+def known_backend(base_url: str) -> str | None:
+    return _BACKENDS.get(base_url)
+
+
+def unreachable_message(base_url: str, e: Exception | None = None) -> str:
+    why = (str(e) if e is not None else "") or (type(e).__name__ if e is not None else "")
+    backend = _BACKENDS.get(base_url)
+    if backend == "build":
+        ask = "Is OrcaSlicer open, with Preferences > Remote API turned on?"
+    elif backend == "plugin":
+        ask = "Is OrcaSlicer open, with the OrcaSlicer MCP plugin turned on?"
+    else:
+        ask = ("Is OrcaSlicer open, with Preferences > Remote API turned on? With the OrcaSlicer "
+               "MCP plugin on stock OrcaSlicer instead: is the plugin turned on?")
+    return (f"not_reachable: OrcaSlicer isn't answering at {base_url}"
+            + (f" ({why})" if why else "") + f". {ask} Ask the user to check.")
+
+
+def timeout_message(seconds: float | None = None) -> str:
+    within = f" within {seconds:g} s" if seconds else " in time"
+    return (f"ui_timeout: OrcaSlicer didn't answer{within}; a dialog may be open in its window, "
+            "ask the user to look.")
+
+
 def mark_reached() -> None:
     flag = REACHED.get()
     if flag is not None:
@@ -45,25 +79,43 @@ class OrcaClient:
     async def __aexit__(self, *exc) -> None:
         await self._http.aclose()
 
-    async def _request(self, method: str, path: str, *, json=None, params=None,
-                       timeout: float | None = None, _count: bool = True) -> dict:
-        if _count:
-            mark_reached()
+    def _effective_timeout(self, timeout: float | None) -> float:
+        return float(timeout) if timeout is not None else float(self._cfg.timeout)
+
+    async def _send(self, method: str, path: str, *, json=None, params=None,
+                    timeout: float | None = None, headers: dict | None = None) -> httpx.Response:
+        """One request with the transport failures turned into errors an assistant can act on.
+        A trial in progress (TRIAL, compare_slices) marks every request it sends."""
+        hdrs = dict(headers or {})
+        if TRIAL.get():
+            hdrs[TRIAL_HEADER] = "1"
         try:
             resp = await self._http.request(
-                method, path, json=json, params=params,
+                method, path, json=json, params=params, headers=hdrs or None,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT)
         except httpx.TimeoutException as e:
-            raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
+            raise UiTimeout(timeout_message(self._effective_timeout(timeout))) from e
         except httpx.TransportError as e:
-            raise NotReachable(f"OrcaSlicer not reachable at {self._cfg.base_url}: {e}") from e
+            raise NotReachable(unreachable_message(self._cfg.base_url, e)) from e
         if resp.status_code >= 400:
             try:
                 body = resp.json()
             except Exception:
                 body = {}
             raise error_from_status(resp.status_code, body)
-        return resp.json()
+        return resp
+
+    async def _request(self, method: str, path: str, *, json=None, params=None,
+                       timeout: float | None = None, _count: bool = True,
+                       headers: dict | None = None) -> dict:
+        if _count:
+            mark_reached()
+        resp = await self._send(method, path, json=json, params=params, timeout=timeout,
+                                headers=headers)
+        data = resp.json()
+        if path == "/api/v1/status" and isinstance(data, dict):
+            _BACKENDS[self._cfg.base_url] = "plugin" if data.get("backend") == "plugin" else "build"
+        return data
 
     async def get_status(self) -> dict:
         data = await self._request("GET", "/api/v1/status")
@@ -307,20 +359,8 @@ class OrcaClient:
         return await self._request("PUT", f"/api/v1/objects/{obj_id}/height_range", json=body)
 
     async def get_gcode(self) -> bytes:
-        try:
-            mark_reached()
-            resp = await self._http.get("/api/v1/gcode")
-        except httpx.TimeoutException as e:
-            raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
-        except httpx.TransportError as e:
-            raise NotReachable(f"OrcaSlicer not reachable at {self._cfg.base_url}: {e}") from e
-        if resp.status_code >= 400:
-            try:
-                body = resp.json()
-            except Exception:
-                body = {}
-            raise error_from_status(resp.status_code, body)
-        return resp.content
+        mark_reached()
+        return (await self._send("GET", "/api/v1/gcode")).content
 
     async def get_plate_render(self, view: str = "editor", angle: str = "iso",
                                width: int = 800, height: int = 600,
@@ -329,20 +369,8 @@ class OrcaClient:
             "view": view, "angle": angle, "width": width, "height": height}
         if frame is not None:
             params["frame"] = frame
-        try:
-            mark_reached()
-            resp = await self._http.get("/api/v1/plate/render", params=params)
-        except httpx.TimeoutException as e:
-            raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
-        except httpx.TransportError as e:
-            raise NotReachable(f"OrcaSlicer not reachable at {self._cfg.base_url}: {e}") from e
-        if resp.status_code >= 400:
-            try:
-                body = resp.json()
-            except Exception:
-                body = {}
-            raise error_from_status(resp.status_code, body)
-        return resp.content
+        mark_reached()
+        return (await self._send("GET", "/api/v1/plate/render", params=params)).content
 
     def _ws_url(self) -> str:
         base = self._cfg.base_url

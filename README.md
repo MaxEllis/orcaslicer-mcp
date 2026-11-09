@@ -54,7 +54,7 @@ OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in pla
 | **Updates** | Offered by the build | Automatic from OrcaCloud |
 | **Get it** | [Download](https://github.com/MaxEllis/OrcaSlicer/releases/latest) | [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE) or the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) |
 
-The trade-off: the build can do everything but replaces your OrcaSlicer. The plugin keeps your OrcaSlicer but only works with settings and presets. To run the build next to stock OrcaSlicer, use its portable Windows zip or Linux AppImage. A plugin installed from a downloaded file doesn't update itself; your assistant tells you when a newer one is out.
+The trade-off: the build can do everything but replaces your OrcaSlicer. The plugin keeps your OrcaSlicer but only works with settings and presets. To run the build next to stock OrcaSlicer, use its portable Windows zip or Linux AppImage. A plugin installed from a downloaded file doesn't update itself; your assistant tells you when a newer one is out. Install the newer file the same way; OrcaSlicer then turns the plugin off and asks for its permissions again, so click **Yes** and tick **Activate** again.
 
 ## Get started
 

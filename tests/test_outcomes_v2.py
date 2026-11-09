@@ -38,20 +38,10 @@ def _columns(dirpath):
 
 def test_store_dir_prefers_env(monkeypatch, tmp_path):
     monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path / "env"))
-    (tmp_path / "legacy").mkdir()
-    monkeypatch.setattr(oc, "LEGACY_DIR", tmp_path / "legacy")
     assert oc.store_dir() == tmp_path / "env"
 
 
-def test_store_dir_keeps_an_existing_legacy_store(monkeypatch, tmp_path):
-    (tmp_path / "legacy").mkdir()
-    monkeypatch.setattr(oc, "LEGACY_DIR", tmp_path / "legacy")
-    monkeypatch.setattr(oc, "DEFAULT_DIR", tmp_path / "default")
-    assert oc.store_dir() == tmp_path / "legacy"
-
-
 def test_store_dir_falls_back_to_the_public_default(monkeypatch, tmp_path):
-    monkeypatch.setattr(oc, "LEGACY_DIR", tmp_path / "absent")
     monkeypatch.setattr(oc, "DEFAULT_DIR", tmp_path / "default")
     assert oc.store_dir() == tmp_path / "default"
     oc.record_outcome(JOB, "test-printer")
@@ -128,7 +118,6 @@ def test_an_old_job_does_not_join_a_newer_slice(monkeypatch, tmp_path):
 
 def test_whitespace_store_env_counts_as_unset(monkeypatch, tmp_path):
     monkeypatch.setenv("PRINT_OUTCOMES_DIR", "   ")
-    monkeypatch.setattr(oc, "LEGACY_DIR", tmp_path / "absent")
     monkeypatch.setattr(oc, "DEFAULT_DIR", tmp_path / "default")
     assert oc.store_dir() == tmp_path / "default"
 

@@ -10,6 +10,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 - `select_preset` takes an optional 1-based `slot` for a filament preset, to set the filament of one extruder or tool on a multi-filament printer without touching the others or discarding unsaved edits. It needs an OrcaSlicer MCP build that lists `preset_slot` (v2.5.0-mcp.16 and later) and refuses on older ones.
 
+### Changed
+- The outcome store and the `save_gcode` G-code folder no longer pick up a shared folder under `~/projects` when one exists. They use `PRINT_OUTCOMES_DIR` when it is set, otherwise `~/.orcaslicer-mcp/outcomes/` (store) and `~/.orcaslicer-mcp/` (G-code). To keep an existing store in another folder, set `PRINT_OUTCOMES_DIR` to it, for the klipper-mcp recorder too.
+
 ### Security
 - Ready for OrcaSlicer 2.5: the config guard also refuses `slicing_pipeline_plugin` (Python plugins that run at each slicing step), `plugins` (the plugins a preset brings with it) and `*_gcodes` lists of G-code such as `imex_mode_gcodes`. `high_precision_gcode`, a 2.5 on/off setting, stays writable.
 
@@ -102,7 +105,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 - `httpx` is now capped below 1.0. Its 1.0 pre-releases have no `AsyncClient`, so an install that resolved one (for example with pre-releases allowed) failed on the first printer or slicer call; the cap keeps a future 1.0 release from doing the same to fresh installs.
-- The outcome store is now owned by this project (klipper-mcp carries a copy) and works without klipper-mcp. `save_gcode` always records the slice, with OrcaSlicer's time and filament estimates, and `list_print_history` adds finished prints with the printer's failure reason. New default location `~/.orcaslicer-mcp/outcomes/`; an existing `~/projects/_shared/print-outcomes/` is still used. The store upgrades itself in place by adding columns, so older versions can still read it.
+- The outcome store is now owned by this project (klipper-mcp carries a copy) and works without klipper-mcp. `save_gcode` always records the slice, with OrcaSlicer's time and filament estimates, and `list_print_history` adds finished prints with the printer's failure reason. New default location `~/.orcaslicer-mcp/outcomes/`. The store upgrades itself in place by adding columns, so older versions can still read it.
 - `recall_prints` rows include the failure reason and OrcaSlicer's estimates. `duration_s` is Moonraker's whole job time, including heating up and any pauses, so beside the estimates it overstates an overrun; `list_print_history` compares the print time, which leaves both out, with the estimate. `filament_g` is the G-code file's own estimate, because printers report filament in millimetres, not grams.
 - A new outcome store's `printer_id` column defaults to `unknown`, the same value the store module uses when a caller passes no printer. Existing stores keep the default they were created with; every write names its printer anyway.
 
@@ -153,7 +156,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [0.1.10] - 2026-09-07
 
 ### Added
-- `save_gcode`: save the last slice's G-code into the shared print-outcomes folder and record the slice (model, geometry, settings) so the companion klipper-mcp can join the real print result back to it.
+- `save_gcode`: save the last slice's G-code into a local gcode folder and record the slice (model, geometry, settings) so the companion klipper-mcp can join the real print result back to it.
 - `recall_prints`: before slicing, see how past prints of the current model went (result, your verdict, the settings used). Inert without the klipper-mcp outcome store.
 - Slicing prompts now consult `recall_prints` first and end with `save_gcode`.
 

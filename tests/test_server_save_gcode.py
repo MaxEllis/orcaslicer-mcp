@@ -186,12 +186,10 @@ async def test_save_gcode_keeps_the_file_when_an_object_has_an_unreadable_size(m
 
 
 @respx.mock
-async def test_save_gcode_falls_back_to_home_dotfolder_when_no_shared_store(monkeypatch, tmp_path):
-    # The module path constants are fixed at import time, so patch them (not HOME alone): this test
+async def test_save_gcode_falls_back_to_home_dotfolder_when_no_outcomes_dir(monkeypatch, tmp_path):
+    # The module path constant is fixed at import time, so patch it (not HOME alone): this test
     # can then never land on a real store whatever the import order.
     monkeypatch.delenv("PRINT_OUTCOMES_DIR", raising=False)
-    fake_shared = tmp_path / "would_be_shared" / "print-outcomes"
-    monkeypatch.setattr(oc, "LEGACY_DIR", fake_shared)
     monkeypatch.setattr(oc, "DEFAULT_DIR", tmp_path / ".orcaslicer-mcp" / "outcomes")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("ORCA_API_TOKEN", "tok"); monkeypatch.setenv("ORCA_API_URL", B)
@@ -202,16 +200,14 @@ async def test_save_gcode_falls_back_to_home_dotfolder_when_no_shared_store(monk
     assert out["outcome_recorded"] is True
     assert (tmp_path / ".orcaslicer-mcp" / "gcode" / "a.gcode").exists()
     assert (tmp_path / ".orcaslicer-mcp" / "outcomes" / "outcomes.db").exists()
-    assert not fake_shared.exists()
 
-    # The first save created the store folder. The G-code folder must not flip to it: the rule is
-    # "the shared folder exists", not "a store folder exists", so a second save lands beside the first.
+    # The first save created the store folder. The G-code folder must not move to it: a second
+    # save lands beside the first.
     second = await srv.save_gcode("b.gcode")
 
     assert second["outcome_recorded"] is True
     assert (tmp_path / ".orcaslicer-mcp" / "gcode" / "b.gcode").exists()
     assert not (tmp_path / ".orcaslicer-mcp" / "outcomes" / "gcode").exists()
-    assert not fake_shared.exists()
 
 
 @respx.mock
@@ -220,8 +216,6 @@ async def test_whitespace_only_outcomes_dir_counts_as_unset(monkeypatch, tmp_pat
     # regression that used the raw value as a relative path lands inside tmp_path and is caught.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PRINT_OUTCOMES_DIR", "   ")
-    fake_shared = tmp_path / "would_be_shared" / "print-outcomes"
-    monkeypatch.setattr(oc, "LEGACY_DIR", fake_shared)
     monkeypatch.setattr(oc, "DEFAULT_DIR", tmp_path / ".orcaslicer-mcp" / "outcomes")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("ORCA_API_TOKEN", "tok"); monkeypatch.setenv("ORCA_API_URL", B)
@@ -233,23 +227,6 @@ async def test_whitespace_only_outcomes_dir_counts_as_unset(monkeypatch, tmp_pat
     assert (tmp_path / ".orcaslicer-mcp" / "gcode" / "w.gcode").exists()
     assert (tmp_path / ".orcaslicer-mcp" / "outcomes" / "outcomes.db").exists()
     assert not (tmp_path / "   ").exists()
-
-
-@respx.mock
-async def test_save_gcode_uses_shared_store_when_it_already_exists(monkeypatch, tmp_path):
-    monkeypatch.delenv("PRINT_OUTCOMES_DIR", raising=False)
-    fake_shared = tmp_path / "would_be_shared" / "print-outcomes"
-    fake_shared.mkdir(parents=True)
-    monkeypatch.setattr(oc, "LEGACY_DIR", fake_shared)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("ORCA_API_TOKEN", "tok"); monkeypatch.setenv("ORCA_API_URL", B)
-    _routes()
-
-    out = await srv.save_gcode("a.gcode")
-
-    assert (fake_shared / "gcode" / "a.gcode").exists()
-    assert (fake_shared / "outcomes.db").exists() and out["outcome_recorded"] is True
-    assert not (tmp_path / ".orcaslicer-mcp").exists()
 
 
 @respx.mock

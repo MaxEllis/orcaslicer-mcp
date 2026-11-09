@@ -13,12 +13,17 @@
   <a href="https://lobehub.com/mcp/maxellis-orcaslicer-mcp"><img alt="MCP Badge" src="https://lobehub.com/badge/mcp/maxellis-orcaslicer-mcp"></a>
 </p>
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/story-dark.png">
-    <img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/story-light.png" alt="Three steps: a chat in your AI app above, OrcaSlicer below. 1: you write that you designed these brackets, want them as strong as possible, and ask it to show you the changes it would make; OrcaSlicer shows the bracket standing. 2: the assistant makes three changes and says why: on its side, because standing up the layers run across the arm that takes the load; 7 walls instead of 4, which makes the arms solid; 215 °C instead of 200 so the layers fuse better. OrcaSlicer's MCP panel lists each change with Rotate back or Revert. 3: OrcaSlicer's slices compared: 2h 57m and 33.7 g as designed, 2h 44m and 46.8 g stronger; lying flat saves 22 minutes, more than the extra walls cost.">
-  </picture>
-</p>
+**1. Say what the print needs**
+
+<p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/step1.png" alt="Your AI app: you write that you designed these brackets, want them as strong as possible, and ask to see the changes it would make. An arrow leads to OrcaSlicer, where the bracket stands on the plate as designed."></p>
+
+**2. It changes what matters, and says why**
+
+<p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/step2.png" alt="Your AI app: the assistant says it made three changes: on its side, because standing up the layers run across the arm that takes the load; 7 walls instead of 4, which makes the arms solid; 215 °C instead of 200 so the layers fuse. A line runs from each reason to OrcaSlicer's MCP panel: Rotated 90° about X (Rotate back), Wall loops 7, was 4 (Revert), Nozzle temperature 215 °C, was 200 (Revert)."></p>
+
+**3. See the trade-off before you print**
+
+<p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/step3.png" alt="Your AI app: the assistant compares OrcaSlicer's two slices, 2h 57m and 33.7 g as designed against 2h 44m and 46.8 g stronger, and notes that lying flat saves 22 minutes, more than the extra walls cost. An arrow leads to OrcaSlicer's preview of the bracket sliced on its side."></p>
 
 <p align="center"><sub>Shown with the OrcaSlicer MCP build. The plugin does the settings part.</sub></p>
 

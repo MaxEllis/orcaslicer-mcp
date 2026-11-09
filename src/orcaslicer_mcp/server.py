@@ -15,6 +15,7 @@ from mcp.types import ToolAnnotations
 from .config import load_config
 from . import client as _client_mod
 from .client import OrcaClient
+from .plugin_update import plugin_update as _plugin_update
 from .errors import ApiError, Validation, NotFound, Conflict, ConfigError, PLUGIN_LIMITS
 from .models import summarize_slice
 from . import settings_schema
@@ -133,6 +134,41 @@ async def _attach_user_changes(result):
     return result
 
 
+# --- An older OrcaSlicer MCP plugin, said once ------------------------------------------------
+# A plugin installed from a .py file never updates itself, so the first tool reply of the session that reaches
+# OrcaSlicer carries a one-time `plugin_update` note when the plugin is older than this release's
+# (plugin_update.LATEST_PLUGIN_VERSION). get_status says so every time. The build is never flagged.
+_plugin_checked_url: str | None = None  # base URL already checked this session
+
+
+async def _check_plugin_update(result: dict) -> None:
+    global _plugin_checked_url
+    async with _client() as c:
+        url = c._cfg.base_url
+        if _plugin_checked_url == url:
+            return
+        status = await c._request("GET", "/api/v1/status", _count=False)
+    _plugin_checked_url = url  # checked, whatever it said: the note is one-time
+    upd = _plugin_update(status) if isinstance(status, dict) else None
+    if upd:
+        result["plugin_update"] = upd
+
+
+async def _attach_plugin_update(result):
+    """Add the one-time `plugin_update` note to a dict reply. Never raises; a failed check is tried again on
+    the next call."""
+    if not isinstance(result, dict) or "plugin_update" in result:
+        return result
+    try:
+        async def locked():
+            async with _get_changes_lock():
+                await _check_plugin_update(result)
+        await asyncio.wait_for(locked(), _FETCH_TIMEOUT_S)
+    except Exception:
+        pass
+    return result
+
+
 def _with_user_changes(fn):
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
@@ -144,6 +180,7 @@ def _with_user_changes(fn):
             _client_mod.REACHED.reset(token)
         if flag[0]:
             result = await _attach_user_changes(result)
+            result = await _attach_plugin_update(result)
         return result
     return wrapper
 
@@ -227,15 +264,23 @@ async def get_status() -> dict:
 
     `backend: "plugin"` means OrcaSlicer runs the OrcaSlicer MCP plugin on stock
     OrcaSlicer: `note` says what it can do. Tell the user before attempting anything it
-    cannot (loading models, slicing, renders, plates, projects, saving presets)."""
+    cannot (loading models, slicing, renders, plates, projects, saving presets). When that
+    plugin is older than the newest release, `plugin_update` says where to get the new one;
+    pass its note on to the user."""
+    global _plugin_checked_url
     try:
         async with _client() as c:
             status = await c.get_status()
+            url = c._cfg.base_url
     except ApiError as e:
         return _err(e)
     if status.get("backend") == "plugin":
         status["note"] = ("Connected to the OrcaSlicer MCP plugin on stock OrcaSlicer, not the "
                           "OrcaSlicer MCP build: " + PLUGIN_LIMITS.split(". ", 1)[1])
+    upd = _plugin_update(status)
+    if upd:
+        status["plugin_update"] = upd
+    _plugin_checked_url = url  # this reply already said it: no one-time note on top
     return status
 
 

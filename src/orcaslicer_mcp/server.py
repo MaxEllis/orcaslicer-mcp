@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import functools
 import json
 import os
 import re
@@ -12,6 +13,7 @@ from mcp.server.mcpserver import MCPServer, Image, Context
 from pydantic import Field
 from mcp.types import ToolAnnotations
 from .config import load_config
+from . import client as _client_mod
 from .client import OrcaClient
 from .errors import ApiError, Validation, NotFound, Conflict, ConfigError
 from .models import summarize_slice
@@ -43,6 +45,79 @@ except Exception:  # source checkout without an installed dist
     _VERSION = "0.0.0"
 
 mcp = MCPServer("orcaslicer", version=_VERSION)
+
+
+# --- Changes the user made by hand, passed on in tool replies -------------------------
+# The fork keeps a journal of GUI edits at GET /api/v1/user_changes?since=. After every
+# tool call that reached OrcaSlicer we fetch what is new and attach it to a dict reply.
+_USER_CHANGES_CAP = 8
+_last_user_seq: int | None = None  # None until the first call of the session seeds it
+
+
+def _user_changes_note(changes: list) -> str:
+    texts = [str(c.get("text", "")) for c in changes if isinstance(c, dict)]
+    shown = texts[:_USER_CHANGES_CAP]
+    parts = list(shown)
+    rest = [c for c in changes[_USER_CHANGES_CAP:] if isinstance(c, dict)]
+    if rest:
+        counts: dict[str, int] = {}
+        for c in rest:
+            g = str(c.get("group", "")) or "Other"
+            counts[g] = counts.get(g, 0) + 1
+        parts.append("\u2026and %d more (%s)" % (
+            len(rest), ", ".join(f"{g}: {n}" for g, n in counts.items())))
+    return ("Since your last action the user changed: " + "; ".join(parts) +
+            ". Work from these values; don't undo them without asking.")
+
+
+async def _attach_user_changes(result):
+    """Fetch the journal and add `user_changes` to a dict reply. Never raises."""
+    global _last_user_seq
+    if not isinstance(result, dict):
+        return result
+    try:
+        async with _client() as c:
+            data = await c._request("GET", "/api/v1/user_changes",
+                                    params={"since": _last_user_seq or 0}, timeout=5.0)
+        if not isinstance(data, dict) or not isinstance(data.get("seq"), int):
+            return result
+        seeding = _last_user_seq is None
+        _last_user_seq = data["seq"]
+        changes = data.get("changes")
+        if seeding or not isinstance(changes, list) or not changes:
+            return result
+        result["user_changes"] = {"note": _user_changes_note(changes), "changes": changes}
+    except Exception:  # older build (404), unreachable, mocked-out: the tool reply stands
+        pass
+    return result
+
+
+def _with_user_changes(fn):
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        before = _client_mod.REQUESTS_SENT
+        result = await fn(*args, **kwargs)
+        if _client_mod.REQUESTS_SENT != before:
+            result = await _attach_user_changes(result)
+        return result
+    return wrapper
+
+
+_orig_tool = mcp.tool
+
+
+def _tool(*targs, **tkw):
+    register = _orig_tool(*targs, **tkw)
+
+    def deco(fn):
+        # Sync tools never talk to OrcaSlicer; only coroutines can reach it.
+        wrapped = _with_user_changes(fn) if asyncio.iscoroutinefunction(fn) else fn
+        register(wrapped)
+        return wrapped
+    return deco
+
+
+mcp.tool = _tool
 
 
 def _client() -> OrcaClient:

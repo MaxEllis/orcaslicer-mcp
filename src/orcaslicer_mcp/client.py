@@ -10,6 +10,10 @@ from .guard import (BlockedKey, sensitive_keys, changed_keys, check_placeholders
                     redact_secrets)
 
 
+# Counts requests sent to OrcaSlicer so the server can tell which tool calls reached it.
+REQUESTS_SENT = 0
+
+
 class OrcaClient:
     def __init__(self, cfg: Config):
         self._cfg = cfg
@@ -27,6 +31,8 @@ class OrcaClient:
 
     async def _request(self, method: str, path: str, *, json=None, params=None,
                        timeout: float | None = None) -> dict:
+        global REQUESTS_SENT
+        REQUESTS_SENT += 1
         try:
             resp = await self._http.request(
                 method, path, json=json, params=params,

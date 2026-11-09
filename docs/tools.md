@@ -59,7 +59,11 @@ A `prediction_check` comes with it and flags any feature whose requested speed w
 | 0.5mm | 5h 20m | 53.4 g | -1h 20m (-20%), +5.4 g (+11%) | |
 | 0.6mm | 4h 35m | 57.1 g | -2h 05m (-31%), +9.1 g (+19%) | fastest, ⚠ 1 warning |
 
-Here every option trades time against filament, so it recommends none: it names the fastest and the lightest and leaves the choice to you. Only when one variant is at least as good as every other on time, filament and warnings does it say so, and mark that row ★.
+Here every option trades time against filament, so it recommends none: it names the fastest and the lightest and leaves the choice to you. Only when one variant is at least as good as every other on time, filament and warnings does it say so, and mark that row ★. Two other trade-offs get their own headline:
+
+> No clear winner: 0.6mm is fastest and lightest but has a warning, 0.5mm has no warnings.
+
+and, when the fastest option without warnings is neither the fastest nor the lightest, a last clause such as *"0.5mm is the fastest with no warnings."*
 
 ## How the part sits
 

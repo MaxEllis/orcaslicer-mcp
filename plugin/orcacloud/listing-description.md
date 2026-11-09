@@ -1,34 +1,47 @@
-Tell your AI assistant what's going wrong with a print. It changes the OrcaSlicer settings that matter, says why, and checks your printer can handle them. You talk to it in your usual AI app; the changes appear in OrcaSlicer.
+<!-- The OrcaCloud listing text (cloud.orcaslicer.com/p/16d116a6bc41). On OrcaCloud the two pictures are uploaded media. -->
 
-![Your AI app says it made two changes, 7 walls instead of 4 and 215 °C instead of 200, and why. Each one appears in the OrcaSlicer MCP panel in OrcaSlicer with Revert.](story-plugin.png)
+Work with an AI assistant to get the print you're after, and learn how OrcaSlicer gets you there. Tell it your goal. It changes the settings that matter, explains each one, and checks your printer can handle them. You talk to it in your usual AI app; the changes appear in OrcaSlicer.
 
-## For example
+![Your AI app explains two changes; the OrcaSlicer MCP panel lists them with Revert](story-plugin.png){width=50% align=left}
 
-You ask: *"My PETG strings everywhere and the first layer keeps lifting at the corners. What should I change?"* It lowers the nozzle temperature, warms the bed for the first layer and lengthens the retraction, tells you why for each one, and lists them beside the 3D view, each with **Revert**. Then you slice and see.
+## Example
+
+**You ask:** *"I designed these brackets and want them as strong as possible. Show me the changes you'd make."*
+
+It raises the wall loops from 4 to 7, because a bracket's strength is in its walls, and the nozzle temperature from 200 to 215 °C, so each layer fuses to the next. Both changes appear beside the 3D view. Slice and see, ask why, try another idea, and press **Revert** on anything you don't want.
 
 ## What it does
 
-- Reads your printer, filament and process settings and explains what they do.
-- Changes settings and switches presets. Changes show as unsaved edits, like your own: nothing is written to your saved presets unless you save them yourself.
-- Lists every change in the OrcaSlicer MCP panel beside the 3D view, with **Revert** or **Switch back** on each.
-- Tells the assistant what you changed yourself, so it doesn't undo your work.
+- **Reads your setup.** Printer, filament and process settings, explained in plain words.
+- **Changes settings and switches presets.** They show as unsaved edits, like your own. Your saved presets stay as they are until you save them.
+- **Shows every change** in the OrcaSlicer MCP panel, with **Revert** or **Switch back** on each one.
+- **Leaves your own edits alone.** It sees what you changed yourself, so it doesn't undo your work.
 
-It can't load models, slice or manage projects: OrcaSlicer's plugin system doesn't allow it. The [OrcaSlicer MCP build](https://github.com/MaxEllis/OrcaSlicer/releases/latest) can. You don't need it for anything above.
+## Plugin or OrcaSlicer MCP build?
+
+![What the plugin and the OrcaSlicer MCP build can each do](plugin-vs-build.png){width=50%}
+
+OrcaSlicer's plugin system can't do the rest. You don't need the [OrcaSlicer MCP build](https://github.com/MaxEllis/OrcaSlicer/releases/latest) for anything this plugin does.
 
 ## What you need
 
-- An AI app on your computer that can use MCP connectors, such as Claude Desktop, Cursor, VS Code or LM Studio. Chats in a web browser and phone apps can't connect to it, because it runs on your computer.
+- An AI app on your computer that can use MCP connectors, such as **Claude Desktop**, **Cursor**, **VS Code** or **LM Studio**. Chats in a web browser and phone apps can't connect, because the plugin runs on your computer.
 - The free [orcaslicer-mcp](https://github.com/MaxEllis/orcaslicer-mcp#get-started) connector. The plugin is free too.
 
 ## Set it up
 
-1. Subscribe, then in OrcaSlicer open the main menu (the icon beside **File**) > **Plugins**, install OrcaSlicer MCP and tick **Activate**.
+1. **Install.** Subscribe here, then in OrcaSlicer open the main menu (the icon beside **File**) > **Plugins**, install OrcaSlicer MCP and tick **Activate**.
+2. **Allow it.** OrcaSlicer asks for network access to `127.0.0.1` (this computer only) and for a thread that keeps the connection open. Choose **Yes**. **No** stops the plugin.
+3. **Copy the token** from the plugin's **Config** tab.
+4. **Connect your AI app.** Add the connector with that token, as its [setup steps](https://github.com/MaxEllis/orcaslicer-mcp#get-started) show. Then ask *"Which printer and filament is OrcaSlicer set up for?"* to check it works.
 
-   Prefer a file? Download `orcaslicer_mcp_plugin.py` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest). In the same Plugins window, click the arrow beside **Install plugin** and choose **Install local plugin**, then click the green **Install local plugin** button again, pick the file and tick **Activate**. Installing a newer file later turns the plugin off and asks for its permissions again: click **Yes**, then tick **Activate** again.
-2. OrcaSlicer shows **Plugin permissions**: network access to `127.0.0.1`, which means this computer only, and permission to create a thread, which keeps the connection running. Choose **Yes**; **No** stops the plugin.
-3. Copy the token from the plugin's **Config** tab.
-4. Add the connector to your AI app with that token, as its [setup steps](https://github.com/MaxEllis/orcaslicer-mcp#get-started) show. Then ask *"Which printer and filament is OrcaSlicer set up for?"* to check it works.
+*Prefer a file?* Download `orcaslicer_mcp_plugin.py` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest). In the Plugins window, click the arrow beside **Install plugin**, choose **Install local plugin**, click the green **Install local plugin** button, pick the file and tick **Activate**. A newer file installed later asks for the permissions again: click **Yes**, then tick **Activate**.
 
-It listens on this computer only, needs the token for every request, and never touches scripts, custom G-code or printer connections. Turn it off any time in the Config tab.
+## Safety
+
+- It listens on this computer only, and every request needs the token.
+- It never changes post-processing scripts, custom G-code, printer connections or plugin settings.
+- It hides printer passwords and API keys from the assistant.
+- You can pause the assistant at any time in the plugin's **Config** tab.
 
 Source and issues: [github.com/MaxEllis/orcaslicer-mcp](https://github.com/MaxEllis/orcaslicer-mcp)

@@ -27,29 +27,31 @@ OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in pla
 
 <p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/step3.png" alt="Your AI app: the assistant compares OrcaSlicer's two slices, 2h 57m and 33.7 g as designed against 2h 44m and 46.8 g stronger, and notes that lying flat saves 22 minutes, more than the extra walls cost. An arrow leads to OrcaSlicer's preview of the bracket sliced on its side."></p>
 
-<p align="center"><sub>Shown with the OrcaSlicer MCP build. The plugin does the settings part.</sub></p>
+<p align="center"><sub>Shown with the OrcaSlicer MCP build. The plugin covers settings and presets only.</sub></p>
 
 ## What you need
 
 - **An AI app on your computer that can use MCP connectors,** such as Claude Desktop, Cursor, VS Code or LM Studio. MCP is how these apps connect to other programs, and `orcaslicer-mcp` is the connector for OrcaSlicer. Chats in a web browser and phone apps can't use it, because the connector runs on your computer.
-- **OrcaSlicer 2.5** on Windows, macOS or Linux, with one of the two ways in below.
-- **About ten minutes.** OrcaSlicer MCP is free. Your AI app works as you already use it, and with a local model nothing leaves your computer.
+- **OrcaSlicer 2.5** on Windows, macOS or Linux, with the OrcaSlicer MCP build or the plugin (compared below).
+- **About ten minutes.** OrcaSlicer MCP is free. Your AI app uses whatever plan you already have, and with a local model nothing leaves your computer.
 
-## Two ways into OrcaSlicer
+## OrcaSlicer MCP build or plugin
 
-| | **OrcaSlicer MCP build** | **Plugin** for OrcaSlicer 2.5 |
+| | **OrcaSlicer MCP build** | **OrcaSlicer MCP plugin** |
 |---|---|---|
-| **What it is** | OrcaSlicer 2.5 with the way in built in | An add-on for the OrcaSlicer you already have |
-| **The assistant can** | Change settings and presets, load and arrange models, slice, render the plate, manage plates and projects | Read your setup, change settings, switch presets |
-| **The panel** | Every change with an undo, plus restore points | Setting and preset changes with an undo |
+| **What it is** | A build of OrcaSlicer 2.5 with the connection built in | A plugin for stock OrcaSlicer 2.5 |
+| **What the assistant can do** | Settings and presets, loading and arranging models, slicing, plate renders, plates and projects | Settings and presets only. You load models and slice yourself. |
+| **Undo panel** | Every change, plus restore points | Setting and preset changes |
+| **Your OrcaSlicer** | Replaced. The installer and the Mac app install over it and keep your printers and presets. The portable Windows zip and the Linux AppImage run alongside it. | Stays as it is |
+| **Updates** | The build offers new releases of this project | Through OrcaCloud; OrcaSlicer updates as usual |
 | **Get it** | [Download](https://github.com/MaxEllis/OrcaSlicer/releases/latest) | [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE), or the `.py` file on this repo's [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) |
 
-The build's installer and Mac app take the place of OrcaSlicer and keep your printers and presets, because both use the same profile folder. To keep stock OrcaSlicer as well, use the portable Windows zip or the Linux AppImage. The plugin leaves your OrcaSlicer as it is.
+The trade-off: the build can do everything but replaces your OrcaSlicer. The plugin keeps your OrcaSlicer but only works with settings and presets.
 
 ## Get started
 
-**1. Turn on the way in.**
-- **Build:** open **Preferences → Remote API**, tick **Enable Remote API** and copy the token, a password that only your AI app gets.
+**1. Turn on the connection in OrcaSlicer.**
+- **Build:** open **Preferences → Remote API**, tick **Enable Remote API** and copy the token (a password for your AI app).
 - **Plugin:** subscribe on OrcaCloud and install it from OrcaSlicer's **File → Plugins**, or there choose **Install local plugin** (the arrow beside **Install plugin**) and pick the downloaded file. Tick **Activate** and allow the two permissions it asks for, then copy the token from its **Config** tab. Use one install or the other: each keeps its own token.
 
 **2. Add the connector to your AI app.**
@@ -73,8 +75,8 @@ The build's installer and Mac app take the place of OrcaSlicer and keep your pri
 ## You stay in charge
 
 - **Every change shows in the panel.** Undo any one, or put the project back to an earlier point (build only).
-- **It hears what you change.** Edit something yourself and the assistant is told with its next reply, so it doesn't undo your work.
-- **It stays on your computer.** OrcaSlicer listens only locally and wants a token. The assistant can't touch scripts, custom G-code or printer connections unless you allow it in Preferences. [Security details](docs/security.md)
+- **It knows what you changed.** When you edit something yourself, the assistant is told with its next reply, so it doesn't undo your work.
+- **It stays on your computer.** OrcaSlicer only accepts connections from this computer, and each one needs the token. The assistant can't touch scripts, custom G-code or printer connections unless you allow it in Preferences. [Security details](docs/security.md)
 
 ## Privacy policy
 

@@ -89,6 +89,7 @@ async def test_set_object_config_needs_m4c(monkeypatch):
 @respx.mock
 async def test_edit_preset_blocks_new_physics_fail(monkeypatch):
     _env(monkeypatch)
+    respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={}))  # fork, not the plugin
     respx.put("http://x:13130/api/v1/preset").mock(return_value=httpx.Response(200, json={"selected": True}))
     respx.get("http://x:13130/api/v1/config").mock(return_value=httpx.Response(
         200, json={"config": {"layer_height": "0.2", "nozzle_diameter": "0.4"}}))
@@ -103,6 +104,7 @@ async def test_edit_preset_blocks_new_physics_fail(monkeypatch):
 @respx.mock
 async def test_edit_preset_allows_unrelated_change_on_already_failing_preset(monkeypatch):
     _env(monkeypatch)
+    respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={}))  # fork, not the plugin
     respx.put("http://x:13130/api/v1/preset").mock(return_value=httpx.Response(200, json={"selected": True}))
     respx.get("http://x:13130/api/v1/config").mock(return_value=httpx.Response(
         200, json={"config": {"layer_height": "0.9", "nozzle_diameter": "0.4"}}))
@@ -131,6 +133,7 @@ def _mock_preset_roundtrip(cfg, applied):
 @respx.mock
 async def test_edit_preset_filament_temp_is_not_blocked_by_active_print_speeds(monkeypatch):
     _env(monkeypatch)
+    respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={}))  # fork, not the plugin
     put_cfg, save = _mock_preset_roundtrip(_FAST_PLA, ["nozzle_temperature"])
     out = await srv.edit_preset("filament", "PLA Basic", {"nozzle_temperature": 205})
     assert out.get("error") is None, out
@@ -142,6 +145,7 @@ async def test_edit_preset_filament_temp_is_not_blocked_by_active_print_speeds(m
 @respx.mock
 async def test_edit_preset_print_speed_is_still_blocked_by_filament_ceiling(monkeypatch):
     _env(monkeypatch)
+    respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={}))  # fork, not the plugin
     put_cfg, save = _mock_preset_roundtrip({**_FAST_PLA, "outer_wall_speed": "100"}, ["outer_wall_speed"])
     out = await srv.edit_preset("print", "Fast", {"outer_wall_speed": 300})
     assert out["error"] == "physics_blocked"
@@ -151,8 +155,49 @@ async def test_edit_preset_print_speed_is_still_blocked_by_filament_ceiling(monk
 @respx.mock
 async def test_edit_preset_filament_is_blocked_by_a_filament_only_check(monkeypatch):
     _env(monkeypatch)
-    put_cfg, save = _mock_preset_roundtrip({**_FAST_PLA, "fan_min_speed": "20", "fan_max_speed": "100"}, ["fan_min_speed"])
-    out = await srv.edit_preset("filament", "PLA Basic", {"fan_min_speed": 150})
+    respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={}))  # fork, not the plugin
+    # fan_min above fan_max: each value is in range (0..100), the pair is not.
+    put_cfg, save = _mock_preset_roundtrip({**_FAST_PLA, "fan_min_speed": "20", "fan_max_speed": "80"}, ["fan_min_speed"])
+    out = await srv.edit_preset("filament", "PLA Basic", {"fan_min_speed": 95})
     assert out["error"] == "physics_blocked"
     assert any(f["name"] == "cooling_sanity" for f in out["fails"])
     assert put_cfg.call_count == 0 and save.call_count == 0
+
+
+@respx.mock
+async def test_edit_preset_refuses_up_front_on_the_plugin(monkeypatch):
+    # The plugin cannot save presets: refuse before selecting or changing anything.
+    _env(monkeypatch)
+    respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={"backend": "plugin"}))
+    select = respx.put("http://x:13130/api/v1/preset").mock(return_value=httpx.Response(200, json={}))
+    put_cfg = respx.put("http://x:13130/api/v1/config").mock(return_value=httpx.Response(200, json={}))
+    out = await srv.edit_preset("print", "P", {"layer_height": 0.2})
+    assert "OrcaSlicer MCP plugin" in out["error"] and "OrcaSlicer MCP build" in out["error"]
+    assert select.call_count == 0 and put_cfg.call_count == 0
+
+
+@respx.mock
+async def test_apply_and_slice_refuses_up_front_on_the_plugin(monkeypatch):
+    _env(monkeypatch)
+    respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={"backend": "plugin"}))
+    put_cfg = respx.put("http://x:13130/api/v1/config").mock(return_value=httpx.Response(200, json={}))
+    out = await srv.apply_and_slice({"layer_height": 0.2})
+    assert "OrcaSlicer MCP plugin" in out["error"] and put_cfg.call_count == 0
+
+
+@respx.mock
+async def test_fork_only_tool_on_the_plugin_names_the_build(monkeypatch):
+    _env(monkeypatch)
+    respx.post("http://x:13130/api/v1/arrange").mock(
+        return_value=httpx.Response(404, json={"error": "not_found", "backend": "plugin"}))
+    out = await srv.arrange_plate()
+    assert "OrcaSlicer MCP plugin" in out["error"] and "needs M4" not in out["error"]
+
+
+@respx.mock
+async def test_get_status_notes_the_plugin(monkeypatch):
+    _env(monkeypatch)
+    respx.get("http://x:13130/api/v1/status").mock(
+        return_value=httpx.Response(200, json={"backend": "plugin", "presets": {}}))
+    out = await srv.get_status()
+    assert out["note"].startswith("Connected to the OrcaSlicer MCP plugin") and "slicing" in out["note"]

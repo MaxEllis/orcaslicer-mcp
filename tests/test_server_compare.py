@@ -4,6 +4,8 @@ import orcaslicer_mcp.server as srv
 
 def _env(m):
     m.setenv("ORCA_API_TOKEN", "tok"); m.setenv("ORCA_API_URL", "http://x:13130")
+    # compare_settings first asks /status whether this is the plugin (which cannot slice).
+    respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={}))
 
 
 @respx.mock

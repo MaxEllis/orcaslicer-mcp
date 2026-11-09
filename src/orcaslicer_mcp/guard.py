@@ -18,13 +18,19 @@ An assistant holding the API token is steerable by text it reads (model names, G
 web pages), so these keys are refused here, before the request reaches OrcaSlicer. Writing
 a key back to the value it already has is allowed, so restore paths keep working; the
 connection keys OrcaSlicer never reports (UNREADABLE_KEYS) cannot be shown unchanged, so
-they are always refused. Edit these settings by hand in the OrcaSlicer GUI. To let the MCP
-write specific ones anyway, list them in ORCA_MCP_ALLOW_KEYS (comma separated, wildcards
-such as *_gcode allowed).
+they are always refused, unless the user allows them.
+
+The user allows them with one tick: Preferences > Remote API > "Allow script, G-code and
+connection edits" in the OrcaSlicer MCP build. The client reads it from /status
+(sensitive_keys_allowed, at most a few seconds old) and lets these keys through when it is on;
+OrcaSlicer MCP v2.4.2-mcp.10 and later enforce the same box inside the slicer. When /status
+can't be read, or OrcaSlicer runs the OrcaSlicer MCP plugin (which never allows them), they are
+refused. Advanced: ORCA_MCP_ALLOW_KEYS (comma separated, wildcards such as *_gcode allowed)
+lets listed keys past this connector whatever the box says, for setups that need it; the build
+still applies its own box. Refusals don't mention it.
 
 This guard only covers the MCP's own tools. A client that can run shell commands can still
-reach OrcaSlicer directly with the token; OrcaSlicer MCP v2.4.2-mcp.10 and later enforce the
-same rule inside the slicer, unlocked only from its Preferences.
+reach OrcaSlicer directly with the token.
 """
 from __future__ import annotations
 import fnmatch
@@ -82,15 +88,35 @@ REDACTED = "<redacted>"
 _URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 
 
+PREFERENCES_BOX = "Allow script, G-code and connection edits"
+
+
 class BlockedKey(ApiError):
-    def __init__(self, keys: list[str]):
+    """A write this connector refuses: the OrcaSlicer MCP build's Preferences box is off (or could
+    not be read), or OrcaSlicer runs the plugin, which never allows these keys. The text is written
+    for the assistant to relay as one plain step."""
+
+    def __init__(self, keys: list[str], plugin: bool = False, status_unknown: bool = False):
         self.keys = sorted(keys)
+        self.plugin = plugin
+        listed = ", ".join(self.keys)
+        if plugin:
+            # The OrcaSlicer MCP plugin (stock OrcaSlicer) has no Remote API Preferences and never
+            # allows these keys.
+            super().__init__(
+                "blocked_by_local_policy: these settings can't be changed through the OrcaSlicer MCP "
+                "plugin: " + listed + ". Scripts, custom G-code, slicing plugins, printer connection "
+                "settings and the printer model can run code or drive the printer, and the plugin never "
+                "lets the assistant change them. Ask the user to make this change in the OrcaSlicer window.")
+            return
+        unknown = (" (OrcaSlicer's settings couldn't be read just now, so this stays locked.)"
+                   if status_unknown else "")
         super().__init__(
-            "blocked_by_local_policy: the MCP refuses to write "
-            + ", ".join(self.keys)
-            + " (post-processing scripts, slicing plugins, custom G-code, printer connection settings and printer "
-              "model can run code or drive the printer). Ask the user to change these in the "
-              "OrcaSlicer GUI, or to allow them explicitly via ORCA_MCP_ALLOW_KEYS.")
+            "blocked_by_local_policy: " + listed + " is locked. Scripts, custom G-code, slicing "
+            "plugins, printer connection settings and the printer model can run code or drive the "
+            "printer, so the assistant may change them only when the user allows it. Ask the user to "
+            f"tick '{PREFERENCES_BOX}' in OrcaSlicer's Preferences > Remote API, then ask again; or to "
+            "make this change themselves in the OrcaSlicer window." + unknown)
 
 
 class RedactedValue(ApiError):

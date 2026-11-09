@@ -1,13 +1,100 @@
 from __future__ import annotations
 import asyncio
+import contextvars
 import json
 import math
+import time
 import httpx
 import websockets
 from .config import Config
-from .errors import error_from_status, NotReachable, ApiError, UiTimeout
+from .errors import (error_from_status, NotReachable, NotFound, ApiError, UiTimeout, OutOfRange,
+                     Validation)
+
+POLICY_TOKEN = "blocked_by_remote_api_policy"
+from . import settings_schema
+from .ranges import out_of_range
 from .guard import (BlockedKey, sensitive_keys, changed_keys, check_placeholders,
                     redact_secrets)
+
+
+# Per tool call: the server sets a one-item list here before a tool runs, and every request
+# the call sends to OrcaSlicer flips it, so the server can tell which calls reached it.
+REACHED: contextvars.ContextVar = contextvars.ContextVar("orca_reached", default=None)
+
+
+# Set while compare_slices (or compare_settings) tries variants: every request then carries
+# X-Orca-Mcp-Trial: 1, so OrcaSlicer's MCP panel records none of the trial writes and slices.
+TRIAL: contextvars.ContextVar = contextvars.ContextVar("orca_trial", default=False)
+TRIAL_HEADER = "X-Orca-Mcp-Trial"
+
+# Which OrcaSlicer answered at each address, once /status has been read: "build" (the
+# OrcaSlicer MCP build) or "plugin" (the OrcaSlicer MCP plugin on stock OrcaSlicer).
+_BACKENDS: dict[str, str] = {}
+
+
+def known_backend(base_url: str) -> str | None:
+    return _BACKENDS.get(base_url)
+
+
+def _is_local(base_url: str) -> bool:
+    host = (httpx.URL(base_url).host or "").lower()
+    return host in ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
+def unreachable_message(base_url: str, e: Exception | None = None) -> str:
+    why = (str(e) if e is not None else "") or (type(e).__name__ if e is not None else "")
+    backend = _BACKENDS.get(base_url)
+    if backend == "build":
+        ask = "Is OrcaSlicer open, with Preferences > Remote API turned on?"
+    elif backend == "plugin":
+        ask = "Is OrcaSlicer open, with the OrcaSlicer MCP plugin turned on?"
+    else:
+        ask = ("Is OrcaSlicer open, with Preferences > Remote API turned on? With the OrcaSlicer "
+               "MCP plugin on stock OrcaSlicer instead: is the plugin turned on?")
+    if not _is_local(base_url):
+        ask += " OrcaSlicer runs on another computer here: is that computer on and awake, and on the network?"
+    return (f"not_reachable: OrcaSlicer isn't answering at {base_url}"
+            + (f" ({why})" if why else "") + f". {ask} Ask the user to check.")
+
+
+def timeout_message(seconds: float | None = None) -> str:
+    within = f" within {seconds:g} s" if seconds else " in time"
+    return (f"ui_timeout: OrcaSlicer didn't answer{within}; a dialog may be open in its window, "
+            "ask the user to look.")
+
+
+def mark_reached() -> None:
+    flag = REACHED.get()
+    if flag is not None:
+        flag[0] = True
+
+
+NOTE_PATH = "/api/v1/activity/note"
+# A note is never worth a wait: a stuck OrcaSlicer (a dialog open) costs at most this per call.
+_NOTE_TIMEOUT_S = 1.5
+_NOTE_RETRY_S = 300.0  # an address that had no note route is asked again after this
+_NOTE_STUCK_S = 60.0  # an address that timed out on a note is skipped for this long
+_NOTE_UNSUPPORTED: dict[str, float] = {}
+_NOTE_STUCK: dict[str, float] = {}
+
+
+def _label(key: str) -> str:
+    rec = settings_schema.describe(key) or {}
+    return rec.get("full_label") or rec.get("label") or key
+
+
+# Where the panel's refused row says why (the fork names the Preferences box the same way).
+REFUSED_KEYS_DETAIL = ("Scripts, custom G-code and printer connection settings are locked. Tick 'Allow "
+                       "script, G-code and connection edits' in Preferences > Remote API to let the "
+                       "assistant change them, or change it yourself here.")
+
+# The last /status each address answered, for the sensitive-key decision. Kept briefly, so
+# unticking the Preferences box takes effect within seconds.
+_STATUS_TTL_S = 5.0
+_STATUS_READ_TIMEOUT_S = 5.0
+_STATUS_SEEN: dict[str, tuple[float, dict]] = {}
+REFUSED_KEYS_DETAIL_PLUGIN = ("The OrcaSlicer MCP plugin never lets the assistant change scripts, custom "
+                              "G-code or printer connection settings. Change it yourself here.")
 
 
 class OrcaClient:
@@ -25,23 +112,50 @@ class OrcaClient:
     async def __aexit__(self, *exc) -> None:
         await self._http.aclose()
 
-    async def _request(self, method: str, path: str, *, json=None, params=None,
-                       timeout: float | None = None) -> dict:
+    def _effective_timeout(self, timeout: float | None) -> float:
+        return float(timeout) if timeout is not None else float(self._cfg.timeout)
+
+    async def _send(self, method: str, path: str, *, json=None, params=None,
+                    timeout: float | None = None, headers: dict | None = None) -> httpx.Response:
+        """One request with the transport failures turned into errors an assistant can act on.
+        A trial in progress (TRIAL, compare_slices) marks every request it sends."""
+        hdrs = dict(headers or {})
+        if TRIAL.get():
+            hdrs[TRIAL_HEADER] = "1"
         try:
             resp = await self._http.request(
-                method, path, json=json, params=params,
+                method, path, json=json, params=params, headers=hdrs or None,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT)
+        except (httpx.ConnectTimeout, httpx.PoolTimeout) as e:
+            # No connection at all: OrcaSlicer is closed, or its computer is off or asleep. Only a
+            # read or write timeout means OrcaSlicer took the request and then didn't answer.
+            raise NotReachable(unreachable_message(self._cfg.base_url, e)) from e
         except httpx.TimeoutException as e:
-            raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
+            raise UiTimeout(timeout_message(self._effective_timeout(timeout))) from e
         except httpx.TransportError as e:
-            raise NotReachable(f"OrcaSlicer not reachable at {self._cfg.base_url}: {e}") from e
+            raise NotReachable(unreachable_message(self._cfg.base_url, e)) from e
+        # Any answer from this address ends a skip of panel notes begun when one timed out.
+        _NOTE_STUCK.pop(self._cfg.base_url, None)
         if resp.status_code >= 400:
             try:
                 body = resp.json()
             except Exception:
                 body = {}
             raise error_from_status(resp.status_code, body)
-        return resp.json()
+        return resp
+
+    async def _request(self, method: str, path: str, *, json=None, params=None,
+                       timeout: float | None = None, _count: bool = True,
+                       headers: dict | None = None) -> dict:
+        if _count:
+            mark_reached()
+        resp = await self._send(method, path, json=json, params=params, timeout=timeout,
+                                headers=headers)
+        data = resp.json()
+        if path == "/api/v1/status" and isinstance(data, dict):
+            _BACKENDS[self._cfg.base_url] = "plugin" if data.get("backend") == "plugin" else "build"
+            _STATUS_SEEN[self._cfg.base_url] = (time.monotonic(), data)
+        return data
 
     async def get_status(self) -> dict:
         data = await self._request("GET", "/api/v1/status")
@@ -78,23 +192,121 @@ class OrcaClient:
     async def duplicate_object(self, obj_id: int) -> dict:
         return await self._request("POST", f"/api/v1/objects/{obj_id}/duplicate")
 
+    # --- Panel notes and connector-side refusals ---------------------------------------
+
+    async def post_note(self, kind: str, text: str, value: str | None = None,
+                        detail: str | None = None) -> bool:
+        """Add one row to OrcaSlicer's MCP panel (POST /api/v1/activity/note). Builds without
+        the route answer 404; that, and any other failure, is silent: a note never decides
+        what a tool reports. A trial's header is never sent with it."""
+        url = self._cfg.base_url
+        now = time.monotonic()
+        at = _NOTE_UNSUPPORTED.get(url)
+        if at is not None and now - at < _NOTE_RETRY_S:
+            return False
+        at = _NOTE_STUCK.get(url)
+        if at is not None and now - at < _NOTE_STUCK_S:
+            return False
+        token = TRIAL.set(False)
+        try:
+            body = {"kind": kind, "text": text}
+            if value:
+                body["value"] = value
+            if detail:
+                body["detail"] = detail[:400]
+            await self._request("POST", NOTE_PATH, json=body, _count=False, timeout=_NOTE_TIMEOUT_S)
+            _NOTE_UNSUPPORTED.pop(url, None)
+            _NOTE_STUCK.pop(url, None)
+            return True
+        except NotFound:
+            _NOTE_UNSUPPORTED[url] = time.monotonic()
+            return False
+        except (UiTimeout, NotReachable):
+            _NOTE_STUCK[url] = time.monotonic()
+            return False
+        except Exception:  # noqa: BLE001 - a note is never worth failing a tool over
+            return False
+        finally:
+            TRIAL.reset(token)
+
+    async def _refused_note(self, text: str, value: str, detail: str) -> None:
+        """A connector-side refusal in the MCP panel, except during a comparison: OrcaSlicer
+        records nothing for trial requests, and the variant's error reaches the assistant."""
+        if TRIAL.get():
+            return
+        await self.post_note("refused", text, value, detail)
+
+    async def _check_ranges(self, changes: dict, current_reader) -> None:
+        """Refuse values outside their setting's range. Only when something fails are the present
+        values read (current_reader(keys)), so a value written back unchanged is never refused."""
+        found = out_of_range(changes or {})
+        if not found:
+            return
+        try:
+            current = await current_reader(list(found))
+        except Exception:  # noqa: BLE001 - without them, judge every value
+            current = {}
+        found = out_of_range({k: changes[k] for k in found}, current)
+        if found:
+            await self._refused_note(", ".join(_label(k) for k in found), "Out of range",
+                                     "; ".join(r["detail"] for r in found.values()))
+            raise OutOfRange(found)
+
+    async def _recent_status(self) -> dict | None:
+        """/status as OrcaSlicer reported it within the last few seconds, or None when it can't be
+        read now."""
+        url = self._cfg.base_url
+        seen = _STATUS_SEEN.get(url)
+        if seen is not None and time.monotonic() - seen[0] < _STATUS_TTL_S:
+            return seen[1]
+        try:
+            st = await self._request("GET", "/api/v1/status", _count=False,
+                                     timeout=_STATUS_READ_TIMEOUT_S)
+        except Exception:  # noqa: BLE001 - unreadable: the caller refuses
+            return None
+        return st if isinstance(st, dict) else None
+
+    async def _judge_keys(self, keys: list[str]) -> None:
+        """Protected keys pass when the OrcaSlicer MCP build says its Preferences box 'Allow
+        script, G-code and connection edits' is ticked (sensitive_keys_allowed); OrcaSlicer
+        checks that box again itself. Otherwise, the plugin, or a /status that can't be read:
+        refuse (fail closed)."""
+        st = await self._recent_status()
+        plugin = (st or {}).get("backend") == "plugin" or (
+            st is None and _BACKENDS.get(self._cfg.base_url) == "plugin")
+        if st is not None and not plugin and st.get("sensitive_keys_allowed") is True:
+            return
+        await self._refused_note(", ".join(_label(k) for k in sorted(keys)), "Not allowed",
+                                 REFUSED_KEYS_DETAIL_PLUGIN if plugin else REFUSED_KEYS_DETAIL)
+        raise BlockedKey(keys, plugin=plugin, status_unknown=st is None and not plugin)
+
+    async def _live_values(self, keys: list[str]) -> dict:
+        return await self.get_config(keys, timeout=_NOTE_TIMEOUT_S)
+
     async def _guard_config(self, changes: dict) -> None:
         """Refuse writes that would change a sensitive key (see guard.py). Writing a key
         back to its current value is allowed."""
         check_placeholders(changes)
+        await self._check_ranges(changes, self._live_values)
         hits = sensitive_keys(changes or {})
         if not hits:
             return
         current = await self.get_config(hits)
         changed = changed_keys(changes, hits, current)
         if changed:
-            raise BlockedKey(changed)
+            await self._judge_keys(changed)
 
     async def guard_preset_edit(self, ptype: str, name: str, changes: dict) -> None:
         """The same refusal for edit_preset, judged against the named preset's stored values
         and BEFORE anything is selected: selecting a preset discards the user's unsaved
         overrides, so a refusal must not come after it."""
         check_placeholders(changes)
+
+        async def stored_values(keys):
+            cfg = (await self._request("POST", "/api/v1/preset/config", timeout=_NOTE_TIMEOUT_S,
+                                       json={"type": ptype, "name": name})).get("config", {})
+            return {k: cfg[k] for k in keys if k in cfg}
+        await self._check_ranges(changes, stored_values)
         hits = sensitive_keys(changes or {})
         if not hits:
             return
@@ -102,13 +314,14 @@ class OrcaClient:
                                       json={"type": ptype, "name": name})).get("config", {})
         changed = changed_keys(changes, hits, stored)
         if changed:
-            raise BlockedKey(changed)
+            await self._judge_keys(changed)
 
     async def set_object_config(self, obj_id: int, changes: dict) -> dict:
         check_placeholders(changes)
+        await self._check_ranges(changes, self._live_values)
         hits = sensitive_keys(changes or {})
         if hits:
-            raise BlockedKey(hits)
+            await self._judge_keys(hits)
         return await self._request("PUT", f"/api/v1/objects/{obj_id}/config", json=changes)
 
     async def transform_object(self, obj_id: int, translate=None, rotate=None, scale=None) -> dict:
@@ -211,12 +424,12 @@ class OrcaClient:
         return await self._request("PUT", "/api/v1/printer/slot_mapping", json={"mapping": mapping},
                                    timeout=self._slot_timeout())
 
-    async def get_config(self, keys: list[str] | None) -> dict:
+    async def get_config(self, keys: list[str] | None, timeout: float | None = None) -> dict:
         # The fork's /config `keys` filter splits the RAW query string on ',' without
         # URL-decoding first, so httpx's percent-encoded comma (%2C) matches nothing and
         # returns {}. Rather than depend on that fragile path, fetch the full config
         # (~20KB on LAN) and filter locally — parser-independent. See test_client_config.
-        data = await self._request("GET", "/api/v1/config")
+        data = await self._request("GET", "/api/v1/config", timeout=timeout)
         cfg = data.get("config", {})
         if keys:
             return {k: cfg[k] for k in keys if k in cfg}
@@ -224,7 +437,18 @@ class OrcaClient:
 
     async def put_config(self, changes: dict) -> dict:
         await self._guard_config(changes)
-        return await self._request("PUT", "/api/v1/config", json=changes)
+        try:
+            return await self._request("PUT", "/api/v1/config", json=changes)
+        except Validation as e:
+            if (POLICY_TOKEN in (e.errors or {}).values()
+                    and _BACKENDS.get(self._cfg.base_url) is None):
+                # Whose policy refused it (the build's Preferences box, or the plugin, which has
+                # none) decides the hint; one quick /status read records the backend.
+                try:
+                    await self._request("GET", "/api/v1/status", _count=False, timeout=_NOTE_TIMEOUT_S)
+                except Exception:  # noqa: BLE001
+                    pass
+            raise
 
     async def restore_config(self, snapshot: dict) -> dict:
         """Write back values read with get_config earlier in the same call (compare_*
@@ -282,19 +506,8 @@ class OrcaClient:
         return await self._request("PUT", f"/api/v1/objects/{obj_id}/height_range", json=body)
 
     async def get_gcode(self) -> bytes:
-        try:
-            resp = await self._http.get("/api/v1/gcode")
-        except httpx.TimeoutException as e:
-            raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
-        except httpx.TransportError as e:
-            raise NotReachable(f"OrcaSlicer not reachable at {self._cfg.base_url}: {e}") from e
-        if resp.status_code >= 400:
-            try:
-                body = resp.json()
-            except Exception:
-                body = {}
-            raise error_from_status(resp.status_code, body)
-        return resp.content
+        mark_reached()
+        return (await self._send("GET", "/api/v1/gcode")).content
 
     async def get_plate_render(self, view: str = "editor", angle: str = "iso",
                                width: int = 800, height: int = 600,
@@ -303,19 +516,8 @@ class OrcaClient:
             "view": view, "angle": angle, "width": width, "height": height}
         if frame is not None:
             params["frame"] = frame
-        try:
-            resp = await self._http.get("/api/v1/plate/render", params=params)
-        except httpx.TimeoutException as e:
-            raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
-        except httpx.TransportError as e:
-            raise NotReachable(f"OrcaSlicer not reachable at {self._cfg.base_url}: {e}") from e
-        if resp.status_code >= 400:
-            try:
-                body = resp.json()
-            except Exception:
-                body = {}
-            raise error_from_status(resp.status_code, body)
-        return resp.content
+        mark_reached()
+        return (await self._send("GET", "/api/v1/plate/render", params=params)).content
 
     def _ws_url(self) -> str:
         base = self._cfg.base_url
@@ -326,6 +528,7 @@ class OrcaClient:
         events: list[dict] = []
         deadline = asyncio.get_event_loop().time() + seconds
         try:
+            mark_reached()
             async with websockets.connect(self._ws_url()) as ws:
                 while True:
                     remaining = deadline - asyncio.get_event_loop().time()

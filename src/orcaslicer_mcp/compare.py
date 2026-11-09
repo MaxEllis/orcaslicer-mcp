@@ -9,19 +9,38 @@ from __future__ import annotations
 import math
 
 
-def _fmt_time(seconds: float | None) -> str:
-    """Whole minutes, seconds dropped (a slice estimate is not second-accurate)."""
+def _minutes(seconds: float | None) -> int | None:
+    """The whole minutes the table shows (a slice estimate is not second-accurate)."""
     if seconds is None:
-        return "?"
-    total_min = int(math.floor(seconds / 60.0 + 0.5))
+        return None
+    return int(math.floor(seconds / 60.0 + 0.5))
+
+
+def _grams(g: float | None) -> float | None:
+    """The tenth of a gram the table shows."""
+    return None if g is None else round(g, 1)
+
+
+def _fmt_minutes(total_min: int) -> str:
     h, m = divmod(total_min, 60)
     return f"{h}h {m:02d}m" if h else f"{m}m"
 
 
-def _signed_time(delta_s: float) -> str:
-    if abs(delta_s) < 30:  # rounds to 0 min; avoid a signed "-0m"
+def _fmt_time(seconds: float | None) -> str:
+    """Whole minutes, seconds dropped."""
+    if seconds is None:
+        return "?"
+    return _fmt_minutes(_minutes(seconds))
+
+
+def _signed_minutes(delta_min: int) -> str:
+    if delta_min == 0:
         return "0m"
-    return f"{'+' if delta_s >= 0 else '-'}{_fmt_time(abs(delta_s))}"
+    return f"{'+' if delta_min > 0 else '-'}{_fmt_minutes(abs(delta_min))}"
+
+
+def _signed_time(delta_s: float) -> str:
+    return _signed_minutes(_minutes(abs(delta_s)) * (1 if delta_s >= 0 else -1))
 
 
 def _signed_mass(delta_g: float) -> str:
@@ -50,39 +69,42 @@ def _has_warn(r: dict) -> int:
 
 
 def _candidates(results: list[dict]) -> list[dict]:
-    """Only variants that actually sliced can be recommended or compared numerically."""
-    return [r for r in results
-            if r.get("error") is None and r.get("time_s") is not None
-            and r.get("filament_g") is not None]
+    """Only variants that actually sliced can be recommended or compared numerically. Each gets
+    the shown (rounded) minutes and grams: every comparison and delta uses those, so what the
+    table says adds up (usability test 2026-11-09: '20m vs 16m' next to a '-3m' delta)."""
+    out = []
+    for r in results:
+        if r.get("error") is None and r.get("time_s") is not None and r.get("filament_g") is not None:
+            out.append({**r, "_min": _minutes(r["time_s"]), "_g": _grams(r["filament_g"])})
+    return out
 
 
-def _dominates(a: dict, b: dict) -> bool:
-    """a dominates b: no worse on time, filament, warnings; strictly better on >=1."""
-    no_worse = (a["time_s"] <= b["time_s"] and a["filament_g"] <= b["filament_g"]
-                and _has_warn(a) <= _has_warn(b))
-    strictly = (a["time_s"] < b["time_s"] or a["filament_g"] < b["filament_g"]
-                or _has_warn(a) < _has_warn(b))
-    return no_worse and strictly
+def _no_worse(a: dict, b: dict) -> bool:
+    """a is at least as good as b on time, filament and warnings (as shown)."""
+    return a["_min"] <= b["_min"] and a["_g"] <= b["_g"] and _has_warn(a) <= _has_warn(b)
 
 
 def _extremes(cand: list[dict]) -> tuple[str | None, str | None]:
     if not cand:
         return (None, None)
-    fastest = min(cand, key=lambda r: r["time_s"])["name"]
-    lightest = min(cand, key=lambda r: r["filament_g"])["name"]
+    fastest = min(cand, key=lambda r: r["_min"])["name"]
+    lightest = min(cand, key=lambda r: r["_g"])["name"]
     return (fastest, lightest)
 
 
 def _recommend(cand: list[dict]) -> tuple[str | None, bool, dict | None, str]:
-    """Return (recommended_name, is_dominant, tradeoff, reason)."""
+    """Return (recommended_name, is_dominant, tradeoff, reason).
+
+    A variant is recommended (and starred) only when it is at least as good as every other on
+    time, filament and warnings. In a trade-off nothing is recommended: the reply names the
+    fastest and the lightest and leaves the choice to the user."""
     if not cand:
         return (None, False, None, "no variant sliced successfully")
 
     fastest, lightest = _extremes(cand)
 
-    # A single variant that dominates every other is the only honest "winner".
     for a in cand:
-        if all(a is b or _dominates(a, b) for b in cand):
+        if all(a is b or _no_worse(a, b) for b in cand):
             parts = []
             if a["name"] == fastest:
                 parts.append("fastest")
@@ -93,13 +115,24 @@ def _recommend(cand: list[dict]) -> tuple[str | None, bool, dict | None, str]:
             reason = ", ".join(parts) if parts else "no worse than the alternatives on any metric"
             return (a["name"], True, None, reason)
 
-    # Trade-off: satisficing default under a stated house rule.
+    tradeoff = {"fastest": fastest, "lightest": lightest}
     warning_free = [r for r in cand if not _has_warn(r)]
-    pool = warning_free or cand
-    pick = min(pool, key=lambda r: r["time_s"])["name"]
-    rule = "the fastest option with no warnings" if warning_free else "the fastest option (all variants flag a warning)"
-    reason = f"no single option wins on everything; suggested as {rule}"
-    return (pick, False, {"fastest": fastest, "lightest": lightest}, reason)
+    if warning_free and len(warning_free) < len(cand):
+        tradeoff["fastest_without_warnings"] = min(warning_free, key=lambda r: r["_min"])["name"]
+    return (None, False, tradeoff, "no single option wins on time, filament and warnings")
+
+
+def _tradeoff_headline(tradeoff: dict) -> str:
+    fastest, lightest = tradeoff["fastest"], tradeoff["lightest"]
+    clean = tradeoff.get("fastest_without_warnings")
+    if fastest == lightest:
+        # The trade-off is the warning: the fastest and lightest option has one.
+        return (f"No clear winner: {fastest} is fastest and lightest but has a warning, "
+                f"{clean} has no warnings.")
+    head = f"No clear winner: {fastest} is fastest, {lightest} is lightest."
+    if clean and clean not in (fastest, lightest):
+        head += f" {clean} is the fastest with no warnings."
+    return head
 
 
 def _delta_vs(r: dict, base: dict | None) -> dict:
@@ -109,15 +142,18 @@ def _delta_vs(r: dict, base: dict | None) -> dict:
     if r["name"] == base["name"]:
         return {"time_pct": 0, "time_formatted": "baseline",
                 "filament_pct": 0, "filament_formatted": "baseline"}
-    t_pct, t_pct_s = _pct(r["time_s"], base["time_s"])
-    g_pct, g_pct_s = _pct(r["filament_g"], base["filament_g"])
+    r_min, b_min = _minutes(r["time_s"]), _minutes(base["time_s"])
+    r_g, b_g = _grams(r["filament_g"]), _grams(base["filament_g"])
+    t_pct, t_pct_s = _pct(r_min, b_min)
+    g_pct, g_pct_s = _pct(r_g, b_g)
+    t_delta, g_delta = _signed_minutes(r_min - b_min), _signed_mass(r_g - b_g)
     return {
         "time_pct": t_pct,
-        "time_delta": _signed_time(r["time_s"] - base["time_s"]),
-        "time_formatted": f"{_signed_time(r['time_s'] - base['time_s'])} ({t_pct_s})",
+        "time_delta": t_delta,
+        "time_formatted": f"{t_delta} ({t_pct_s})",
         "filament_pct": g_pct,
-        "filament_delta": _signed_mass(r["filament_g"] - base["filament_g"]),
-        "filament_formatted": f"{_signed_mass(r['filament_g'] - base['filament_g'])} ({g_pct_s})",
+        "filament_delta": g_delta,
+        "filament_formatted": f"{g_delta} ({g_pct_s})",
     }
 
 
@@ -188,13 +224,12 @@ def compute_comparison(results: list[dict], baseline: str | None, detail: bool) 
             row["roles"] = r.get("roles")
         variants.append(row)
 
-    if recommended is None:
-        headline = "No variant sliced successfully."
-    elif is_dominant:
+    if recommended is not None:
         headline = f"Recommended: {recommended} - {reason}."
+    elif tradeoff is not None:
+        headline = _tradeoff_headline(tradeoff)
     else:
-        headline = (f"Recommended: {recommended} - {reason}. "
-                    f"Trade-off: fastest is {fastest}, lightest is {lightest}.")
+        headline = "No variant sliced successfully."
 
     table = _render_table(variants, base_name or "?", recommended)
     for v in variants:

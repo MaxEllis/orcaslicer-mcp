@@ -15,16 +15,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 - The outcome store and the `save_gcode` G-code folder no longer pick up a shared folder under `~/projects` when one exists. They use `PRINT_OUTCOMES_DIR` when it is set, otherwise `~/.orcaslicer-mcp/outcomes/` (store) and `~/.orcaslicer-mcp/` (G-code). To keep an existing store in another folder, set `PRINT_OUTCOMES_DIR` to it, for the klipper-mcp recorder too.
-
-### Security
-- Ready for OrcaSlicer 2.5: the config guard also refuses `slicing_pipeline_plugin` (Python plugins that run at each slicing step), `plugins` (the plugins a preset brings with it) and `*_gcodes` lists of G-code such as `imex_mode_gcodes`. `high_precision_gcode`, a 2.5 on/off setting, stays writable.
-
-### Changed
 - `describe_setting` and `search_settings` now know OrcaSlicer 2.5.0's settings (992, up from 807, built from the 2.4.2 and 2.5.0 sources). A setting added in 2.5 carries `since: "2.5.0"`; `silent_mode`, which 2.5 removed, carries `removed_in: "2.5.0"`.
 - On the OrcaSlicer MCP plugin, a refused action now says what failed and how to do it by hand in OrcaSlicer (press Slice plate and read out the time, Arrange all objects in the toolbar, the save icon beside the preset name), and mentions the OrcaSlicer MCP build after that. `compare_slices` and `compare_settings` refuse up front there, so nothing changes.
 - Refusals made by the connector itself (locked settings, out-of-range values, and on the plugin the actions it can't do) now show in OrcaSlicer's MCP panel too, on builds that have the panel's note route.
 - `get_status` says in words whether it reached the OrcaSlicer MCP build or the plugin, and leaves OrcaSlicer's internal nozzle bookkeeping out of the list of modified settings. `get_printer_status` says first when it falls back to the printer you last used, which may not be the one selected in OrcaSlicer now.
 - Every tool's description now opens with one whole sentence that says when to pick it over a similar tool, and the text below it no longer repeats that sentence.
+- `add_plate` notes that on OrcaSlicer 2.5, adding a 2nd, 5th or 10th plate rearranges the plate grid and clears every plate's slice result.
 
 ### Fixed
 - A setting can no longer be changed to a value outside its allowed range. A layer height of -1 used to be applied, and the next slice ran out of memory and closed OrcaSlicer with the project unsaved; 250% infill went through without a word. `set_config`, `apply_and_slice`, `set_object_config`, `edit_preset` and the compare tools now check every value against the setting's own limits first (a percentage by its number, each entry of a list on its own) and refuse with the allowed range. Writing back a value a setting already has is never refused, even when a shipped profile holds it outside the range. When OrcaSlicer refuses a value itself, its own sentence is passed on.
@@ -35,6 +31,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `compare_slices` no longer fills OrcaSlicer's MCP panel with its trial runs: one line such as "Compared 3 options · nothing kept" sums the comparison up. It recommends and stars a variant only when it is at least as good as every other on time, filament and warnings; when they trade off it says "No clear winner: X is fastest, Y is lightest." The differences now add up with the rounded minutes and grams the table shows. If a comparison can't put your settings back, the reply and the panel say which ones.
 - Slice warnings carry OrcaSlicer's sentence next to the code, and the level as a word.
 - Every error has a readable explanation, and none sends you to an HTTP route; a missing file given as a bare name asks for the full path.
+
+### Security
+- Ready for OrcaSlicer 2.5: the config guard also refuses `slicing_pipeline_plugin` (Python plugins that run at each slicing step), `plugins` (the plugins a preset brings with it) and `*_gcodes` lists of G-code such as `imex_mode_gcodes`. `high_precision_gcode`, a 2.5 on/off setting, stays writable.
 
 ## [0.1.20] - 2026-11-09
 

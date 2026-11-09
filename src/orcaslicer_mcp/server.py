@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import inspect
 import contextvars
 import functools
 import json
@@ -295,7 +296,7 @@ def _tool(*targs, **tkw):
 
     def deco(fn):
         # Sync tools never talk to OrcaSlicer; only coroutines can reach it.
-        wrapped = _with_user_changes(fn) if asyncio.iscoroutinefunction(fn) else fn
+        wrapped = _with_user_changes(fn) if inspect.iscoroutinefunction(fn) else fn
         register(wrapped)
         return wrapped
     return deco

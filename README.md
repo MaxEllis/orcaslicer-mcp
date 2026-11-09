@@ -13,7 +13,7 @@
   <a href="https://lobehub.com/mcp/maxellis-orcaslicer-mcp"><img alt="MCP Badge" src="https://lobehub.com/badge/mcp/maxellis-orcaslicer-mcp"></a>
 </p>
 
-<p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/story.png" alt="Three steps: a chat in your AI app above, OrcaSlicer below. 1: you write that the brackets will hold up a shelf and must not snap, without doubling the print time; OrcaSlicer shows the bracket standing. 2: the assistant explains that standing up, the layers run across the arm that takes the load, and lays it on its side with more walls and 25% gyroid infill; OrcaSlicer's MCP panel lists each change with Rotate back or Revert. 3: OrcaSlicer's slices compared: 42 min and 36.2 g as designed, 45 min and 52.0 g stronger; lying flat saves 5 minutes."></p>
+<p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/story.png" alt="Three steps: a chat in your AI app above, OrcaSlicer below. 1: you write that you designed these brackets to hold up a shelf and want them as strong as you can get; OrcaSlicer shows the bracket standing. 2: the assistant explains that standing up, the layers run across the arm that takes the load, and lays it on its side with more walls and 25% gyroid infill; OrcaSlicer's MCP panel lists each change with Rotate back or Revert. 3: OrcaSlicer's slices compared: 42 min and 36.2 g as designed, 45 min and 52.0 g stronger; lying flat saves 5 minutes."></p>
 
 You talk to the assistant in your usual AI app, in plain words. It makes the changes in OrcaSlicer, in the window you already use: settings, presets, models, slicing. A panel beside the 3D view lists every change it makes, with a way to undo each one.
 
@@ -57,7 +57,7 @@ In Claude Desktop, install `orcaslicer-mcp-<version>.mcpb` from the [latest rele
 Goals, in your own words, the way you'd ask a friend who knows OrcaSlicer:
 
 - *"This lid has to press onto a 40 mm jar. What do I change so it fits first time?"*
-- *"These brackets will hold up a shelf. Make them strong enough without doubling the print time."*
+- *"I designed these brackets to hold up a shelf and want them as strong as I can get. What would you change?"*
 - *"It's going on a car dashboard. Will PLA survive, and what should I change if I use PETG?"*
 - *"The top of this box looks rough. How do I get it smooth?"*
 - *"Why does this take six hours, and what can I do about it?"*

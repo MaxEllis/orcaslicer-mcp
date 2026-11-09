@@ -1,6 +1,6 @@
 name: Publish to MCP Registry
 
-# Publishes server.json to the official MCP registry
+# Publishes packaging/server.json to the official MCP registry
 # (https://registry.modelcontextprotocol.io) under the io.github.MaxEllis
 # namespace. Authentication is GitHub OIDC: the registry trusts a workflow
 # running in a repo owned by the namespace owner, so no stored secret or
@@ -29,14 +29,18 @@ jobs:
           ./mcp-publisher --version || true
 
       - name: Sanity-check server.json version matches pyproject
+        working-directory: packaging
         run: |
           sv=$(python3 -c "import json;print(json.load(open('server.json'))['version'])")
-          pv=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          pv=$(python3 -c "import tomllib;print(tomllib.load(open('../pyproject.toml','rb'))['project']['version'])")
           echo "server.json=$sv  pyproject=$pv"
           test "$sv" = "$pv" || { echo "version mismatch"; exit 1; }
 
       - name: Log in to the registry (GitHub OIDC)
         run: ./mcp-publisher login github-oidc
 
+      # mcp-publisher reads ./server.json, which lives in packaging/.
+
       - name: Publish
-        run: ./mcp-publisher publish
+        working-directory: packaging
+        run: ../mcp-publisher publish

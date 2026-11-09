@@ -8,7 +8,7 @@ OrcaSlicer MCP is an independent project. The dot is a brighter take on OrcaSlic
 
 | File | Use |
 | --- | --- |
-| `icon.svg`, `icon-512.png` | App and plugin icon. Also used as `mcpb/icon.png`. |
+| `icon.svg`, `icon-512.png` | App and plugin icon. Also used as `packaging/mcpb/icon.png`. |
 | `logo-horizontal-light.svg`, `logo-horizontal-dark.svg` | Icon and name side by side. README header. PNGs at 240 px tall sit beside them. |
 | `logo-stacked-light.svg`, `logo-stacked-dark.svg` | Icon above the name, for centred layouts. |
 | `wordmark-light.svg`, `wordmark-dark.svg` | The name alone. |

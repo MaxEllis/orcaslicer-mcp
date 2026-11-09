@@ -10,8 +10,8 @@ import anyio
 import orcaslicer_mcp.server as srv
 
 ROOT = Path(__file__).resolve().parents[1]
-LISTING = ROOT / "lhm.plugin.json"
-REGEN = "lhm.plugin.json is stale: run .venv/bin/python scripts/gen_lhm_tools.py"
+LISTING = ROOT / "packaging" / "lhm.plugin.json"
+REGEN = "packaging/lhm.plugin.json is stale: run .venv/bin/python scripts/gen_lhm_tools.py"
 ABBREVIATION_END = re.compile(r"\b(?:e\.g|i\.e|etc|vs)\.$", re.IGNORECASE)  # a summary that stops here was cut
 
 

@@ -3,7 +3,7 @@
 No live API here: the orchestrator in server.py produces one result dict per
 variant and this module turns them into the research-backed output shape
 (headline + table + structured rows), computing every derived number so the
-model never has to. See docs/superpowers/specs/2026-08-07-compare-slices-design.md.
+model never has to. See docs/design/2026-08-07-compare-slices-design.md.
 """
 from __future__ import annotations
 import math

@@ -38,7 +38,7 @@ def test_refusal_gives_one_plain_step():
 
 def test_mcpb_field_title_matches_the_refusal():
     import pathlib
-    manifest = json.loads((pathlib.Path(__file__).parent.parent / "mcpb" / "manifest.json").read_text())
+    manifest = json.loads((pathlib.Path(__file__).parent.parent / "packaging" / "mcpb" / "manifest.json").read_text())
     field = manifest["user_config"]["allow_keys"]
     assert field["title"] == "Allow sensitive config keys"
     assert manifest["server"]["mcp_config"]["env"]["ORCA_MCP_ALLOW_KEYS"] == "${user_config.allow_keys}"

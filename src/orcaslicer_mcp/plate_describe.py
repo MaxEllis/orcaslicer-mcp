@@ -1,5 +1,5 @@
 """Turn the last slice's G-code into per-object plate facts for the model (spec:
-docs/superpowers/specs/2026-09-08-describe-plate-design.md). Stdlib only: this module is pure so it
+docs/design/2026-09-08-describe-plate-design.md). Stdlib only: this module is pure so it
 can be tested on fixtures without OrcaSlicer, and vendored if ever needed.
 
 Everything spatial is computed on a 1 mm XY occupancy grid per (object, layer), filled while the

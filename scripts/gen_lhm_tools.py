@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Rewrite the `tools` array of lhm.plugin.json from the tools the live server registers.
+"""Rewrite the `tools` array of packaging/lhm.plugin.json from the tools the live server registers.
 
-    .venv/bin/python scripts/gen_lhm_tools.py           # rewrite lhm.plugin.json
+    .venv/bin/python scripts/gen_lhm_tools.py           # rewrite packaging/lhm.plugin.json
     .venv/bin/python scripts/gen_lhm_tools.py --check   # exit 1 if it is stale (what the test does)
 
 Names and order come from the server's own tool list. Each description is the first paragraph of the
@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 
-LISTING = Path(__file__).resolve().parents[1] / "lhm.plugin.json"
+LISTING = Path(__file__).resolve().parents[1] / "packaging" / "lhm.plugin.json"
 MAX_CHARS = 300
 # A sentence ends at . ! or ? followed by whitespace and a capital, digit, quote or bracket. A period
 # that closes e.g. / i.e. / etc. / vs. does not end one ("(e.g. 0 to 5 mm)" and "(e.g. 'warped')"
@@ -54,7 +54,7 @@ def main(argv: list[str]) -> int:
     new = render(listing)
     if "--check" in argv:
         if LISTING.read_text(encoding="utf-8") != new:
-            print("lhm.plugin.json is stale: run scripts/gen_lhm_tools.py", file=sys.stderr)
+            print("packaging/lhm.plugin.json is stale: run scripts/gen_lhm_tools.py", file=sys.stderr)
             return 1
         return 0
     LISTING.write_text(new, encoding="utf-8")

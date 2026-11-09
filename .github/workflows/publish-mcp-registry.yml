@@ -18,6 +18,8 @@ permissions:
 
 jobs:
   publish:
+    # Server releases are tagged vX.Y.Z; plugin releases (plugin-vX.Y.Z) go to OrcaCloud instead.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

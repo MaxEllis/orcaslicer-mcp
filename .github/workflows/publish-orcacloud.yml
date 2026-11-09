@@ -1,0 +1,49 @@
+# Publishes the OrcaSlicer MCP plugin (plugin/orcaslicer_mcp_plugin.py) to its OrcaCloud listing.
+# Based on the Orca Cloud wiki's "Publish from GitHub" workflow: OIDC trusted publishing, so there are
+# no tokens or secrets. The listing is connected to this repository (Edit plugin > GitHub publishing).
+#
+# Only plugin releases run it: a GitHub release tagged plugin-vX.Y.Z, created with --latest=false so
+# /releases/latest keeps pointing at the orcaslicer-mcp release. Its notes become the OrcaCloud
+# changelog (max 4000 characters). OrcaCloud wants the OS suffix "_any" in the file name.
+name: Publish plugin to OrcaCloud
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    if: startsWith(github.event.release.tag_name, 'plugin-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the plugin version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#plugin-v}"
+          [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "tag must be plugin-vX.Y.Z" >&2; exit 1; }
+          f=plugin/orcaslicer_mcp_plugin.py
+          grep -q "^# version = \"$tag\"$" "$f" || { echo "header version != $tag" >&2; exit 1; }
+          grep -q "^PLUGIN_VERSION = \"$tag\"$" "$f" || { echo "PLUGIN_VERSION != $tag" >&2; exit 1; }
+          mkdir -p dist && cp "$f" dist/orcaslicer_mcp_plugin_any.py
+
+      - name: Publish release to OrcaCloud
+        run: |
+          set -euo pipefail
+          oidc_token="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=orcacloud" | jq -r .value)"
+          version="${GITHUB_REF_NAME#plugin-v}"
+          changelog="$(jq -r '.release.body // ""' "$GITHUB_EVENT_PATH" | head -c 4000)"
+          metadata="$(jq -cn --arg version "$version" --arg changelog "$changelog" \
+            '{version: $version} + (if $changelog == "" then {} else {changelog: $changelog} end)')"
+          status="$(curl -sS -o response.json -w '%{http_code}' \
+            -H "Authorization: Bearer $oidc_token" \
+            -F "metadata=$metadata" -F "files=@dist/orcaslicer_mcp_plugin_any.py" \
+            https://api.orcaslicer.com/api/v1/plugin-publish/releases)"
+          cat response.json; echo
+          [ "$status" = "201" ]

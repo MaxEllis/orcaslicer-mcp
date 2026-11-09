@@ -154,8 +154,7 @@ async def test_sync_tools_and_errors_are_left_alone(monkeypatch):
 def _plugin_source() -> pathlib.Path | None:
     env = os.environ.get("ORCASLICER_MCP_PLUGIN_SRC")
     candidates = [pathlib.Path(env)] if env else []
-    candidates.append(pathlib.Path(__file__).resolve().parents[2] / "orcaslicer-mcp-plugin" /
-                      "orcaslicer_mcp_plugin.py")
+    candidates.append(pathlib.Path(__file__).resolve().parents[1] / "plugin" / "orcaslicer_mcp_plugin.py")
     return next((p for p in candidates if p.is_file()), None)
 
 

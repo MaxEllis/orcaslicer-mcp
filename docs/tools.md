@@ -8,14 +8,14 @@
 | **Knowing what they mean** | Look settings up in OrcaSlicer's own labels and tooltips, and check a profile against your printer's physical limits before printing. | `describe_setting` `search_settings` `compare_settings` `consult` `check_profile_physics` |
 | **Presets** | Switch, edit, save, rename and delete presets, and choose the filament preset of one slot on a multi-filament printer. | `list_presets` `select_preset` `get_preset_config` `edit_preset` `save_preset` `rename_preset` `delete_preset` |
 | **Models** | Load STL, OBJ, 3MF and STEP files, then move, rotate, scale, duplicate, arrange and auto-orient them. | `load_model` `list_objects` `transform_object` `duplicate_object` `delete_object` `arrange_plate` `auto_orient` `check_placement` `diagnose_plate` |
-| **Slicing** | Slice, read time, filament and OrcaSlicer's warnings, split the result by feature, and compare several settings in one go. | `slice_and_wait` `apply_and_slice` `get_slice_breakdown` `compare_slices` `get_slice_warnings` `get_gcode` `save_gcode` |
+| **Slicing** | Slice, read time, filament and OrcaSlicer's warnings, split the result by feature, and compare several settings in one go. | `slice` `slice_and_wait` `apply_and_slice` `get_slice_status` `cancel_slice` `get_slice_breakdown` `compare_slices` `get_slice_warnings` `get_gcode` `save_gcode` |
 | **Seeing the plate** | Get the plate as a picture, or as a short description of how each part stands, where support goes and where the seams sit. | `render_plate` `describe_plate` |
 | **Plates** | Build a project with several plates, one part per plate, each sliced on its own. | `list_plates` `add_plate` `select_plate` `delete_plate` `move_object_to_plate` |
-| **Projects** | Save, open and start projects as the File menu does, browse and tidy project files, and see whether there is something to save. | `save_project` `open_project` `new_project` `get_project` `list_recent_projects` `browse_projects` `move_project_file` |
+| **Projects** | Save, open and start projects as the File menu does, browse and tidy project files, and see whether there is something to save. | `save_project` `open_project` `new_project` `get_project` `list_recent_projects` `open_recent_project` `forget_recent_project` `browse_projects` `move_project_file` `delete_project_file` |
 | **Your printer** | Read what a Klipper or OctoPrint printer is doing, wait for a print to reach a stage, list past jobs, and check the profile matches the printer. Read-only. | `get_printer_status` `wait_for_printer` `list_print_history` `check_printer_match` |
 | **Learning from prints** | Record each slice with its settings, match it to how the print turned out, and recall that next time. | `recall_prints` `remember` |
 
-The rest are status, job and event tools (`get_status`, `watch_events`, `get_job_status` and the like) and the CANVAS tray mapping for the Elegoo Centauri Carbon 2.
+The rest: `get_status`, `get_job_status` and `watch_events` report on OrcaSlicer and what it is doing, and `get_printer_slots`, `get_filament_slot_mapping` and `set_filament_slot_mapping` map filaments to the CANVAS trays of an Elegoo Centauri Carbon 2.
 
 ## What the assistant sees
 
@@ -50,17 +50,16 @@ A `prediction_check` comes with it and flags any feature whose requested speed w
 
 `compare_slices` slices the plate under several variants, puts your settings back afterwards, and returns one table with the differences worked out:
 
-```
-Recommended: 0.4mm - fastest with no warnings.
+> No clear winner: 0.6mm is fastest, 0.3mm is lightest.
 
-variant     time      filament   vs 0.4mm (baseline)
-0.3mm       8h 10m    41.0 g      +1h 30m (+22%), -7.0 g (-15%)
-0.4mm  *    6h 40m    48.0 g      baseline
-0.5mm       5h 20m    53.4 g      -1h 20m (-20%), +5.4 g (+11%)
-0.6mm       4h 35m    57.1 g      -2h 05m (-31%), +9.1 g (+19%)  thin-wall warning
-```
+| Variant | Time | Filament | vs 0.4mm | Notes |
+|---|---|---|---|---|
+| 0.3mm | 8h 10m | 41.0 g | +1h 30m (+22%), -7.0 g (-15%) | lightest |
+| 0.4mm | 6h 40m | 48.0 g | baseline | |
+| 0.5mm | 5h 20m | 53.4 g | -1h 20m (-20%), +5.4 g (+11%) | |
+| 0.6mm | 4h 35m | 57.1 g | -2h 05m (-31%), +9.1 g (+19%) | fastest, ⚠ 1 warning |
 
-It recommends a variant only when one beats the rest on time, filament and warnings. When they trade off, it names the fastest and the lightest and leaves the choice to you.
+Here every option trades time against filament, so it recommends none: it names the fastest and the lightest and leaves the choice to you. Only when one variant is at least as good as every other on time, filament and warnings does it say so, and mark that row ★.
 
 ## How the part sits
 

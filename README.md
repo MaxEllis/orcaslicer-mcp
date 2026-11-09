@@ -13,7 +13,7 @@
   <a href="https://lobehub.com/mcp/maxellis-orcaslicer-mcp"><img alt="MCP Badge" src="https://lobehub.com/badge/mcp/maxellis-orcaslicer-mcp"></a>
 </p>
 
-OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in plain words in the AI app, the changes happen in the OrcaSlicer window you already use, and a panel beside the 3D view lists each one with a way to undo it.
+OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in plain words in the AI app, the changes happen in the OrcaSlicer window you already use, and the OrcaSlicer MCP panel beside the 3D view lists each one with a way to undo it.
 
 **1. Say what the print needs**
 
@@ -21,7 +21,7 @@ OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in pla
 
 **2. It changes what matters, and says why**
 
-<p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/step2.png" alt="Your AI app: the assistant says it made three changes: on its side, because standing up the layers run across the arm that takes the load; 7 walls instead of 4, which makes the arms solid; 215 °C instead of 200 so the layers fuse. A line runs from each reason to OrcaSlicer's MCP panel: Rotated 90° about X (Rotate back), Wall loops 7, was 4 (Revert), Nozzle temperature 215 °C, was 200 (Revert)."></p>
+<p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/step2.png" alt="Your AI app: the assistant says it made three changes: on its side, because standing up the layers run across the arm that takes the load; 7 walls instead of 4, which makes the arms solid; 215 °C instead of 200 so the layers fuse. A line runs from each reason to the OrcaSlicer MCP panel: Rotated 90° about X (Rotate back), Wall loops 7, was 4 (Revert), Nozzle temperature 215 °C, was 200 (Revert)."></p>
 
 **3. See the trade-off before you print**
 
@@ -60,7 +60,11 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
 
 **1. Turn on the connection in OrcaSlicer.**
 - **Build:** open **Preferences → Remote API**, tick **Enable Remote API** and copy the token (a password for your AI app).
-- **Plugin:** subscribe on OrcaCloud and install it from OrcaSlicer's main menu (the icon beside **File**) → **Plugins**, or there choose **Install local plugin** (the arrow beside **Install plugin**) and pick the downloaded file. Tick **Activate** and allow the two permissions it asks for, then copy the token from its **Config** tab. Use one install or the other: each keeps its own token.
+- **Plugin:** open OrcaSlicer's main menu (the icon beside **File**) → **Plugins**, then install it one of two ways:
+  - **From OrcaCloud:** subscribe on [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE), then install OrcaSlicer MCP from the list.
+  - **From a downloaded file:** download `orcaslicer_mcp_plugin.py` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest). Click the arrow beside **Install plugin** and choose **Install local plugin**. The first time, this only renames the green button, so click **Install local plugin** again and pick the file.
+
+  Tick **Activate**. OrcaSlicer then shows **Plugin permissions**: network access to `127.0.0.1`, which means this computer only, and permission to create a thread, which keeps the connection running. Choose **Yes**; **No** stops the plugin. Then copy the token from the plugin's **Config** tab. Use one install or the other: each keeps its own token.
 
 **2. Add the connector to your AI app.**
 - **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest), open it, and paste the token into its settings. Nothing else to install.
@@ -78,13 +82,14 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
   }
   ```
 
-**3. Check it works.** With OrcaSlicer open, ask *"Which printer and filament is OrcaSlicer set up for?"* The answer should name your printer and filament presets. If it can't connect, see [troubleshooting](docs/troubleshooting.md).
+**3. Check it works.** With OrcaSlicer open, ask *"Which printer and filament is OrcaSlicer set up for?"* The answer should name your printer and filament presets. If it can't connect, or your app warns about too many tools, see [troubleshooting](docs/troubleshooting.md).
 
 ## You stay in charge
 
-- **Every change shows in the panel.** Undo any one, or put the project back to an earlier point (build only).
+- **Every change shows in the OrcaSlicer MCP panel.** Undo any one there, or put the project back to an earlier point (build only). OrcaSlicer's own Ctrl+Z (⌘Z on a Mac) undoes model edits, not settings, so use the panel to take a setting back. Closed the panel? **View → OrcaSlicer MCP panel** brings it back.
 - **It knows what you changed.** When you edit something yourself, the assistant is told with its next reply, so it doesn't undo your work.
-- **It stays on your computer.** OrcaSlicer only accepts connections from this computer, and each one needs the token. The assistant can't touch scripts, custom G-code or printer connections unless you allow it in Preferences. [Security details](docs/security.md)
+- **It stays on your computer.** OrcaSlicer only accepts connections from this computer, and each one needs the token. [Security details](docs/security.md)
+- **Scripts and G-code stay locked.** The assistant can't touch scripts, custom G-code or printer connections. With the plugin it never can. With the build, allowing it takes two switches: tick **Allow script, G-code and connection edits** in **Preferences → Remote API**, and list those settings in the connector's allowed keys in your AI app (`ORCA_MCP_ALLOW_KEYS`, which Claude Desktop calls **Allow sensitive config keys**).
 
 ## Privacy policy
 

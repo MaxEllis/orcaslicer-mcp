@@ -87,10 +87,11 @@ def test_deltas_use_the_shown_rounded_values():
     assert d["filament_delta"] == "0.0 g" and d["filament_pct"] == 0
 
 
-def test_all_warnings_falls_back_to_fastest():
+def test_all_warnings_but_one_variant_dominates():
     res = [_r("A", t=4000, g=50.0, warnings=["w"]), _r("B", t=6000, g=52.0, warnings=["w"])]
     out = compare.compute_comparison(res, baseline=None, detail=False)
-    assert out["recommended"] == "A"  # fastest, since none are warning-free
+    assert out["recommended"] == "A"  # faster and lighter, warnings alike: A dominates
+    assert out["recommended_is_dominant"] is True
 
 
 # --- baseline + deltas ------------------------------------------------------

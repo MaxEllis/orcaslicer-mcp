@@ -7,7 +7,10 @@ import time
 import httpx
 import websockets
 from .config import Config
-from .errors import error_from_status, NotReachable, NotFound, ApiError, UiTimeout, OutOfRange
+from .errors import (error_from_status, NotReachable, NotFound, ApiError, UiTimeout, OutOfRange,
+                     Validation)
+
+POLICY_TOKEN = "blocked_by_remote_api_policy"
 from . import settings_schema
 from .ranges import out_of_range
 from .guard import (BlockedKey, sensitive_keys, changed_keys, check_placeholders,
@@ -33,6 +36,11 @@ def known_backend(base_url: str) -> str | None:
     return _BACKENDS.get(base_url)
 
 
+def _is_local(base_url: str) -> bool:
+    host = (httpx.URL(base_url).host or "").lower()
+    return host in ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
 def unreachable_message(base_url: str, e: Exception | None = None) -> str:
     why = (str(e) if e is not None else "") or (type(e).__name__ if e is not None else "")
     backend = _BACKENDS.get(base_url)
@@ -43,6 +51,8 @@ def unreachable_message(base_url: str, e: Exception | None = None) -> str:
     else:
         ask = ("Is OrcaSlicer open, with Preferences > Remote API turned on? With the OrcaSlicer "
                "MCP plugin on stock OrcaSlicer instead: is the plugin turned on?")
+    if not _is_local(base_url):
+        ask += " OrcaSlicer runs on another computer here: is that computer on and awake, and on the network?"
     return (f"not_reachable: OrcaSlicer isn't answering at {base_url}"
             + (f" ({why})" if why else "") + f". {ask} Ask the user to check.")
 
@@ -60,9 +70,12 @@ def mark_reached() -> None:
 
 
 NOTE_PATH = "/api/v1/activity/note"
-_NOTE_TIMEOUT_S = 5.0
+# A note is never worth a wait: a stuck OrcaSlicer (a dialog open) costs at most this per call.
+_NOTE_TIMEOUT_S = 1.5
 _NOTE_RETRY_S = 300.0  # an address that had no note route is asked again after this
+_NOTE_STUCK_S = 60.0  # an address that timed out on a note is skipped for this long
 _NOTE_UNSUPPORTED: dict[str, float] = {}
+_NOTE_STUCK: dict[str, float] = {}
 
 
 def _label(key: str) -> str:
@@ -74,6 +87,8 @@ def _label(key: str) -> str:
 REFUSED_KEYS_DETAIL = ("Refused by the AI app's OrcaSlicer MCP connector: scripts, custom G-code and "
                        "printer connection settings are locked. Change it yourself here, or allow it in "
                        "Preferences > Remote API and in the connector's allowed keys.")
+REFUSED_KEYS_DETAIL_PLUGIN = ("The OrcaSlicer MCP plugin never lets the assistant change scripts, custom "
+                              "G-code or printer connection settings. Change it yourself here.")
 
 
 class OrcaClient:
@@ -105,6 +120,10 @@ class OrcaClient:
             resp = await self._http.request(
                 method, path, json=json, params=params, headers=hdrs or None,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT)
+        except (httpx.ConnectTimeout, httpx.PoolTimeout) as e:
+            # No connection at all: OrcaSlicer is closed, or its computer is off or asleep. Only a
+            # read or write timeout means OrcaSlicer took the request and then didn't answer.
+            raise NotReachable(unreachable_message(self._cfg.base_url, e)) from e
         except httpx.TimeoutException as e:
             raise UiTimeout(timeout_message(self._effective_timeout(timeout))) from e
         except httpx.TransportError as e:
@@ -172,8 +191,12 @@ class OrcaClient:
         the route answer 404; that, and any other failure, is silent: a note never decides
         what a tool reports. A trial's header is never sent with it."""
         url = self._cfg.base_url
+        now = time.monotonic()
         at = _NOTE_UNSUPPORTED.get(url)
-        if at is not None and time.monotonic() - at < _NOTE_RETRY_S:
+        if at is not None and now - at < _NOTE_RETRY_S:
+            return False
+        at = _NOTE_STUCK.get(url)
+        if at is not None and now - at < _NOTE_STUCK_S:
             return False
         token = TRIAL.set(False)
         try:
@@ -181,41 +204,66 @@ class OrcaClient:
             if value:
                 body["value"] = value
             if detail:
-                body["detail"] = detail
+                body["detail"] = detail[:400]
             await self._request("POST", NOTE_PATH, json=body, _count=False, timeout=_NOTE_TIMEOUT_S)
             _NOTE_UNSUPPORTED.pop(url, None)
+            _NOTE_STUCK.pop(url, None)
             return True
         except NotFound:
             _NOTE_UNSUPPORTED[url] = time.monotonic()
+            return False
+        except (UiTimeout, NotReachable):
+            _NOTE_STUCK[url] = time.monotonic()
             return False
         except Exception:  # noqa: BLE001 - a note is never worth failing a tool over
             return False
         finally:
             TRIAL.reset(token)
 
-    async def _check_ranges(self, changes: dict) -> None:
+    async def _refused_note(self, text: str, value: str, detail: str) -> None:
+        """A connector-side refusal in the MCP panel, except during a comparison: OrcaSlicer
+        records nothing for trial requests, and the variant's error reaches the assistant."""
+        if TRIAL.get():
+            return
+        await self.post_note("refused", text, value, detail)
+
+    async def _check_ranges(self, changes: dict, current_reader) -> None:
+        """Refuse values outside their setting's range. Only when something fails are the present
+        values read (current_reader(keys)), so a value written back unchanged is never refused."""
         found = out_of_range(changes or {})
+        if not found:
+            return
+        try:
+            current = await current_reader(list(found))
+        except Exception:  # noqa: BLE001 - without them, judge every value
+            current = {}
+        found = out_of_range({k: changes[k] for k in found}, current)
         if found:
-            for key, r in found.items():  # one refused row per setting, as OrcaSlicer's own refusals
-                await self.post_note("refused", _label(key), "Out of range", r["detail"])
+            await self._refused_note(", ".join(_label(k) for k in found), "Out of range",
+                                     "; ".join(r["detail"] for r in found.values()))
             raise OutOfRange(found)
 
     async def _refuse_keys(self, keys: list[str]) -> None:
-        box_on = None
+        box_on, plugin = None, _BACKENDS.get(self._cfg.base_url) == "plugin"
         try:
-            box_on = (await self._request("GET", "/api/v1/status", _count=False)).get(
-                "sensitive_keys_allowed")
+            st = await self._request("GET", "/api/v1/status", _count=False, timeout=_NOTE_TIMEOUT_S)
+            box_on = st.get("sensitive_keys_allowed")
+            plugin = st.get("backend") == "plugin"
         except Exception:  # noqa: BLE001 - only refines the wording of the refusal
             pass
-        await self.post_note("refused", ", ".join(_label(k) for k in sorted(keys)), "Not allowed",
-                             REFUSED_KEYS_DETAIL)
-        raise BlockedKey(keys, preferences_box_on=box_on if isinstance(box_on, bool) else None)
+        await self._refused_note(", ".join(_label(k) for k in sorted(keys)), "Not allowed",
+                                 REFUSED_KEYS_DETAIL_PLUGIN if plugin else REFUSED_KEYS_DETAIL)
+        raise BlockedKey(keys, preferences_box_on=box_on if isinstance(box_on, bool) else None,
+                         plugin=plugin)
+
+    async def _live_values(self, keys: list[str]) -> dict:
+        return await self.get_config(keys)
 
     async def _guard_config(self, changes: dict) -> None:
         """Refuse writes that would change a sensitive key (see guard.py). Writing a key
         back to its current value is allowed."""
         check_placeholders(changes)
-        await self._check_ranges(changes)
+        await self._check_ranges(changes, self._live_values)
         hits = sensitive_keys(changes or {})
         if not hits:
             return
@@ -229,7 +277,12 @@ class OrcaClient:
         and BEFORE anything is selected: selecting a preset discards the user's unsaved
         overrides, so a refusal must not come after it."""
         check_placeholders(changes)
-        await self._check_ranges(changes)
+
+        async def stored_values(keys):
+            cfg = (await self._request("POST", "/api/v1/preset/config",
+                                       json={"type": ptype, "name": name})).get("config", {})
+            return {k: cfg[k] for k in keys if k in cfg}
+        await self._check_ranges(changes, stored_values)
         hits = sensitive_keys(changes or {})
         if not hits:
             return
@@ -241,7 +294,7 @@ class OrcaClient:
 
     async def set_object_config(self, obj_id: int, changes: dict) -> dict:
         check_placeholders(changes)
-        await self._check_ranges(changes)
+        await self._check_ranges(changes, self._live_values)
         hits = sensitive_keys(changes or {})
         if hits:
             await self._refuse_keys(hits)
@@ -360,7 +413,18 @@ class OrcaClient:
 
     async def put_config(self, changes: dict) -> dict:
         await self._guard_config(changes)
-        return await self._request("PUT", "/api/v1/config", json=changes)
+        try:
+            return await self._request("PUT", "/api/v1/config", json=changes)
+        except Validation as e:
+            if (POLICY_TOKEN in (e.errors or {}).values()
+                    and _BACKENDS.get(self._cfg.base_url) is None):
+                # Whose policy refused it (the build's Preferences box, or the plugin, which has
+                # none) decides the hint; one quick /status read records the backend.
+                try:
+                    await self._request("GET", "/api/v1/status", _count=False, timeout=_NOTE_TIMEOUT_S)
+                except Exception:  # noqa: BLE001
+                    pass
+            raise
 
     async def restore_config(self, snapshot: dict) -> dict:
         """Write back values read with get_config earlier in the same call (compare_*

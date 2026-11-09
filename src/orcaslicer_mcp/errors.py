@@ -67,10 +67,10 @@ class OutOfRange(Validation):
     by this server's own check (ranges.py) or by OrcaSlicer (422 out_of_range).
     `ranges` is {key: {value, min, max, unit, detail}}."""
 
-    def __init__(self, ranges: dict[str, dict]):
+    def __init__(self, ranges: dict[str, dict], token: str = "out_of_range"):
         self.ranges = ranges
-        details = [r["detail"] for r in ranges.values()]
-        super().__init__("out_of_range: " + "; ".join(details) + ". Nothing was changed.",
+        details = [r["detail"].rstrip(". ") for r in ranges.values()]
+        super().__init__(f"{token}: " + "; ".join(details) + ". Nothing was changed.",
                          {k: r["detail"] for k, r in ranges.items()})
 
 
@@ -85,17 +85,27 @@ def _out_of_range_from_body(body: dict) -> "OutOfRange | None":
     from .ranges import describe_problem, schema_bounds
     found: dict[str, dict] = {}
 
-    def add(key, value, lo, hi, detail=None):
+    def add(key, value, lo, hi, detail=None, extra=None):
         if key in found:  # the top-level entry and errors[key] describe the same refusal
             return
         s_lo, s_hi, unit = schema_bounds(key)
+        if unit and " or %" in unit:
+            unit = ""  # a "mm or %" bound depends on the form the value was given in; state the number only
         lo = _num(lo) if _num(lo) is not None else s_lo
         hi = _num(hi) if _num(hi) is not None else s_hi
+        # OrcaSlicer's own sentence is relayed as it is; one is built only when it sent none.
         found[key] = {"value": value, "min": lo, "max": hi, "unit": unit,
-                      "detail": detail or describe_problem(key, value, lo, hi, unit)}
+                      "detail": detail or describe_problem(key, value, lo, hi, unit), **(extra or {})}
+
+    def top_extra():
+        return {k: body[k] for k in ("index", "min_exclusive") if k in body}
+
+    def text(v):
+        return v.strip() if isinstance(v, str) and v.strip() else None
 
     if body.get("error") == "out_of_range" and isinstance(body.get("key"), str):
-        add(body["key"], body.get("value"), body.get("min"), body.get("max"))
+        add(body["key"], body.get("value"), body.get("min"), body.get("max"),
+            detail=text(body.get("detail")), extra=top_extra())
     errors = body.get("errors")
     if isinstance(errors, dict):
         for key, why in errors.items():
@@ -107,13 +117,25 @@ def _out_of_range_from_body(body: dict) -> "OutOfRange | None":
                 add(key, "the value sent", None, None, detail=why[len("out_of_range: "):])
             elif isinstance(why, str) and why.replace("_", " ").lower().find("out of range") >= 0:
                 add(key, "the value sent", None, None)
-    return OutOfRange(found) if found else None
+    if found:
+        return OutOfRange(found)
+    # set_height_range: {"error":"layer_height_out_of_range","key","value","min","max","detail"}
+    if body.get("error") == "layer_height_out_of_range":
+        add("layer_height", body.get("value"), body.get("min"), body.get("max"),
+            detail=text(body.get("detail")))
+        return OutOfRange(found, token="layer_height_out_of_range")
+    return None
+
+
+# Refusals that are about who may change a setting, not about its value.
+_POLICY_TOKENS = frozenset({"blocked_by_remote_api_policy"})
 
 
 def _invalid_values_message(errors: dict) -> str:
-    parts = [f"{k}: {v}" for k, v in errors.items()]
-    return ("invalid_values: OrcaSlicer refused " + "; ".join(parts)
-            + ". Nothing was changed; describe_setting shows each setting's type and allowed values.")
+    parts = [f"{k}: {str(v).rstrip('. ')}" for k, v in errors.items()]
+    tail = ("." if all(v in _POLICY_TOKENS for v in errors.values())
+            else "; describe_setting shows each setting's type and allowed values.")
+    return "invalid_values: OrcaSlicer refused " + "; ".join(parts) + ". Nothing was changed" + tail
 
 
 def error_from_status(status: int, body: dict) -> ApiError:

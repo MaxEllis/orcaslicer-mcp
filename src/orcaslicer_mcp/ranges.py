@@ -52,17 +52,18 @@ def _unit(rec: dict) -> str:
     return _UNIT_FIXES.get(u, u)
 
 
-def _number(el, or_percent: bool) -> float | None:
-    """The number the sidebar would check, or None when this is not a plain number (left for
-    OrcaSlicer to judge: it refuses unparsable text itself)."""
+def _parse(el, or_percent: bool) -> tuple[float, bool] | None:
+    """(number, given as a percentage) as the sidebar would read it, or None when this is not a
+    plain number (left for OrcaSlicer to judge: it refuses unparsable text itself)."""
     if isinstance(el, bool):
         return None
     if isinstance(el, (int, float)):
-        return float(el) if math.isfinite(el) else None
+        return (float(el), False) if math.isfinite(el) else None
     if not isinstance(el, str):
         return None
     s = el.strip().replace(" ", "")
-    if s.endswith("%"):
+    pct = s.endswith("%")
+    if pct:
         s = s[:-1]
     elif or_percent and s.endswith("mm"):
         s = s[:-2]
@@ -70,7 +71,12 @@ def _number(el, or_percent: bool) -> float | None:
         n = float(s)
     except ValueError:
         return None
-    return n if math.isfinite(n) else None
+    return (n, pct) if math.isfinite(n) else None
+
+
+def _number(el, or_percent: bool) -> float | None:
+    p = _parse(el, or_percent)
+    return None if p is None else p[0]
 
 
 def _elements(value, vector: bool) -> list:
@@ -83,6 +89,19 @@ def _elements(value, vector: bool) -> list:
 
 def _fmt(n: float) -> str:
     return format(n, "g")
+
+
+_EPS = 1e-4  # ConfigOptionDef::is_value_valid with max_precision 4
+
+
+def in_range(key: str, n: float, lo: float | None, hi: float | None) -> bool:
+    if key in _MUST_BE_POSITIVE and n <= 0:
+        return False
+    if lo == 0 and n < 0:
+        return False
+    if (lo is not None and abs(n - lo) < _EPS) or (hi is not None and abs(n - hi) < _EPS):
+        return True
+    return (lo is None or n >= lo) and (hi is None or n <= hi)
 
 
 def range_text(key: str, lo: float | None, hi: float | None, unit: str = "") -> str:
@@ -105,15 +124,23 @@ def _shown(value) -> str:
     return str(value)
 
 
+def _display_unit(rec: dict, unit: str, percent: bool) -> str:
+    """A "mm or %" setting states its bounds in the form the value was given in."""
+    if "OrPercent" in str(rec.get("type")):
+        return "%" if percent else ""
+    return unit
+
+
 def describe_problem(key: str, value, lo: float | None, hi: float | None,
-                     unit: str | None = None) -> str:
-    """One plain sentence for a refused value."""
+                     unit: str | None = None, index: int | None = None) -> str:
+    """One plain sentence for a refused value (`value` is the offending element)."""
     rec = settings_schema.describe(key) or {}
     label = rec.get("full_label") or rec.get("label")
     name = f"{label} ({key})" if label else key
     if unit is None:
         unit = _unit(rec)
-    return f"{name} must be {range_text(key, lo, hi, unit)}; {_shown(value)} is outside that range"
+    where = f" (entry {index + 1})" if index is not None else ""
+    return f"{name} must be {range_text(key, lo, hi, unit)}; {_shown(value)}{where} is outside that range"
 
 
 def schema_bounds(key: str) -> tuple[float | None, float | None, str]:
@@ -121,24 +148,36 @@ def schema_bounds(key: str) -> tuple[float | None, float | None, str]:
     return _bound(rec.get("min")), _bound(rec.get("max")), _unit(rec)
 
 
-def out_of_range(changes: dict) -> dict[str, dict]:
-    """{key: {value, min, max, unit, detail}} for every value outside its setting's range.
-    Unknown keys, non-numeric settings and values that are not plain numbers are left alone:
-    OrcaSlicer judges those itself."""
+def _same(a: tuple[float, bool] | None, b: tuple[float, bool] | None) -> bool:
+    return a is not None and b is not None and a[1] == b[1] and abs(a[0] - b[0]) < 1e-9
+
+
+def out_of_range(changes: dict, current: dict | None = None) -> dict[str, dict]:
+    """{key: {value, element, index, min, max, min_exclusive, unit, detail}} for every value outside
+    its setting's range. Unknown keys, non-numeric settings and values that are not plain numbers
+    are left alone, and so is an element equal to what `current` (the setting's present value
+    text, as get_config reports it) already holds: OrcaSlicer judges those itself."""
     found: dict[str, dict] = {}
+    current = current or {}
     for key, value in (changes or {}).items():
         rec = settings_schema.describe(key)
         if not rec or rec.get("type") not in _NUMERIC_TYPES:
             continue
         lo, hi, unit = _bound(rec.get("min")), _bound(rec.get("max")), _unit(rec)
         or_percent = "OrPercent" in rec["type"]
-        positive = key in _MUST_BE_POSITIVE
-        for el in _elements(value, rec["type"] in _VECTOR_TYPES):
-            n = _number(el, or_percent)
-            if n is None:
+        vector = rec["type"] in _VECTOR_TYPES
+        elems = _elements(value, vector)
+        now = [_parse(e, or_percent) for e in _elements(current.get(key), vector)] if key in current else []
+        for i, el in enumerate(elems):
+            p = _parse(el, or_percent)
+            if p is None or in_range(key, p[0], lo, hi):
                 continue
-            if (positive and n <= 0) or (lo is not None and n < lo) or (hi is not None and n > hi):
-                found[key] = {"value": value, "min": lo, "max": hi, "unit": unit,
-                              "detail": describe_problem(key, value, lo, hi, unit)}
-                break
+            if (i < len(now) and _same(p, now[i])) or (len(elems) == 1 and any(_same(p, c) for c in now)):
+                continue  # already there: writing it back changes nothing
+            idx = i if len(elems) > 1 else None
+            shown_unit = _display_unit(rec, unit, p[1])
+            found[key] = {"value": value, "element": el, "index": idx, "min": lo, "max": hi,
+                          "min_exclusive": key in _MUST_BE_POSITIVE, "unit": shown_unit,
+                          "detail": describe_problem(key, el, lo, hi, shown_unit, idx)}
+            break
     return found

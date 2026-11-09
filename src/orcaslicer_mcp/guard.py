@@ -96,10 +96,21 @@ class BlockedKey(ApiError):
     """A write this connector refuses on its own (layer one of two). The text is written for the
     assistant to relay: the simplest route first, then both switches in plain words."""
 
-    def __init__(self, keys: list[str], preferences_box_on: bool | None = None):
+    def __init__(self, keys: list[str], preferences_box_on: bool | None = None,
+                 plugin: bool = False):
         self.keys = sorted(keys)
         self.preferences_box_on = preferences_box_on
+        self.plugin = plugin
         listed = ", ".join(self.keys)
+        if plugin:
+            # The OrcaSlicer MCP plugin (stock OrcaSlicer) has no Remote API Preferences and never
+            # allows these keys, so neither switch would help.
+            super().__init__(
+                "blocked_by_local_policy: these settings can't be changed through the OrcaSlicer MCP "
+                "plugin: " + listed + ". Scripts, custom G-code, slicing plugins, printer connection "
+                "settings and the printer model can run code or drive the printer, and the plugin never "
+                "lets the assistant change them. Ask the user to make this change in the OrcaSlicer window.")
+            return
         if preferences_box_on:
             box = (f"(1) OrcaSlicer: Preferences > Remote API > '{PREFERENCES_BOX}' (already on); ")
         else:

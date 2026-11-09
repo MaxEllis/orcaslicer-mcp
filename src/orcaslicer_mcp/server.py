@@ -199,14 +199,25 @@ def _with_user_changes(fn):
 # geometry" left the assistant to guess (usability test 2026-11-09, m12): every error gets a
 # `detail` sentence, and HTTP routes become the tool names that do the same thing.
 _ROUTE_TOOLS = {
-    "/model": "load_model", "/project/open": "open_project", "/project/save": "save_project",
-    "/project/new": "new_project", "/slice": "slice", "/slice/status": "get_slice_status",
-    "/config": "set_config", "/status": "get_status", "/objects": "list_objects",
-    "/preset": "select_preset", "/preset/save": "save_preset", "/plates": "list_plates",
-    "/arrange": "arrange_plate", "/orient": "auto_orient", "/gcode": "get_gcode",
-    "/plate/render": "render_plate", "/project/recent": "list_recent_projects",
+    ("POST", "/model"): "load_model", ("POST", "/project/open"): "open_project",
+    ("POST", "/project/save"): "save_project", ("POST", "/project/new"): "new_project",
+    ("GET", "/project"): "get_project", ("GET", "/project/recent"): "list_recent_projects",
+    ("DELETE", "/project/recent"): "forget_recent_project", ("GET", "/project/browse"): "browse_projects",
+    ("POST", "/project/move"): "move_project_file", ("DELETE", "/project/file"): "delete_project_file",
+    ("POST", "/slice"): "slice", ("GET", "/slice/status"): "get_slice_status",
+    ("POST", "/slice/cancel"): "cancel_slice",
+    ("GET", "/config"): "get_config", ("PUT", "/config"): "set_config",
+    ("GET", "/status"): "get_status", ("GET", "/objects"): "list_objects",
+    ("PUT", "/preset"): "select_preset", ("DELETE", "/preset"): "delete_preset",
+    ("POST", "/preset/save"): "save_preset", ("POST", "/preset/config"): "get_preset_config",
+    ("GET", "/presets"): "list_presets",
+    ("GET", "/plates"): "list_plates", ("POST", "/plates"): "add_plate",
+    ("POST", "/arrange"): "arrange_plate", ("POST", "/orient"): "auto_orient",
+    ("GET", "/gcode"): "get_gcode", ("GET", "/plate/render"): "render_plate",
+    ("GET", "/jobs/status"): "get_job_status",
 }
-_ROUTE = re.compile(r"\b(?:GET|POST|PUT|DELETE|PATCH)\s+(?:/api/v1)?(/[\w/{}.-]*)")
+_ROUTE = re.compile(r"\b(GET|POST|PUT|DELETE|PATCH)\s+(?:/api/v1)?(/[\w/{}.-]*)")
+
 
 _ERROR_DETAILS = {
     "already_slicing": "A slice is already running; wait for it (get_slice_status) or stop it (cancel_slice).",
@@ -236,8 +247,7 @@ _ERROR_DETAILS = {
 
 def _without_routes(text: str) -> str:
     def repl(m):
-        path = m.group(1).rstrip(".")
-        return _ROUTE_TOOLS.get(path, "another tool")
+        return _ROUTE_TOOLS.get((m.group(1), m.group(2).rstrip(".")), "another tool")
     return _ROUTE.sub(repl, text)
 
 
@@ -252,6 +262,9 @@ def _polish_error(result) -> None:
     for k in ("error", "detail", "hint"):
         if isinstance(result.get(k), str):
             result[k] = _without_routes(result[k])
+    if isinstance(result.get("errors"), dict):
+        result["errors"] = {k: _without_routes(v) if isinstance(v, str) else v
+                            for k, v in result["errors"].items()}
     token = result["error"]
     if "detail" not in result and "message" not in result and re.fullmatch(r"[a-z_]+", token):
         detail = _ERROR_DETAILS.get(token) or (token.replace("_", " ").capitalize() + ".")
@@ -316,16 +329,36 @@ async def _start_slice(c) -> dict:
         return await c.slice()
 
 
+def _backend_now() -> str | None:
+    """Which OrcaSlicer answered at the configured address ("build" or "plugin"), once known."""
+    try:
+        return _client_mod.known_backend(load_config().base_url)
+    except Exception:  # noqa: BLE001 - no token configured, say
+        return None
+
+
 def _err(e: ApiError) -> dict:
     if isinstance(e, NotFound) and e.plugin:
         return _plugin_text(_CURRENT_TOOL.get())
     out = {"error": str(e)}
     if isinstance(e, Validation):
         out["errors"] = e.errors
+        body = getattr(e, "body", None) or {}
+        if not isinstance(e, OutOfRange):
+            # OrcaSlicer's own explanation of a refusal travels with it.
+            for k in ("detail", "key"):
+                if isinstance(body.get(k), str) and body[k].strip():
+                    out[k] = body[k]
         if isinstance(e, OutOfRange):
-            out["allowed"] = {k: {"min": r["min"], "max": r["max"], "unit": r["unit"]}
+            out["allowed"] = {k: {"min": r["min"], "max": r["max"], "unit": r["unit"],
+                                  **({"min_exclusive": True} if r.get("min_exclusive") else {}),
+                                  **({"index": r["index"]} if r.get("index") is not None else {})}
                               for k, r in e.ranges.items()}
-        if "blocked_by_remote_api_policy" in (e.errors or {}).values():
+        if "blocked_by_remote_api_policy" in (e.errors or {}).values() and _backend_now() == "plugin":
+            out["hint"] = ("The OrcaSlicer MCP plugin never lets the assistant change scripts, custom "
+                           "G-code or printer connection settings. Ask the user to make this change "
+                           "in the OrcaSlicer window.")
+        elif "blocked_by_remote_api_policy" in (e.errors or {}).values():
             out["hint"] = ("OrcaSlicer itself refused these keys: Preferences > Remote API > "
                            "'Allow script, G-code and connection edits' is off. This connector's "
                            "own allowed keys (ORCA_MCP_ALLOW_KEYS) already let them through; that "
@@ -373,6 +406,11 @@ async def _slice_refusal(c, e: ApiError) -> dict | None:
             reason = _reason_from(await c.slice_status())
         except Exception:  # noqa: BLE001 - only refines the reply
             reason = None
+    if isinstance(body.get("key"), str) and body["key"]:
+        out["key"] = body["key"]  # the setting OrcaSlicer's check blames
+        rec = settings_schema.describe(body["key"]) or {}
+        if rec.get("full_label") or rec.get("label"):
+            out["setting"] = rec.get("full_label") or rec.get("label")
     if reason:
         out["detail"] = f"OrcaSlicer won't slice this plate: {reason}"
         return out
@@ -702,6 +740,8 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
     Use it for a quick sweep of a single key. To compare named combinations of settings with
     ready-to-relay deltas and a verdict, use compare_slices instead. Like compare_slices it adds
     one line to OrcaSlicer's MCP panel, not one per trial."""
+    if not values:
+        return {"error": "no_values", "detail": "Give at least one value of the setting to compare."}
     try:
         async with _client() as c:
             if (refusal := await _plugin_refusal(c)) is not None:  # it cannot slice

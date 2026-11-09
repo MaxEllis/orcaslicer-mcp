@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 - Tool replies now tell the assistant what you changed by hand in OrcaSlicer since its last action: settings, presets, objects and plates, and the panel's own undos. The reply carries a `user_changes` note (the first 8 changes, then a count by group) and the full list, so the assistant works from your values instead of overwriting them. It needs an OrcaSlicer MCP build with the change journal (v2.5.0-mcp.16 and later); older builds are left alone.
+- Works with the OrcaSlicer MCP plugin for stock OrcaSlicer 2.5. `get_status` reports `backend: "plugin"` with a note on what the plugin can do; a tool the plugin can't serve says it needs the OrcaSlicer MCP build, and `apply_and_slice` and `edit_preset` refuse up front so nothing is left half done.
 - `select_preset` takes an optional 1-based `slot` for a filament preset, to set the filament of one extruder or tool on a multi-filament printer without touching the others or discarding unsaved edits. It needs an OrcaSlicer MCP build that lists `preset_slot` (v2.5.0-mcp.16 and later) and refuses on older ones.
 
 ### Security

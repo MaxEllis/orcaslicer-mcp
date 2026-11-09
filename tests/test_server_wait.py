@@ -9,6 +9,7 @@ def _env(m):
 @respx.mock
 async def test_apply_and_slice_composes(monkeypatch):
     _env(monkeypatch)
+    respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={}))  # fork, not the plugin
     respx.put("http://x:13130/api/v1/config").mock(
         return_value=httpx.Response(200, json={"applied": ["layer_height"], "errors": {}}))
     respx.post("http://x:13130/api/v1/slice").mock(
@@ -45,6 +46,7 @@ async def test_slice_and_wait_polls_until_done(monkeypatch):
 @respx.mock
 async def test_apply_and_slice_skips_wait_when_already_valid(monkeypatch):
     _env(monkeypatch)
+    respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={}))  # fork, not the plugin
     respx.put("http://x:13130/api/v1/config").mock(
         return_value=httpx.Response(200, json={"applied": ["layer_height"], "errors": {}}))
     respx.post("http://x:13130/api/v1/slice").mock(

@@ -9,14 +9,27 @@ class Unauthorized(ApiError):
     pass
 
 
+# What the OrcaSlicer MCP plugin (stock OrcaSlicer 2.5) can and cannot do. Its missing
+# routes answer {"error": "not_found", "backend": "plugin"}; this text replaces the generic
+# "not available on this build" so the assistant can tell the user exactly why.
+PLUGIN_LIMITS = (
+    "the OrcaSlicer MCP plugin (stock OrcaSlicer) cannot do this. It can read settings, "
+    "presets, the objects on the plate and the project, and change settings. Loading or moving "
+    "models, slicing, slice results and G-code, plate renders, plates, opening and saving "
+    "projects, and saving or deleting presets need the OrcaSlicer MCP build: "
+    "https://github.com/MaxEllis/OrcaSlicer/releases")
+
+
 class NotFound(ApiError):
     """404 from the fork. `route_missing=True` means the endpoint itself doesn't exist
     (older build, e.g. pre-M4); False means the route exists but the resource doesn't
-    (unknown_object / unknown_preset / missing file)."""
+    (unknown_object / unknown_preset / missing file). `plugin=True` means the endpoint is
+    missing because OrcaSlicer runs the OrcaSlicer MCP plugin, not the OrcaSlicer MCP build."""
 
-    def __init__(self, message: str, route_missing: bool = False):
+    def __init__(self, message: str, route_missing: bool = False, plugin: bool = False):
         super().__init__(message)
         self.route_missing = route_missing
+        self.plugin = plugin
 
 
 class BadRequest(ApiError):
@@ -66,6 +79,8 @@ def _error_from_status(status: int, body: dict) -> ApiError:
         err = body.get("error")
         if err and err != "not_found":
             return NotFound(err)
+        if body.get("backend") == "plugin":
+            return NotFound("not available: " + PLUGIN_LIMITS, route_missing=True, plugin=True)
         return NotFound("endpoint not found / not available on this OrcaSlicer build",
                         route_missing=True)
     if status == 400:
@@ -76,4 +91,7 @@ def _error_from_status(status: int, body: dict) -> ApiError:
         return Validation(msg, body.get("errors"))
     if status == 504:
         return UiTimeout("OrcaSlicer GUI did not respond in time; retry")
+    # The plugin answers 503 with a reason the user can act on ("paused": its panel was closed).
+    if status == 503 and body.get("error") and body.get("detail"):
+        return ServerError(f"{body['error']}: {body['detail']}")
     return ServerError(msg)

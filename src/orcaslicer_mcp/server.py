@@ -15,7 +15,7 @@ from mcp.types import ToolAnnotations
 from .config import load_config
 from . import client as _client_mod
 from .client import OrcaClient
-from .errors import ApiError, Validation, NotFound, Conflict, ConfigError
+from .errors import ApiError, Validation, NotFound, Conflict, ConfigError, PLUGIN_LIMITS
 from .models import summarize_slice
 from . import settings_schema
 from . import placement
@@ -223,12 +223,20 @@ async def get_status() -> dict:
     v2.4.2-mcp.15 and later `project` is {name, path, dirty}: path is empty until the project
     has been saved, and dirty says File > Save has something to write, so an agent knows when
     to save_project and when the user has been editing in the window. Older builds report
-    `project` as the bare path string."""
+    `project` as the bare path string.
+
+    `backend: "plugin"` means OrcaSlicer runs the OrcaSlicer MCP plugin on stock
+    OrcaSlicer: `note` says what it can do. Tell the user before attempting anything it
+    cannot (loading models, slicing, renders, plates, projects, saving presets)."""
     try:
         async with _client() as c:
-            return await c.get_status()
+            status = await c.get_status()
     except ApiError as e:
         return _err(e)
+    if status.get("backend") == "plugin":
+        status["note"] = ("Connected to the OrcaSlicer MCP plugin on stock OrcaSlicer, not the "
+                          "OrcaSlicer MCP build: " + PLUGIN_LIMITS.split(". ", 1)[1])
+    return status
 
 
 @mcp.tool()
@@ -392,6 +400,8 @@ async def apply_and_slice(
     to keep the steps separate, or compare_settings to try several values of one key."""
     try:
         async with _client() as c:
+            if (refusal := await _plugin_refusal(c)) is not None:  # it cannot slice
+                return refusal
             applied = await c.put_config(changes)
             started = await _start_slice(c)
             if not started.get("already_valid"):
@@ -537,6 +547,8 @@ def _m4_err(e: ApiError, milestone: str) -> dict:
     # Only a route-level 404 means the build lacks the capability; a resource-level
     # 404 (unknown_object / unknown_preset / missing file) must keep its message (F7).
     if isinstance(e, NotFound) and e.route_missing:
+        if e.plugin:
+            return {"error": str(e)}
         return {"error": f"not available on this OrcaSlicer build (needs {milestone})"}
     return _err(e)
 
@@ -1350,6 +1362,18 @@ async def load_model(path: str) -> dict:
         return _m4a_err(e)
 
 
+async def _plugin_refusal(c) -> dict | None:
+    """For a tool that would change something before reaching a route the plugin lacks:
+    the refusal to return up front, so nothing is left half done. None on the fork."""
+    try:
+        status = await c.get_status()
+    except ApiError:
+        return None  # let the tool's own call report the problem
+    if status.get("backend") == "plugin":
+        return {"error": "not available: " + PLUGIN_LIMITS}
+    return None
+
+
 async def _has_capability(c, name: str) -> bool:
     try:
         status = await c.get_status()
@@ -1534,6 +1558,8 @@ async def edit_preset(type: str, name: str, changes: dict) -> dict:
     try:
         async with _client() as c:
             await c.guard_preset_edit(type, name, changes)  # refuse before selecting anything
+            if (refusal := await _plugin_refusal(c)) is not None:  # it cannot save presets
+                return refusal
             await c.select_preset(type, name)
             cfg = await c.get_config(None)
             overlay = dict(cfg) | {k: str(v) for k, v in changes.items()}

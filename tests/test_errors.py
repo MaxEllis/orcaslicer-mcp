@@ -32,3 +32,16 @@ def test_404_route_level_is_route_missing():
         e = error_from_status(404, body)
         assert isinstance(e, NotFound)
         assert e.route_missing is True
+
+
+def test_plugin_404_names_the_limits():
+    from orcaslicer_mcp.errors import PLUGIN_LIMITS
+    e = error_from_status(404, {"error": "not_found", "backend": "plugin"})
+    assert isinstance(e, NotFound) and e.route_missing and e.plugin
+    assert PLUGIN_LIMITS in str(e) and "OrcaSlicer MCP build" in str(e)
+    assert error_from_status(404, {"error": "not_found"}).plugin is False
+
+
+def test_plugin_503_keeps_the_reason():
+    e = error_from_status(503, {"error": "paused", "detail": "the panel was closed"})
+    assert str(e) == "paused: the panel was closed"

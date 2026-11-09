@@ -52,7 +52,7 @@ OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in pla
 | Read your printer's status | ✓ | ✓ |
 | **Your OrcaSlicer** | Replaced, with your printers and presets kept | Stays as it is |
 | **Updates** | Offered by the build | Automatic from OrcaCloud |
-| **Get it** | [Download](https://github.com/MaxEllis/OrcaSlicer/releases/latest) | [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE) or the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) |
+| **Get it** | [Download](https://github.com/MaxEllis/OrcaSlicer/releases/latest) | [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41) or the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) |
 
 The trade-off: the build can do everything but replaces your OrcaSlicer. The plugin keeps your OrcaSlicer but only works with settings and presets. To run the build next to stock OrcaSlicer, use its portable Windows zip or Linux AppImage. A plugin installed from a downloaded file doesn't update itself; your assistant tells you when a newer one is out. Install the newer file the same way; OrcaSlicer then turns the plugin off and asks for its permissions again, so click **Yes** and tick **Activate** again.
 
@@ -61,7 +61,7 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
 **1. Turn on the connection in OrcaSlicer.**
 - **Build:** open **Preferences → Remote API**, tick **Enable Remote API** and copy the token (a password for your AI app).
 - **Plugin:** open OrcaSlicer's main menu (the icon beside **File**) → **Plugins**, then install it one of two ways:
-  - **From OrcaCloud:** subscribe on [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE), then install OrcaSlicer MCP from the list.
+  - **From OrcaCloud:** subscribe on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), then install OrcaSlicer MCP from the list.
   - **From a downloaded file:** download `orcaslicer_mcp_plugin.py` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest). Click the arrow beside **Install plugin** and choose **Install local plugin**. The first time, this only renames the green button, so click **Install local plugin** again and pick the file.
 
   Tick **Activate**. OrcaSlicer then shows **Plugin permissions**: network access to `127.0.0.1`, which means this computer only, and permission to create a thread, which keeps the connection running. Choose **Yes**; **No** stops the plugin. Then copy the token from the plugin's **Config** tab. Use one install or the other: each keeps its own token.

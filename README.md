@@ -15,42 +15,50 @@
 
 <p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/story.png" alt="Three steps: a chat in your AI app above, OrcaSlicer below. 1: you write that you designed these brackets, want them as strong as possible, and ask it to show you the changes it would make; OrcaSlicer shows the bracket standing. 2: the assistant makes three changes and says why: on its side, because standing up the layers run across the arm that takes the load; 7 walls instead of 4, which makes the arms solid; 215 °C instead of 200 so the layers fuse better. OrcaSlicer's MCP panel lists each change with Rotate back or Revert. 3: OrcaSlicer's slices compared: 2h 57m and 33.7 g as designed, 2h 44m and 46.8 g stronger; lying flat saves 22 minutes, more than the extra walls cost."></p>
 
-You talk to the assistant in your usual AI app, in plain words. It makes the changes in OrcaSlicer, in the window you already use: settings, presets, models, slicing. A panel beside the 3D view lists every change it makes, with a way to undo each one.
+<p align="center"><sub>Shown with the OrcaSlicer MCP build. The plugin does the settings part.</sub></p>
 
-## Two ways to run it
+OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in plain words in the AI app, the changes happen in the OrcaSlicer window you already use, and a panel beside the 3D view lists each one with a way to undo it.
+
+## What you need
+
+- **An AI app on your computer that can use MCP connectors,** such as Claude Desktop, Cursor, VS Code or LM Studio. MCP is how these apps connect to other programs, and `orcaslicer-mcp` is the connector for OrcaSlicer. Chats in a web browser and phone apps can't use it, because the connector runs on your computer.
+- **OrcaSlicer 2.5** on Windows, macOS or Linux, with one of the two ways in below.
+- **About ten minutes.** OrcaSlicer MCP is free. Your AI app works as you already use it, and with a local model nothing leaves your computer.
+
+## Two ways into OrcaSlicer
 
 | | **OrcaSlicer MCP build** | **Plugin** for OrcaSlicer 2.5 |
 |---|---|---|
-| **What it is** | OrcaSlicer 2.5 with the assistant's way in built in | An add-on for the OrcaSlicer you already have |
+| **What it is** | OrcaSlicer 2.5 with the way in built in | An add-on for the OrcaSlicer you already have |
 | **The assistant can** | Change settings and presets, load and arrange models, slice, render the plate, manage plates and projects | Read your setup, change settings, switch presets |
 | **The panel** | Every change with an undo, plus restore points | Setting and preset changes with an undo |
 | **Get it** | [Download](https://github.com/MaxEllis/OrcaSlicer/releases/latest) | [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE), or the `.py` file on this repo's [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) |
 
-Either way you also need this package, `orcaslicer-mcp`, which connects your assistant app to OrcaSlicer.
+The build's installer and Mac app take the place of OrcaSlicer and keep your printers and presets, because both use the same profile folder. To keep stock OrcaSlicer as well, use the portable Windows zip or the Linux AppImage. The plugin leaves your OrcaSlicer as it is.
 
 ## Get started
 
 **1. Turn on the way in.**
-- **Build:** open **Preferences → Remote API**, tick **Enable Remote API** and copy the token.
+- **Build:** open **Preferences → Remote API**, tick **Enable Remote API** and copy the token, a password that only your AI app gets.
 - **Plugin:** subscribe on OrcaCloud and install it from OrcaSlicer's **File → Plugins**, or there choose **Install local plugin** (the arrow beside **Install plugin**) and pick the downloaded file. Tick **Activate** and allow the two permissions it asks for, then copy the token from its **Config** tab. Use one install or the other: each keeps its own token.
 
-**2. Add orcaslicer-mcp to your assistant app.** Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then add this to the app's MCP settings:
+**2. Add the connector to your AI app.**
+- **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest), open it, and paste the token into its settings. Nothing else to install.
+- **Other apps (Cursor, VS Code, LM Studio and the like):** install [uv](https://docs.astral.sh/uv/getting-started/installation/) once, a small tool that runs the connector: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS and Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows. Then add this to the app's MCP settings:
 
-```json
-{
-  "mcpServers": {
-    "orcaslicer": {
-      "command": "uvx",
-      "args": ["orcaslicer-mcp"],
-      "env": { "ORCA_API_TOKEN": "<your token>" }
+  ```json
+  {
+    "mcpServers": {
+      "orcaslicer": {
+        "command": "uvx",
+        "args": ["orcaslicer-mcp"],
+        "env": { "ORCA_API_TOKEN": "<your token>" }
+      }
     }
   }
-}
-```
+  ```
 
-In Claude Desktop, install `orcaslicer-mcp-<version>.mcpb` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) instead, and paste the token into its settings.
-
-**3. Ask for something.** If it doesn't connect, see [troubleshooting](docs/troubleshooting.md).
+**3. Check it works.** With OrcaSlicer open, ask *"Which printer and filament is OrcaSlicer set up for?"* The answer should name your printer and filament presets. If it can't connect, see [troubleshooting](docs/troubleshooting.md).
 
 ## What you can ask
 
@@ -63,7 +71,7 @@ Goals, in your own words, the way you'd ask a friend who knows OrcaSlicer:
 - *"Why does this take six hours, and what can I do about it?"*
 - *"Is my print still heating?"* It reads a Klipper or OctoPrint printer, without ever controlling it.
 
-The plugin handles the questions answered by settings and presets. [All 66 tools](docs/tools.md) are listed with examples.
+With the plugin, the assistant answers these by changing settings and presets; you load and slice. Every tool is listed in [docs/tools.md](docs/tools.md).
 
 ## You stay in charge
 

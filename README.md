@@ -70,19 +70,6 @@ The build's installer and Mac app take the place of OrcaSlicer and keep your pri
 
 **3. Check it works.** With OrcaSlicer open, ask *"Which printer and filament is OrcaSlicer set up for?"* The answer should name your printer and filament presets. If it can't connect, see [troubleshooting](docs/troubleshooting.md).
 
-## What you can ask
-
-Goals, in your own words, the way you'd ask a friend who knows OrcaSlicer:
-
-- *"This lid has to press onto a 40 mm jar. What do I change so it fits first time?"*
-- *"I designed these brackets and want to understand how to get them as strong as possible. Show me the changes you'd make."*
-- *"It's going on a car dashboard. Will PLA survive, and what should I change if I use PETG?"*
-- *"The top of this box looks rough. How do I get it smooth?"*
-- *"Why does this take six hours, and what can I do about it?"*
-- *"Is my print still heating?"* It reads a Klipper or OctoPrint printer, without ever controlling it.
-
-With the plugin, the assistant answers these by changing settings and presets; you load and slice. Every tool is listed in [docs/tools.md](docs/tools.md).
-
 ## You stay in charge
 
 - **Every change shows in the panel.** Undo any one, or put the project back to an earlier point (build only).

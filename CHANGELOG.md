@@ -9,7 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 - Tool replies now tell the assistant what you changed by hand in OrcaSlicer since its last action: settings, presets, objects and plates, and the panel's own undos. The reply carries a `user_changes` note (the first 8 changes, then a count by group) and the full list, so the assistant works from your values instead of overwriting them. It needs an OrcaSlicer MCP build with the change journal (v2.5.0-mcp.16 and later); older builds are left alone.
-- Works with the OrcaSlicer MCP plugin for stock OrcaSlicer 2.5. `get_status` reports `backend: "plugin"` with a note on what the plugin can do; a tool the plugin can't serve says it needs the OrcaSlicer MCP build, and `apply_and_slice` and `edit_preset` refuse up front so nothing is left half done.
+- Works with the OrcaSlicer MCP plugin for stock OrcaSlicer 2.5. `get_status` reports `backend: "plugin"` with a note on what the plugin can do; a tool the plugin can't serve says how to do it by hand and that the OrcaSlicer MCP build can do it, and `apply_and_slice`, `edit_preset` and the compare tools refuse up front so nothing is left half done.
 - An OrcaSlicer MCP plugin installed from a downloaded file never updates itself, so orcaslicer-mcp tells you: when the plugin is older than the one released with this version, `get_status` carries `plugin_update`, and the first tool reply of the session carries it once, with where to download the new one (or install it from OrcaCloud to get updates automatically). The plugin itself asks for no network access. The OrcaSlicer MCP build is never flagged; it has its own update notice.
 - `select_preset` takes an optional 1-based `slot` for a filament preset, to set the filament of one extruder or tool on a multi-filament printer without touching the others or discarding unsaved edits. It needs an OrcaSlicer MCP build that lists `preset_slot` (v2.5.0-mcp.16 and later) and refuses on older ones.
 
@@ -18,6 +18,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 - `describe_setting` and `search_settings` now know OrcaSlicer 2.5.0's settings (992, up from 807, built from the 2.4.2 and 2.5.0 sources). A setting added in 2.5 carries `since: "2.5.0"`; `silent_mode`, which 2.5 removed, carries `removed_in: "2.5.0"`.
+- On the OrcaSlicer MCP plugin, a refused action now says what failed and how to do it by hand in OrcaSlicer (press Slice plate and read out the time, Arrange all objects in the toolbar, the save icon beside the preset name), and mentions the OrcaSlicer MCP build after that. `compare_slices` and `compare_settings` refuse up front there, so nothing changes.
+- Refusals made by the connector itself (locked settings, out-of-range values) now show in OrcaSlicer's MCP panel too, on builds that have the panel's note route.
+- `get_status` says in words whether it reached the OrcaSlicer MCP build or the plugin, and leaves OrcaSlicer's internal nozzle bookkeeping out of the list of modified settings. `get_printer_status` says first when it falls back to the printer you last used, which may not be the one selected in OrcaSlicer now.
+- Every tool's description now opens with one whole sentence that says when to pick it over a similar tool.
+
+### Fixed
+- A setting can no longer be changed to a value outside its allowed range. A layer height of -1 used to be applied, and the next slice ran out of memory and closed OrcaSlicer with the project unsaved; 250% infill went through without a word. `set_config`, `apply_and_slice`, `set_object_config`, `edit_preset` and the compare tools now check every value against the setting's own limits first (a percentage by its number, each entry of a list on its own) and refuse with the allowed range. When OrcaSlicer refuses a value itself, the reply reads the same way.
+- When OrcaSlicer can't be reached, the reply asks whether it is open with Preferences > Remote API turned on, or, for the OrcaSlicer MCP plugin, whether the plugin is turned on. A timeout no longer ends in an empty colon: it says how long it waited and that a dialog may be open in the OrcaSlicer window.
+- A refused change to scripts, custom G-code or printer connection settings now explains both switches in plain words: the Preferences box "Allow script, G-code and connection edits", and the connector's own allowed keys, with where to set them (Claude Desktop's extension settings, or the env block of other apps' MCP configuration). It says when the Preferences box is already on, and it suggests the simplest route first: make the change yourself in OrcaSlicer.
+- A slice result that a later change made out of date is marked as such ("out of date, slice again") by `get_slice_status`, `get_slice_warnings`, `get_slice_breakdown` and `diagnose_plate`.
+- A slice OrcaSlicer won't start now says why, in OrcaSlicer's own words. Without a reason from OrcaSlicer, the reply lists what the profile check finds (a layer height too large for the nozzle, say) instead of "object outside bed". An empty plate says to load a model first, also on `render_plate`, `describe_plate` and the G-code tools.
+- `compare_slices` no longer fills OrcaSlicer's MCP panel with its trial runs: one line such as "Compared 3 options · nothing kept" sums the comparison up. It recommends and stars a variant only when it is at least as good as every other on time, filament and warnings; when they trade off it says "No clear winner: X is fastest, Y is lightest." The differences now add up with the rounded minutes and grams the table shows.
+- Slice warnings carry OrcaSlicer's sentence next to the code, and the level as a word.
+- Every error has a readable explanation, and none sends you to an HTTP route; a missing file given as a bare name asks for the full path.
 
 ## [0.1.20] - 2026-11-09
 

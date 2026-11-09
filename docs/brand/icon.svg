@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>OrcaSlicer MCP</title>
+  <!-- Tile -->
+  <rect width="512" height="512" rx="114" fill="#232428"/>
+  <!-- One printed line tracing a speech bubble; it ends at the tool (the dot) -->
+  <path d="M240,146 H164 A60,60 0 0 0 104,206 V286 A60,60 0 0 0 164,346 H178 L166,402 L240,346 H348 A60,60 0 0 0 408,286 V206 A60,60 0 0 0 348,146 H320"
+        fill="none" stroke="#F2EEE6" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="320" cy="146" r="36" fill="#FFB547"/>
+</svg>

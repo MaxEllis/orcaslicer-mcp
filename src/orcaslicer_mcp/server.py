@@ -16,7 +16,7 @@ from .config import load_config
 from . import client as _client_mod
 from .client import OrcaClient
 from .plugin_update import plugin_update as _plugin_update
-from .errors import ApiError, Validation, NotFound, Conflict, ConfigError, PLUGIN_LIMITS
+from .errors import ApiError, Validation, NotFound, Conflict, ConfigError, OutOfRange, PLUGIN_LIMITS
 from .models import summarize_slice
 from . import settings_schema
 from . import placement
@@ -242,6 +242,9 @@ def _err(e: ApiError) -> dict:
     out = {"error": str(e)}
     if isinstance(e, Validation):
         out["errors"] = e.errors
+        if isinstance(e, OutOfRange):
+            out["allowed"] = {k: {"min": r["min"], "max": r["max"], "unit": r["unit"]}
+                              for k, r in e.ranges.items()}
         if "blocked_by_remote_api_policy" in (e.errors or {}).values():
             out["hint"] = ("OrcaSlicer itself refused these keys: Preferences > Remote API > "
                            "'Allow script, G-code and connection edits' is off. They stay a "

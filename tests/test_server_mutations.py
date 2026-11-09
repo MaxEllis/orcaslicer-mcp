@@ -156,8 +156,9 @@ async def test_edit_preset_print_speed_is_still_blocked_by_filament_ceiling(monk
 async def test_edit_preset_filament_is_blocked_by_a_filament_only_check(monkeypatch):
     _env(monkeypatch)
     respx.get("http://x:13130/api/v1/status").mock(return_value=httpx.Response(200, json={}))  # fork, not the plugin
-    put_cfg, save = _mock_preset_roundtrip({**_FAST_PLA, "fan_min_speed": "20", "fan_max_speed": "100"}, ["fan_min_speed"])
-    out = await srv.edit_preset("filament", "PLA Basic", {"fan_min_speed": 150})
+    # fan_min above fan_max: each value is in range (0..100), the pair is not.
+    put_cfg, save = _mock_preset_roundtrip({**_FAST_PLA, "fan_min_speed": "20", "fan_max_speed": "80"}, ["fan_min_speed"])
+    out = await srv.edit_preset("filament", "PLA Basic", {"fan_min_speed": 95})
     assert out["error"] == "physics_blocked"
     assert any(f["name"] == "cooling_sanity" for f in out["fails"])
     assert put_cfg.call_count == 0 and save.call_count == 0

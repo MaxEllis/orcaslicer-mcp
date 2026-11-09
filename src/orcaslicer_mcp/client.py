@@ -6,7 +6,8 @@ import math
 import httpx
 import websockets
 from .config import Config
-from .errors import error_from_status, NotReachable, ApiError, UiTimeout
+from .errors import error_from_status, NotReachable, ApiError, UiTimeout, OutOfRange
+from .ranges import out_of_range
 from .guard import (BlockedKey, sensitive_keys, changed_keys, check_placeholders,
                     redact_secrets)
 
@@ -20,6 +21,13 @@ def mark_reached() -> None:
     flag = REACHED.get()
     if flag is not None:
         flag[0] = True
+
+
+def check_ranges(changes: dict) -> None:
+    """Refuse values outside their setting's min/max before anything is sent (ranges.py)."""
+    found = out_of_range(changes or {})
+    if found:
+        raise OutOfRange(found)
 
 
 class OrcaClient:
@@ -96,6 +104,7 @@ class OrcaClient:
         """Refuse writes that would change a sensitive key (see guard.py). Writing a key
         back to its current value is allowed."""
         check_placeholders(changes)
+        check_ranges(changes)
         hits = sensitive_keys(changes or {})
         if not hits:
             return
@@ -109,6 +118,7 @@ class OrcaClient:
         and BEFORE anything is selected: selecting a preset discards the user's unsaved
         overrides, so a refusal must not come after it."""
         check_placeholders(changes)
+        check_ranges(changes)
         hits = sensitive_keys(changes or {})
         if not hits:
             return
@@ -120,6 +130,7 @@ class OrcaClient:
 
     async def set_object_config(self, obj_id: int, changes: dict) -> dict:
         check_placeholders(changes)
+        check_ranges(changes)
         hits = sensitive_keys(changes or {})
         if hits:
             raise BlockedKey(hits)

@@ -40,23 +40,51 @@ def test_single_dominant_variant():
     assert out["tradeoff"] is None
 
 
-def test_tradeoff_no_dominant_uses_house_rule():
-    # A fastest but heaviest; B lightest but slowest. Neither dominates.
+def test_tradeoff_recommends_nothing():
+    # A fastest but heaviest; B lightest but slowest. Neither is at least as good on everything.
     res = [_r("A", t=5000, g=57.0), _r("B", t=8000, g=41.0)]
     out = compare.compute_comparison(res, baseline=None, detail=False)
-    assert out["recommended_is_dominant"] is False
-    # house rule = fastest with no warnings -> A (both warning-free, A faster)
-    assert out["recommended"] == "A"
+    assert out["recommended"] is None and out["recommended_is_dominant"] is False
     tags = out["tradeoff"]
     assert tags["fastest"] == "A" and tags["lightest"] == "B"
+    assert out["headline"] == "No clear winner: A is fastest, B is lightest."
+    assert "★" not in out["table_markdown"]
 
 
-def test_house_rule_skips_variant_with_warnings():
-    # Fastest variant has a warning -> recommended falls to fastest warning-free
+def test_tradeoff_on_warnings_only():
+    # A is faster and lighter but carries a warning; B is warning-free.
     res = [_r("A", t=4000, g=50.0, warnings=["thin wall"]), _r("B", t=6000, g=52.0)]
     out = compare.compute_comparison(res, baseline=None, detail=False)
-    assert out["recommended"] == "B"
-    assert out["recommended_is_dominant"] is False
+    assert out["recommended"] is None
+    assert out["tradeoff"]["fastest_without_warnings"] == "B"
+    assert out["headline"] == ("No clear winner: A is fastest and lightest but has a warning, "
+                               "B has no warnings.")
+
+
+def test_tradeoff_names_the_fastest_clean_option_when_it_is_neither_extreme():
+    res = [_r("fast", t=3000, g=60.0, warnings=["w"]), _r("light", t=9000, g=30.0, warnings=["w"]),
+           _r("clean", t=6000, g=50.0)]
+    out = compare.compute_comparison(res, baseline=None, detail=False)
+    assert out["headline"] == ("No clear winner: fast is fastest, light is lightest. "
+                               "clean is the fastest with no warnings.")
+
+
+def test_star_when_at_least_as_good_on_everything_even_with_ties():
+    # Same shown filament (3.2 g): A is faster and no worse, so it is starred.
+    res = [_r("A", t=960, g=3.21), _r("B", t=1200, g=3.24)]
+    out = compare.compute_comparison(res, baseline=None, detail=False)
+    assert out["recommended"] == "A" and out["recommended_is_dominant"] is True
+    assert "★" in out["table_markdown"]
+
+
+def test_deltas_use_the_shown_rounded_values():
+    # 20m 10s vs 16m 20s shows 20m vs 16m: the delta reads -4m (-20%), not -3m (-19%).
+    res = [_r("base", t=1210, g=3.24, changes={}), _r("fast", t=980, g=3.16, changes={"x": "1"})]
+    out = compare.compute_comparison(res, baseline=None, detail=False)
+    d = {v["name"]: v for v in out["variants"]}["fast"]["delta_vs_baseline"]
+    assert d["time_delta"] == "-4m" and d["time_pct"] == -20
+    # 3.2 g vs 3.2 g shown: no change and 0%, not "0.0 g (-2%)".
+    assert d["filament_delta"] == "0.0 g" and d["filament_pct"] == 0
 
 
 def test_all_warnings_falls_back_to_fastest():

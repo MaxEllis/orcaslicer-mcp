@@ -103,11 +103,11 @@
     },
     {
       "name": "compare_settings",
-      "description": "For each value of `key`, slice and collect stats/warnings; restore the original when done."
+      "description": "Slice once per value of ONE setting and return the raw stats and warnings of each; the original value is put back afterwards, even on error."
     },
     {
       "name": "compare_slices",
-      "description": "Slice the current plate under several named variants and compare the cost of each."
+      "description": "Slice the current plate under 2-8 named combinations of settings and compare their time, filament and warnings, then put the settings back; use it over compare_settings when you want ready-to-relay deltas and a verdict."
     },
     {
       "name": "list_objects",

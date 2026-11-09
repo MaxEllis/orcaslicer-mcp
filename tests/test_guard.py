@@ -241,6 +241,7 @@ async def test_object_config_blocked(monkeypatch):
 @respx.mock
 async def test_compare_settings_rows_blocked(monkeypatch):
     _env(monkeypatch)
+    respx.get(f"{BASE}/api/v1/status").mock(return_value=httpx.Response(200, json={}))  # the build
     _get_config({"post_process": ""})
     put = respx.put(f"{BASE}/api/v1/config").mock(return_value=httpx.Response(200, json={}))
     out = await srv.compare_settings("post_process", ["a.sh", "b.sh"])
@@ -255,6 +256,7 @@ async def test_compare_settings_restore_does_not_depend_on_another_read(monkeypa
     # The snapshot read and the guard's read succeed; a third GET would time out. The
     # restore must not need it.
     _env(monkeypatch)
+    respx.get(f"{BASE}/api/v1/status").mock(return_value=httpx.Response(200, json={}))  # the build
     snap = httpx.Response(200, json={"config": {"machine_start_gcode": "G28"}})
     get = respx.get(f"{BASE}/api/v1/config").mock(
         side_effect=[snap, snap, httpx.ReadTimeout("stalled")])

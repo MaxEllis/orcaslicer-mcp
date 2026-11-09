@@ -584,36 +584,45 @@ async def apply_and_slice(
 
 @mcp.tool()
 async def compare_settings(key: str, values: list, extra: dict | None = None) -> dict:
-    """For each value of `key`, slice and collect stats/warnings; restore the original when done.
+    """Slice once per value of ONE setting and return the raw stats and warnings of each; the
+    original value is put back afterwards, even on error.
 
-    Non-destructive: the original value of `key` is put back even on error.
-    """
+    Use it for a quick sweep of a single key. To compare named combinations of settings with
+    ready-to-relay deltas and a verdict, use compare_slices instead. Like compare_slices it adds
+    one line to OrcaSlicer's MCP panel, not one per trial."""
     try:
         async with _client() as c:
+            if (refusal := await _plugin_refusal(c)) is not None:  # it cannot slice
+                return refusal
             snapshot_keys = [key] + list((extra or {}).keys())
-            originals = await c.get_config(snapshot_keys)
             rows = []
             restore_error = None
+            trial = _client_mod.TRIAL.set(True)
             try:
-                for v in values:
-                    row = {"value": v, "stats": None, "warnings": [], "error": None}
-                    try:
-                        await c.put_config({key: v, **(extra or {})})
-                        started = await _start_slice(c)
-                        if not started.get("already_valid"):
-                            await _wait_for_slice(c, 300)
-                        s = summarize_slice(await c.slice_status())
-                        row["stats"] = s["stats"]
-                        row["warnings"] = s["warnings"]
-                    except ApiError as e:
-                        row["error"] = str(e)
-                    rows.append(row)
+                originals = await c.get_config(snapshot_keys)
+                try:
+                    for v in values:
+                        row = {"value": v, "stats": None, "warnings": [], "error": None}
+                        try:
+                            await c.put_config({key: v, **(extra or {})})
+                            started = await _start_slice(c)
+                            if not started.get("already_valid"):
+                                await _wait_for_slice(c, 300)
+                            s = summarize_slice(await c.slice_status())
+                            row["stats"] = s["stats"]
+                            row["warnings"] = s["warnings"]
+                        except ApiError as e:
+                            row["error"] = await _variant_error(c, e)
+                        rows.append(row)
+                finally:
+                    if originals:
+                        try:
+                            await c.restore_config(originals)
+                        except ApiError as e:
+                            restore_error = str(e)  # preserve collected rows even if restore fails
             finally:
-                if originals:
-                    try:
-                        await c.restore_config(originals)
-                    except ApiError as e:
-                        restore_error = str(e)  # preserve collected rows even if restore fails
+                _client_mod.TRIAL.reset(trial)
+            await c.post_note("slice", _compare_note(len(values), restore_error is None))
             result = {"key": key, "rows": rows}
             if restore_error is not None:
                 result["restore_error"] = restore_error
@@ -622,10 +631,25 @@ async def compare_settings(key: str, values: list, extra: dict | None = None) ->
         return _err(e)
 
 
+def _compare_note(n: int, restored: bool) -> str:
+    """The one panel row a comparison leaves: its trial writes and slices record nothing."""
+    tail = "nothing kept" if restored else "settings may not be back as they were"
+    return f"Compared {n} option{'s' if n != 1 else ''} \u00b7 {tail}"
+
+
+async def _variant_error(c, e: ApiError) -> str:
+    refusal = await _slice_refusal(c, e)
+    if refusal is not None:
+        return f"{refusal['error']}: {refusal['detail']}"
+    return str(e)
+
+
 @mcp.tool()
 async def compare_slices(variants: list[dict], baseline: str | None = None,
                          detail: bool = False, timeout: int = 300) -> dict:
-    """Slice the current plate under several named variants and compare the cost of each.
+    """Slice the current plate under 2-8 named combinations of settings and compare their time,
+    filament and warnings, then put the settings back; use it over compare_settings when you
+    want ready-to-relay deltas and a verdict.
 
     Each variant is {"name": str, "changes": {setting: value}}; changes={} means the
     current config as-is (a natural baseline row). Applies each variant over the ORIGINAL
@@ -634,11 +658,15 @@ async def compare_slices(variants: list[dict], baseline: str | None = None,
     after any un-resliced edit).
 
     Returns a ready-to-relay `headline` and `table_markdown`, plus structured `variants`.
-    All deltas and percentages are ALREADY computed and rounded against `baseline`
-    (defaults to the changes={} variant, else the first) - relay them as given rather than
-    recomputing. `recommended` names one pick; `recommended_is_dominant` says whether it
-    beats every variant on every axis (time, filament, warnings) or is only the fastest
-    warning-free option amid a genuine trade-off (`tradeoff` then names the frontier).
+    All deltas and percentages are ALREADY computed against `baseline` (defaults to the
+    changes={} variant, else the first) from the rounded minutes and grams the table shows -
+    relay them as given rather than recomputing. `recommended` (starred in the table) is set
+    only when one variant is at least as good as every other on time, filament and warnings.
+    In a trade-off it is null and the headline reads "No clear winner: X is fastest, Y is
+    lightest."; `tradeoff` names them, so leave the choice to the user.
+
+    The trial writes and slices are not recorded in OrcaSlicer's MCP panel; one line such as
+    "Compared 3 options · nothing kept" is added instead.
 
     Each variant is a full slice (minutes); capped at 8. Set detail=True only when a
     per-feature (wall/infill/support) split is wanted - it grows the response ~N x. With
@@ -658,50 +686,60 @@ async def compare_slices(variants: list[dict], baseline: str | None = None,
 
     try:
         async with _client() as c:
+            if (refusal := await _plugin_refusal(c)) is not None:  # it cannot slice
+                return refusal
             union = sorted({k for v in variants for k in (v.get("changes") or {})})
-            snapshot = await c.get_config(union) if union else {}
             results: list[dict] = []
             restore_error = None
+            snapshot: dict = {}
+            # Every request of the trial, the final restore included, carries the trial header,
+            # so OrcaSlicer's MCP panel records none of it; one note sums it up afterwards.
+            trial = _client_mod.TRIAL.set(True)
             try:
-                for v in variants:
-                    changes = v.get("changes") or {}
-                    r = {"name": v["name"], "changes": changes, "time_s": None,
-                         "filament_g": None, "warnings": [], "valid": False,
-                         "error": None, "roles": None}
-                    try:
-                        if snapshot:
-                            await c.restore_config(snapshot)  # reset to baseline so variants don't stack
-                        if changes:
-                            applied = await c.put_config(changes)
-                            if applied.get("errors"):
-                                r["error"] = "invalid_keys"
-                                r["errors"] = applied["errors"]
-                                results.append(r)
-                                continue
-                        started = await _start_slice(c)
-                        if not started.get("already_valid"):
-                            await _wait_for_slice(c, timeout)
-                        st = await c.slice_status()
-                        s = summarize_slice(st)
-                        stats = s.get("stats") or {}
-                        status = await c.get_status()
-                        r["time_s"] = stats.get("estimated_time_seconds")
-                        r["filament_g"] = stats.get("filament_used_g")
-                        r["warnings"] = s.get("warnings") or []
-                        r["valid"] = bool(status.get("slice_result_valid"))
-                        if s.get("state") == "error" or r["time_s"] is None:
-                            r["error"] = r["error"] or (s.get("message") or "slice_failed")
-                        if detail:
-                            r["roles"] = build_breakdown(st, await c.get_config(None)).get("roles")
-                    except ApiError as e:
-                        r["error"] = str(e)
-                    results.append(r)
+                snapshot = await c.get_config(union) if union else {}
+                try:
+                    for v in variants:
+                        changes = v.get("changes") or {}
+                        r = {"name": v["name"], "changes": changes, "time_s": None,
+                             "filament_g": None, "warnings": [], "valid": False,
+                             "error": None, "roles": None}
+                        try:
+                            if snapshot:
+                                await c.restore_config(snapshot)  # reset to baseline so variants don't stack
+                            if changes:
+                                applied = await c.put_config(changes)
+                                if applied.get("errors"):
+                                    r["error"] = "invalid_keys"
+                                    r["errors"] = applied["errors"]
+                                    results.append(r)
+                                    continue
+                            started = await _start_slice(c)
+                            if not started.get("already_valid"):
+                                await _wait_for_slice(c, timeout)
+                            st = await c.slice_status()
+                            s = summarize_slice(st)
+                            stats = s.get("stats") or {}
+                            status = await c.get_status()
+                            r["time_s"] = stats.get("estimated_time_seconds")
+                            r["filament_g"] = stats.get("filament_used_g")
+                            r["warnings"] = s.get("warnings") or []
+                            r["valid"] = bool(status.get("slice_result_valid"))
+                            if s.get("state") == "error" or r["time_s"] is None:
+                                r["error"] = r["error"] or (s.get("message") or "slice_failed")
+                            if detail:
+                                r["roles"] = build_breakdown(st, await c.get_config(None)).get("roles")
+                        except ApiError as e:
+                            r["error"] = await _variant_error(c, e)
+                        results.append(r)
+                finally:
+                    if snapshot:
+                        try:
+                            await c.restore_config(snapshot)
+                        except ApiError as e:
+                            restore_error = str(e)
             finally:
-                if snapshot:
-                    try:
-                        await c.restore_config(snapshot)
-                    except ApiError as e:
-                        restore_error = str(e)
+                _client_mod.TRIAL.reset(trial)
+            await c.post_note("slice", _compare_note(len(variants), restore_error is None))
     except ApiError as e:
         return _err(e)
 

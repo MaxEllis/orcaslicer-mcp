@@ -70,16 +70,10 @@ def _label(key: str) -> str:
     return rec.get("full_label") or rec.get("label") or key
 
 
-def refused_keys_note(keys: list[str]) -> str:
-    names = ", ".join(_label(k) for k in sorted(keys))
-    return f"Refused: {names} \u00b7 scripts, G-code and printer connection are locked"
-
-
-def refused_range_note(found: dict[str, dict]) -> str:
-    from .ranges import range_text
-    parts = [f"{_label(k)} {r['value']} (allowed: {range_text(k, r['min'], r['max'], r['unit'])})"
-             for k, r in found.items()]
-    return "Refused: " + "; ".join(parts)
+# Where the panel's refused row says why (the fork names the Preferences box the same way).
+REFUSED_KEYS_DETAIL = ("Refused by the AI app's OrcaSlicer MCP connector: scripts, custom G-code and "
+                       "printer connection settings are locked. Change it yourself here, or allow it in "
+                       "Preferences > Remote API and in the connector's allowed keys.")
 
 
 class OrcaClient:
@@ -172,7 +166,8 @@ class OrcaClient:
 
     # --- Panel notes and connector-side refusals ---------------------------------------
 
-    async def post_note(self, kind: str, text: str) -> bool:
+    async def post_note(self, kind: str, text: str, value: str | None = None,
+                        detail: str | None = None) -> bool:
         """Add one row to OrcaSlicer's MCP panel (POST /api/v1/activity/note). Builds without
         the route answer 404; that, and any other failure, is silent: a note never decides
         what a tool reports. A trial's header is never sent with it."""
@@ -182,8 +177,12 @@ class OrcaClient:
             return False
         token = TRIAL.set(False)
         try:
-            await self._request("POST", NOTE_PATH, json={"kind": kind, "text": text},
-                                _count=False, timeout=_NOTE_TIMEOUT_S)
+            body = {"kind": kind, "text": text}
+            if value:
+                body["value"] = value
+            if detail:
+                body["detail"] = detail
+            await self._request("POST", NOTE_PATH, json=body, _count=False, timeout=_NOTE_TIMEOUT_S)
             _NOTE_UNSUPPORTED.pop(url, None)
             return True
         except NotFound:
@@ -197,7 +196,8 @@ class OrcaClient:
     async def _check_ranges(self, changes: dict) -> None:
         found = out_of_range(changes or {})
         if found:
-            await self.post_note("refused", refused_range_note(found))
+            for key, r in found.items():  # one refused row per setting, as OrcaSlicer's own refusals
+                await self.post_note("refused", _label(key), "Out of range", r["detail"])
             raise OutOfRange(found)
 
     async def _refuse_keys(self, keys: list[str]) -> None:
@@ -207,7 +207,8 @@ class OrcaClient:
                 "sensitive_keys_allowed")
         except Exception:  # noqa: BLE001 - only refines the wording of the refusal
             pass
-        await self.post_note("refused", refused_keys_note(keys))
+        await self.post_note("refused", ", ".join(_label(k) for k in sorted(keys)), "Not allowed",
+                             REFUSED_KEYS_DETAIL)
         raise BlockedKey(keys, preferences_box_on=box_on if isinstance(box_on, bool) else None)
 
     async def _guard_config(self, changes: dict) -> None:

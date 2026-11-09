@@ -85,12 +85,14 @@ def _out_of_range_from_body(body: dict) -> "OutOfRange | None":
     from .ranges import describe_problem, schema_bounds
     found: dict[str, dict] = {}
 
-    def add(key, value, lo, hi):
+    def add(key, value, lo, hi, detail=None):
+        if key in found:  # the top-level entry and errors[key] describe the same refusal
+            return
         s_lo, s_hi, unit = schema_bounds(key)
         lo = _num(lo) if _num(lo) is not None else s_lo
         hi = _num(hi) if _num(hi) is not None else s_hi
         found[key] = {"value": value, "min": lo, "max": hi, "unit": unit,
-                      "detail": describe_problem(key, value, lo, hi, unit)}
+                      "detail": detail or describe_problem(key, value, lo, hi, unit)}
 
     if body.get("error") == "out_of_range" and isinstance(body.get("key"), str):
         add(body["key"], body.get("value"), body.get("min"), body.get("max"))
@@ -100,6 +102,9 @@ def _out_of_range_from_body(body: dict) -> "OutOfRange | None":
             if isinstance(why, dict) and (why.get("error") == "out_of_range"
                                           or "min" in why or "max" in why):
                 add(key, why.get("value"), why.get("min"), why.get("max"))
+            elif isinstance(why, str) and why.startswith("out_of_range: "):
+                # OrcaSlicer MCP builds: "out_of_range: Layer height must be at least 0 mm (got -1mm)"
+                add(key, "the value sent", None, None, detail=why[len("out_of_range: "):])
             elif isinstance(why, str) and why.replace("_", " ").lower().find("out of range") >= 0:
                 add(key, "the value sent", None, None)
     return OutOfRange(found) if found else None

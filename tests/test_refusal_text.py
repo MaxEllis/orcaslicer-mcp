@@ -65,7 +65,8 @@ async def test_refusal_is_posted_to_the_panel():
     assert "blocked_by_local_policy" in out["error"] and not put.called
     body = json.loads(note.calls.last.request.content)
     assert body["kind"] == "refused"
-    assert body["text"].startswith("Refused: ") and "locked" in body["text"]
+    assert body["text"] == "Start G-code" and body["value"] == "Not allowed"
+    assert "locked" in body["detail"] and "Preferences > Remote API" in body["detail"]
     assert "X-Orca-Mcp-Trial" not in note.calls.last.request.headers
 
 
@@ -75,8 +76,8 @@ async def test_out_of_range_refusal_is_posted_to_the_panel():
     out = await srv.set_config({"layer_height": -1})
     assert out["error"].startswith("out_of_range")
     body = json.loads(note.calls.last.request.content)
-    assert body == {"kind": "refused",
-                    "text": "Refused: Layer height -1 (allowed: greater than 0 mm)"}
+    assert body == {"kind": "refused", "text": "Layer height", "value": "Out of range",
+                    "detail": "Layer height (layer_height) must be greater than 0 mm; -1 is outside that range"}
 
 
 @respx.mock

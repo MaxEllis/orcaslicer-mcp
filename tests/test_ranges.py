@@ -115,3 +115,18 @@ async def test_fork_out_of_range_through_set_config(monkeypatch):
     out = await srv.set_config({"bridge_flow": 1.5})
     assert out["error"].startswith("out_of_range")
     assert out["allowed"]["bridge_flow"] == {"min": 0, "max": 2, "unit": ""}
+
+
+def test_fork_reply_shape_with_both_top_level_and_errors_entry():
+    # The OrcaSlicer MCP build's PUT /config refusal: errors[key] carries its sentence and the
+    # first out-of-range key is repeated at the top level.
+    body = {"applied": [], "errors": {
+                "layer_height": "out_of_range: Layer height must be at least 0 mm (got -1mm)",
+                "sparse_infill_density": "out_of_range: Sparse infill density must be between 0% and 100% (got 250%)"},
+            "error": "out_of_range", "key": "layer_height", "value": "-1", "min": 0, "max": None,
+            "detail": "Layer height must be at least 0 mm (got -1mm)"}
+    e = error_from_status(422, body)
+    assert isinstance(e, OutOfRange)
+    assert set(e.ranges) == {"layer_height", "sparse_infill_density"}
+    assert e.ranges["layer_height"]["value"] == "-1"          # from the top level, not overwritten
+    assert "between 0% and 100%" in e.ranges["sparse_infill_density"]["detail"]

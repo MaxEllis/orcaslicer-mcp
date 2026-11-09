@@ -39,7 +39,7 @@ OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in pla
 
 | | **OrcaSlicer MCP build** | **OrcaSlicer MCP plugin** |
 |---|---|---|
-| **What it is** | A build of OrcaSlicer 2.5 with the connection built in | A plugin for stock OrcaSlicer 2.5 |
+| **What it is** | OrcaSlicer 2.5 with the connection built in | A plugin for stock OrcaSlicer 2.5 |
 | Read and change settings | ✓ | ✓ |
 | Switch presets | ✓ | ✓ |
 | Save, rename and delete presets | ✓ | ✗ |
@@ -50,11 +50,11 @@ OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in pla
 | Undo each change in the panel | ✓ | ✓ |
 | Restore the project to an earlier point | ✓ | ✗ |
 | Read your printer's status | ✓ | ✓ |
-| **Your OrcaSlicer** | Replaced. The installer and the Mac app install over it and keep your printers and presets. The portable Windows zip and the Linux AppImage run alongside it. | Stays as it is |
-| **Updates** | The build offers new releases of this project | Through OrcaCloud; OrcaSlicer updates as usual |
-| **Get it** | [Download](https://github.com/MaxEllis/OrcaSlicer/releases/latest) | [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE), or the `.py` file on this repo's [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) |
+| **Your OrcaSlicer** | Replaced, with your printers and presets kept | Stays as it is |
+| **Updates** | Offered by the build | Through OrcaCloud |
+| **Get it** | [Download](https://github.com/MaxEllis/OrcaSlicer/releases/latest) | [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE) or the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) |
 
-The trade-off: the build can do everything but replaces your OrcaSlicer. The plugin keeps your OrcaSlicer but only works with settings and presets.
+The trade-off: the build can do everything but replaces your OrcaSlicer. The plugin keeps your OrcaSlicer but only works with settings and presets. To run the build next to stock OrcaSlicer, use its portable Windows zip or Linux AppImage.
 
 ## Get started
 

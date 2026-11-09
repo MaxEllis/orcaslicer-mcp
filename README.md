@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h3 align="center">Tell your AI assistant what the print needs. It finds the OrcaSlicer settings that matter, says why, and shows what they cost before you print.</h3>
+<h3 align="center">Work with your AI assistant to get the print you're after, and learn how OrcaSlicer gets you there.</h3>
 
 <p align="center">
   <a href="https://pypi.org/project/orcaslicer-mcp/"><img alt="PyPI" src="https://img.shields.io/pypi/v/orcaslicer-mcp?color=009789"></a>
@@ -13,13 +13,13 @@
   <a href="https://lobehub.com/mcp/maxellis-orcaslicer-mcp"><img alt="MCP Badge" src="https://lobehub.com/badge/mcp/maxellis-orcaslicer-mcp"></a>
 </p>
 
-OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in plain words in the AI app, the changes happen in the OrcaSlicer window you already use, and the OrcaSlicer MCP panel beside the 3D view lists each one with a way to undo it.
+OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. Tell the assistant your goal in plain words. It finds the settings that matter, explains each one, and shows what they cost before you print. The changes happen in the OrcaSlicer window you already use, and the OrcaSlicer MCP panel beside the 3D view lists each one with a way to undo it.
 
-**1. Say what the print needs**
+**1. Tell it your goal**
 
 <p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/step1.png" alt="Your AI app: you write that you designed these brackets, want them as strong as possible, and ask to see the changes it would make. An arrow leads to OrcaSlicer, where the bracket stands on the plate as designed."></p>
 
-**2. It changes what matters, and says why**
+**2. It changes what matters, and explains why**
 
 <p align="center"><img src="https://raw.githubusercontent.com/MaxEllis/orcaslicer-mcp/main/docs/images/step2.png" alt="Your AI app: the assistant says it made three changes: on its side, because standing up the layers run across the arm that takes the load; 7 walls instead of 4, which makes the arms solid; 215 °C instead of 200 so the layers fuse. A line runs from each reason to the OrcaSlicer MCP panel: Rotated 90° about X (Rotate back), Wall loops 7, was 4 (Revert), Nozzle temperature 215 °C, was 200 (Revert)."></p>
 

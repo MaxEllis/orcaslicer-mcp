@@ -51,7 +51,7 @@ OrcaSlicer MCP connects an AI app on your computer to OrcaSlicer. You ask in pla
 | Restore the project to an earlier point | ✓ | ✗ |
 | Read your printer's status | ✓ | ✓ |
 | **Your OrcaSlicer** | Replaced, with your printers and presets kept | Stays as it is |
-| **Updates** | Offered by the build | Through OrcaCloud |
+| **Updates** | Offered by the build | Automatic from OrcaCloud; for a file install, your assistant tells you |
 | **Get it** | [Download](https://github.com/MaxEllis/OrcaSlicer/releases/latest) | [OrcaCloud](https://cloud.orcaslicer.com/p/EXAMPLE) or the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest) |
 
 The trade-off: the build can do everything but replaces your OrcaSlicer. The plugin keeps your OrcaSlicer but only works with settings and presets. To run the build next to stock OrcaSlicer, use its portable Windows zip or Linux AppImage.

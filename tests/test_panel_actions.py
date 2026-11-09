@@ -190,6 +190,7 @@ async def test_fetch_failures_leave_reply_untouched(monkeypatch):
         else:
             respx.get(f"{BASE}/user_changes").mock(return_value=resp)
         out = await srv.get_status()
+        out.pop("connected_to", None)  # get_status's own field, not the journal's
         assert out == {"app_version": "2.5.0"}
         assert srv._last_user_seq == 1
 

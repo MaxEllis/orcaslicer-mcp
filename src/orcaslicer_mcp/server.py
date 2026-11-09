@@ -186,11 +186,81 @@ def _with_user_changes(fn):
         finally:
             _client_mod.REACHED.reset(token)
             _CURRENT_TOOL.reset(tool_token)
+        _polish_error(result)
         if flag[0]:
             result = await _attach_user_changes(result)
             result = await _attach_plugin_update(result)
         return result
     return wrapper
+
+
+# --- Every error reads as a sentence ------------------------------------------------------
+# A reply such as {"error": "file_not_found"} or "open takes a .3mf project; POST /model imports
+# geometry" left the assistant to guess (usability test 2026-11-09, m12): every error gets a
+# `detail` sentence, and HTTP routes become the tool names that do the same thing.
+_ROUTE_TOOLS = {
+    "/model": "load_model", "/project/open": "open_project", "/project/save": "save_project",
+    "/project/new": "new_project", "/slice": "slice", "/slice/status": "get_slice_status",
+    "/config": "set_config", "/status": "get_status", "/objects": "list_objects",
+    "/preset": "select_preset", "/preset/save": "save_preset", "/plates": "list_plates",
+    "/arrange": "arrange_plate", "/orient": "auto_orient", "/gcode": "get_gcode",
+    "/plate/render": "render_plate", "/project/recent": "list_recent_projects",
+}
+_ROUTE = re.compile(r"\b(?:GET|POST|PUT|DELETE|PATCH)\s+(?:/api/v1)?(/[\w/{}.-]*)")
+
+_ERROR_DETAILS = {
+    "already_slicing": "A slice is already running; wait for it (get_slice_status) or stop it (cancel_slice).",
+    "slicing": "A slice is running; wait for it to finish (get_slice_status), then try again.",
+    "job_running": "OrcaSlicer is still arranging or orienting; wait until get_job_status says idle.",
+    "unknown_object": "There is no object with that id; list_objects shows the ids.",
+    "unknown_preset": "There is no preset with that name; list_presets shows the names.",
+    "unknown_plate": "There is no plate with that index; list_plates shows the 0-based indexes.",
+    "file_not_found": "There is no such file on the OrcaSlicer machine; give the full path as it is on that computer.",
+    "need_at_least_two_variants": "compare_slices needs at least two variants to compare.",
+    "too_many_variants": "compare_slices takes at most 8 variants; each one is a full slice.",
+    "each_variant_needs_a_name": "Every variant needs a name, shown in the comparison table.",
+    "variant_names_must_be_unique": "Two variants share a name; give each a different one.",
+    "unknown_baseline": "The baseline must be the name of one of the variants.",
+    "unknown_setting": "There is no setting with that key; search_settings finds keys by words.",
+    "invalid_type": "The preset type must be print, filament or printer.",
+    "invalid_keys": "OrcaSlicer refused some of the values; `errors` names each one, and nothing was saved.",
+    "no_project_path": "The project has never been saved, so it has no file yet: pass a path to save_project.",
+    "unsaved_changes": "The open project has unsaved changes; pass if_unsaved='save' or 'discard' deliberately, after asking the user.",
+    "exists": "A file already exists at that path; pick another name, or pass overwrite=True if the user agrees.",
+    "plate_locked": "That plate is locked in OrcaSlicer; the user can unlock it there.",
+    "last_plate": "The only plate cannot be deleted.",
+    "parse_failed": "The G-code of this slice could not be read.",
+    "blocked_by_remote_api_policy": "OrcaSlicer's own Preferences refused this; `hint` says which box.",
+}
+
+
+def _without_routes(text: str) -> str:
+    def repl(m):
+        path = m.group(1).rstrip(".")
+        return _ROUTE_TOOLS.get(path, "another tool")
+    return _ROUTE.sub(repl, text)
+
+
+def _looks_relative(path) -> bool:
+    return isinstance(path, str) and bool(path) and not (
+        path.startswith(("/", "\\", "~")) or re.match(r"[A-Za-z]:[\\/]", path))
+
+
+def _polish_error(result) -> None:
+    if not isinstance(result, dict) or not isinstance(result.get("error"), str):
+        return
+    for k in ("error", "detail", "hint"):
+        if isinstance(result.get(k), str):
+            result[k] = _without_routes(result[k])
+    token = result["error"]
+    if "detail" not in result and "message" not in result and re.fullmatch(r"[a-z_]+", token):
+        detail = _ERROR_DETAILS.get(token) or (token.replace("_", " ").capitalize() + ".")
+        if token == "file_not_found" and isinstance(result.get("path"), str):
+            detail = (f"There is no file at {result['path']} on the OrcaSlicer machine; give the full "
+                      "path as it is on that computer.")
+        result["detail"] = detail
+    if token == "file_not_found" and _looks_relative(result.get("path")) and "full path" not in result.get("detail", ""):
+        result["detail"] += " Give the full path, for example C:\\Users\\name\\Downloads\\part.stl or /home/name/part.stl."
 
 
 _orig_tool = mcp.tool
@@ -344,9 +414,26 @@ async def _not_sliced(token: str = "not_sliced") -> dict:
 
 
 
+# Settings OrcaSlicer tracks as "modified" that no user edits: extruder_nozzle_stats (2.5) is
+# the printer's nozzle bookkeeping and shows as a dirty printer key straight after loading.
+_INTERNAL_MODIFIED = frozenset({"extruder_nozzle_stats"})
+
+
+def _hide_internal_modified(status: dict) -> None:
+    modified = status.get("modified")
+    if not isinstance(modified, dict):
+        return
+    for group, keys in modified.items():
+        if isinstance(keys, list):
+            modified[group] = [k for k in keys
+                               if not (isinstance(k, str) and k.split("#", 1)[0] in _INTERNAL_MODIFIED)]
+
+
 @mcp.tool()
 async def get_status() -> dict:
-    """Snapshot of the current OrcaSlicer session: app and project info, the active
+    """Start here: a snapshot of the OrcaSlicer session (build or plugin, project, active presets and their unsaved edits, whether the last slice still holds); for slice numbers use get_slice_status.
+
+    Snapshot of the current OrcaSlicer session: app and project info, the active
     print/filament/printer presets with which of their keys are modified (dirty), whether the
     last slice is still valid, and whether a slice is running. Read-only.
 
@@ -357,7 +444,8 @@ async def get_status() -> dict:
     to save_project and when the user has been editing in the window. Older builds report
     `project` as the bare path string.
 
-    `backend: "plugin"` means OrcaSlicer runs the OrcaSlicer MCP plugin on stock
+    `connected_to` says in words which one answered: the OrcaSlicer MCP build, or
+    `backend: "plugin"`, the OrcaSlicer MCP plugin on stock
     OrcaSlicer: `note` says what it can do. Tell the user before attempting anything it
     cannot (loading models, slicing, renders, plates, projects, saving presets). When that
     plugin is older than the newest release, `plugin_update` says where to get the new one;
@@ -370,8 +458,12 @@ async def get_status() -> dict:
     except ApiError as e:
         return _err(e)
     if status.get("backend") == "plugin":
+        status["connected_to"] = "the OrcaSlicer MCP plugin on stock OrcaSlicer"
         status["note"] = ("Connected to the OrcaSlicer MCP plugin on stock OrcaSlicer, not the "
                           "OrcaSlicer MCP build: " + PLUGIN_LIMITS.split(". ", 1)[1])
+    else:
+        status["connected_to"] = "the OrcaSlicer MCP build (OrcaSlicer with the Remote API built in)"
+    _hide_internal_modified(status)
     upd = _plugin_update(status)
     if upd:
         status["plugin_update"] = upd
@@ -381,7 +473,9 @@ async def get_status() -> dict:
 
 @mcp.tool()
 async def get_config(keys: list[str] | None = None) -> dict:
-    """Read merged config values (optionally filtered to `keys`)."""
+    """Read the current value of settings (all, or only `keys`); to learn what a setting means or its allowed range use describe_setting.
+
+    Read merged config values (optionally filtered to `keys`)."""
     try:
         async with _client() as c:
             return {"config": await c.get_config(keys)}
@@ -401,7 +495,9 @@ async def set_config(
         "every loaded filament ('70,100,70,70,35'), while this writes the one filament "
         "preset open in the Filament tab, so pass that preset's single value instead."))],
 ) -> dict:
-    """Apply config changes to the active project as unsaved overrides, atomically: if any
+    """Change settings on the open project as unsaved edits, all or nothing; use apply_and_slice to also slice, or edit_preset to change a saved preset.
+
+    Apply config changes to the active project as unsaved overrides, atomically: if any
     key is invalid the whole batch is rejected and nothing changes. Returns {applied, errors}.
 
     Overrides show as modified in get_status, are not written to any preset file, and revert
@@ -422,7 +518,9 @@ async def set_config(
 
 @mcp.tool()
 async def slice() -> dict:
-    """Start slicing the current plate in the background and return immediately, without waiting
+    """Start a slice and return at once without waiting; use slice_and_wait when you want the finished time and filament in the same call.
+
+    Start slicing the current plate in the background and return immediately, without waiting
     for the result. The reply is 'started' (a slice began), 'already_valid' (the plate is
     unchanged and the last result still holds), or a conflict if a slice is already running.
 
@@ -440,7 +538,9 @@ async def slice() -> dict:
 
 @mcp.tool()
 async def get_slice_status() -> dict:
-    """State of the current or most recent slice: state (slicing, done, error, or idle), stats
+    """Read the state, time and filament of the current or last slice, and whether it is out of date; for the warnings alone use get_slice_warnings.
+
+    State of the current or most recent slice: state (slicing, done, error, or idle), stats
     (print time and filament use when done), and any warnings or errors. Read-only.
 
     Poll this after slice to follow progress and read the result; 'idle' means no slice has run
@@ -462,7 +562,9 @@ async def get_slice_status() -> dict:
 
 @mcp.tool()
 async def get_slice_warnings() -> dict:
-    """Just the warnings/errors from the last (or current) slice, plus validity: the
+    """Read only the warnings and errors of the last slice and whether it still holds; the quick check that a fix cleared a warning.
+
+    Just the warnings/errors from the last (or current) slice, plus validity: the
     fast 'did anything go wrong' check and the way to confirm a fix cleared.
 
     NOTE: only as complete as the API exposes. On the current fork build this may report
@@ -486,7 +588,9 @@ async def get_slice_warnings() -> dict:
 
 @mcp.tool()
 async def get_slice_breakdown() -> dict:
-    """Per-feature breakdown of the last slice + a stateless predicted-vs-observed flow check.
+    """Read where the time and filament of the last slice go, per feature (walls, infill, support), with a check for speeds capped by the flow limit.
+
+    Per-feature breakdown of the last slice + a stateless predicted-vs-observed flow check.
 
     Returns per-role time/filament + speed/flow ranges, global time-weighted metric
     distributions, per-layer aggregates, and a prediction_check flagging where the profile's
@@ -515,7 +619,9 @@ async def get_slice_breakdown() -> dict:
 
 @mcp.tool()
 async def cancel_slice() -> dict:
-    """Abort a running slice, or unwedge a stale 'slicing' state (e.g. after an
+    """Stop a running slice, or clear a slice stuck in 'slicing'; safe to call when nothing is running.
+
+    Abort a running slice, or unwedge a stale 'slicing' state (e.g. after an
     object outside the bed). Safe when idle."""
     try:
         async with _client() as c:
@@ -530,7 +636,9 @@ async def slice_and_wait(
         "Maximum seconds to wait for the slice to finish before returning the last known "
         "state. Default 300; raise it for large or textured plates that slice slowly."))] = 300,
 ) -> dict:
-    """Slice the current plate and block until it finishes, then return the final stats and
+    """Slice the current plate and wait for the finished time, filament and warnings; the usual way to slice (slice returns at once instead).
+
+    Slice the current plate and block until it finishes, then return the final stats and
     warnings in one call. If the plate is already sliced and unchanged, it returns the existing
     result without re-slicing.
 
@@ -557,7 +665,9 @@ async def apply_and_slice(
         "{'layer_height': 0.2}. Same format and validation as set_config; discover keys with "
         "search_settings or find_config_keys."))],
 ) -> dict:
-    """Apply config overrides and then slice in one step, returning {applied, errors, result}
+    """Change settings and slice in one call, returning both; use set_config and then slice_and_wait to keep the steps apart.
+
+    Apply config overrides and then slice in one step, returning {applied, errors, result}
     with the resulting stats and warnings. The changes are atomic (any invalid key rejects the
     whole batch) and unsaved, exactly like set_config, so they revert if the preset is reselected.
 
@@ -584,7 +694,9 @@ async def apply_and_slice(
 
 @mcp.tool()
 async def compare_settings(key: str, values: list, extra: dict | None = None) -> dict:
-    """Slice once per value of ONE setting and return the raw stats and warnings of each; the
+    """Slice once per value of a single setting and return the raw numbers, putting the value back after; compare_slices adds deltas and a verdict.
+
+    Slice once per value of ONE setting and return the raw stats and warnings of each; the
     original value is put back afterwards, even on error.
 
     Use it for a quick sweep of a single key. To compare named combinations of settings with
@@ -647,7 +759,9 @@ async def _variant_error(c, e: ApiError) -> str:
 @mcp.tool()
 async def compare_slices(variants: list[dict], baseline: str | None = None,
                          detail: bool = False, timeout: int = 300) -> dict:
-    """Slice the current plate under 2-8 named combinations of settings and compare their time,
+    """Slice under 2-8 named combinations of settings and compare time, filament and warnings with ready-made deltas, putting the settings back after.
+
+    Slice the current plate under 2-8 named combinations of settings and compare their time,
     filament and warnings, then put the settings back; use it over compare_settings when you
     want ready-to-relay deltas and a verdict.
 
@@ -826,7 +940,9 @@ def _slots_err(e: ApiError) -> dict:
 
 @mcp.tool()
 async def list_objects() -> dict:
-    """List objects in the project: id (stable), name, size_mm, transform (offset/rotation/scale)
+    """List the objects in the project with their ids, names, sizes, placement and plate; the object tools take these ids.
+
+    List objects in the project: id (stable), name, size_mm, transform (offset/rotation/scale)
     and, on fork v2.4.2-mcp.13 and later, the 0-based plate each one sits on (-1 when it is off
     every plate)."""
     try:
@@ -838,7 +954,9 @@ async def list_objects() -> dict:
 
 @mcp.tool()
 async def set_object_config(object_id: int, changes: dict) -> dict:
-    """Set per-object config overrides on an object by id, e.g. {"wall_loops": 4, "sparse_infill_density": "30%"}. Atomic (nothing applied if any key is invalid)."""
+    """Change settings for one object only, all or nothing; use set_config to change them for the whole plate.
+
+    Set per-object config overrides on an object by id, e.g. {"wall_loops": 4, "sparse_infill_density": "30%"}. Atomic (nothing applied if any key is invalid)."""
     try:
         async with _client() as c:
             return await c.set_object_config(object_id, changes)
@@ -848,7 +966,9 @@ async def set_object_config(object_id: int, changes: dict) -> dict:
 
 @mcp.tool()
 async def duplicate_object(object_id: int) -> dict:
-    """Duplicate an object on the plate by id (adds a copy, offset from the original)."""
+    """Add one copy of an object next to it on the plate; call it again for more copies.
+
+    Duplicate an object on the plate by id (adds a copy, offset from the original)."""
     try:
         async with _client() as c:
             return await c.duplicate_object(object_id)
@@ -862,7 +982,9 @@ async def delete_object(
         "Integer id of the object to remove, taken from the 'id' field of list_objects "
         "(not the array index or the file name)."))],
 ) -> dict:
-    """Remove one object from the current plate by id. This is permanent within the session
+    """Remove one object from the plate by id; this cannot be undone through these tools.
+
+    Remove one object from the current plate by id. This is permanent within the session
     and cannot be undone through the API; the other objects keep their ids.
 
     Call list_objects first to get the id. Deleting leaves the last slice invalid, so re-slice
@@ -878,7 +1000,9 @@ async def delete_object(
 async def transform_object(object_id: int, translate: list[float] | None = None,
                            rotate: list[float] | None = None,
                            scale: list[float] | None = None) -> dict:
-    """Move/rotate/scale an object by id. translate=[dx,dy,dz] mm (relative), rotate=[rx,ry,rz] degrees (relative), scale=[sx,sy,sz] absolute factor. Provide at least one.
+    """Move, rotate or scale one object by id; use move_object_to_plate to change its plate, or arrange_plate to tidy the whole plate.
+
+    Move/rotate/scale an object by id. translate=[dx,dy,dz] mm (relative), rotate=[rx,ry,rz] degrees (relative), scale=[sx,sy,sz] absolute factor. Provide at least one.
 
     On fork v2.4.2-mcp.13 and later the object then belongs to whichever plate it sits on,
     as after a drag in the window; list_objects shows the plate. To send an object to
@@ -892,7 +1016,9 @@ async def transform_object(object_id: int, translate: list[float] | None = None,
 
 @mcp.tool()
 async def arrange_plate() -> dict:
-    """Auto-arrange all objects on the plate (async job; poll get_job_status until idle).
+    """Let OrcaSlicer pack every object on the unlocked plates (Arrange all); use transform_object to move just one.
+
+    Auto-arrange all objects on the plate (async job; poll get_job_status until idle).
 
     With several plates this is OrcaSlicer's "Arrange all": it re-packs the objects of every
     unlocked plate together and deletes plates left empty at the end, which undoes a
@@ -906,7 +1032,9 @@ async def arrange_plate() -> dict:
 
 @mcp.tool()
 async def auto_orient() -> dict:
-    """Auto-orient all objects for printing (async job; poll get_job_status until idle)."""
+    """Let OrcaSlicer turn every object to its best printing orientation; use transform_object to rotate one by a set angle.
+
+    Auto-orient all objects for printing (async job; poll get_job_status until idle)."""
     try:
         async with _client() as c:
             return await c.orient()
@@ -916,7 +1044,9 @@ async def auto_orient() -> dict:
 
 @mcp.tool()
 async def list_plates() -> dict:
-    """List the plates in the project: each one's 0-based index, name, whether it is the
+    """List the project's plates with their objects and which one is current; the plate tools take the 0-based index shown here.
+
+    List the plates in the project: each one's 0-based index, name, whether it is the
     current plate (the one slice, get_gcode, render_plate and get_job_status act on), lock
     state, build volume and the objects it holds. Also says how many plates the build allows
     (max) and whether one can be added or deleted right now. Read-only.
@@ -932,7 +1062,9 @@ async def list_plates() -> dict:
 
 @mcp.tool()
 async def get_printer_slots() -> dict:
-    """Read the filament slots (trays) of the connected Elegoo Centauri Carbon 2 with a CANVAS
+    """Read the filament trays of an Elegoo Centauri Carbon 2 with a CANVAS unit; only for that printer, and slow (up to about 18 s).
+
+    Read the filament slots (trays) of the connected Elegoo Centauri Carbon 2 with a CANVAS
     unit: which tray is active, and for each tray its label (A1, A2, ...), status, material,
     brand and colour. Read-only. Works only for that printer; needs fork v2.4.2-mcp.14 or later.
     The call asks the printer over the network and can take up to about 18 seconds, and
@@ -955,7 +1087,9 @@ async def get_printer_slots() -> dict:
 
 @mcp.tool()
 async def get_filament_slot_mapping() -> dict:
-    """Show which CANVAS tray each filament would use if the user clicked Send now. The
+    """Show which CANVAS tray each filament would print from on the next Send (Elegoo Centauri Carbon 2 only); read-only.
+
+    Show which CANVAS tray each filament would use if the user clicked Send now. The
     filaments listed are the ones on the plate the next Send would use. Read-only; needs fork
     v2.4.2-mcp.14 or later. It reads the printer when no slot list is cached, so it can take up
     to about 18 seconds, and OrcaSlicer's API serves one request at a time meanwhile, so other
@@ -982,7 +1116,9 @@ async def set_filament_slot_mapping(
         "get_filament_slot_mapping lists): {filament: 0-based filament index, canvas_id, "
         "tray_id} from get_printer_slots."))],
 ) -> dict:
-    """Choose which CANVAS tray each filament of the plate the next Send would use prints from.
+    """Choose which CANVAS tray each filament prints from on the next Send (Elegoo Centauri Carbon 2 only); it starts nothing.
+
+    Choose which CANVAS tray each filament of the plate the next Send would use prints from.
     Returns the same reply as get_filament_slot_mapping, so check valid and problems. Needs
     fork v2.4.2-mcp.14 or later and an Elegoo Centauri Carbon 2 with a CANVAS. It reads the
     printer when no slot list is cached, so it can take up to about 18 seconds, and
@@ -1011,7 +1147,9 @@ async def add_plate(
         "Make the new plate the current one, as the toolbar button does. Pass false to "
         "keep working on the plate that is current now."))] = True,
 ) -> dict:
-    """Add an empty plate to the project, the same way the toolbar's "Add plate" button
+    """Add an empty plate, like the toolbar's Add plate button, so parts can print separately.
+
+    Add an empty plate to the project, the same way the toolbar's "Add plate" button
     does. Returns the new plate's 0-based index for move_object_to_plate and select_plate.
 
     Use it when parts should print separately: load them, add a plate, move the second
@@ -1031,7 +1169,9 @@ async def select_plate(
     index: Annotated[int, Field(description=(
         "0-based plate index from list_plates (the window shows plates 1-based)."))],
 ) -> dict:
-    """Make a plate the current one, exactly like clicking it: slice_and_wait, get_gcode,
+    """Make a plate the current one, so slicing, G-code, renders and slice status act on it.
+
+    Make a plate the current one, exactly like clicking it: slice_and_wait, get_gcode,
     render_plate, get_slice_status and get_job_status then act on that plate.
 
     get_slice_status then reports that plate's own result: its stats if it is still sliced,
@@ -1050,7 +1190,9 @@ async def delete_plate(
     index: Annotated[int, Field(description=(
         "0-based plate index from list_plates. Later plates shift down one index."))],
 ) -> dict:
-    """Delete a plate. The objects it held are NOT deleted: OrcaSlicer parks them beside
+    """Delete a plate; the objects on it are parked beside the bed, not deleted.
+
+    Delete a plate. The objects it held are NOT deleted: OrcaSlicer parks them beside
     the bed, as the toolbar's delete does, and the reply says how many were moved off-plate
     (objects_moved_off_plate). Use move_object_to_plate to put them somewhere printable.
     OrcaSlicer parks them where the next plate appears, so an add_plate straight after a
@@ -1075,7 +1217,9 @@ async def move_object_to_plate(
         "Which copy to move when the object has several (duplicate_object); 0 is the "
         "original."))] = 0,
 ) -> dict:
-    """Move an object onto another plate. Coming from a plate it keeps its position relative
+    """Move an object onto another plate by its index; simpler than transform_object for changing plates.
+
+    Move an object onto another plate. Coming from a plate it keeps its position relative
     to that plate (front-left of plate 1 lands front-left of plate 2); coming from off-plate
     (parked beside the bed) it lands at the destination's centre. If it then overlaps a
     part, shift it with transform_object; arrange_plate would re-pack every plate together.
@@ -1092,7 +1236,9 @@ async def move_object_to_plate(
 
 @mcp.tool()
 async def get_project() -> dict:
-    """The open project as a file: name (the window title), path (empty until it has been
+    """Read the open project as a file (name, path, unsaved changes); check it before save_project, open_project or new_project.
+
+    The open project as a file: name (the window title), path (empty until it has been
     saved), saved, dirty (File > Save has something to write), plate and object counts, the
     preset groups with unsaved edits (modified) and how many entries File > Recent holds.
     Read-only. Call it before save_project, open_project or new_project to see whether the
@@ -1115,7 +1261,9 @@ async def save_project(
         "never a silent clobber. Saving the project back onto its own path is a plain "
         "Save and needs no overwrite."))] = False,
 ) -> dict:
-    """Save the project as a .3mf, exactly what File > Save / Save Project As writes: plates,
+    """Save the open project as a .3mf with its plates and settings (File > Save or Save As); save_gcode saves the sliced G-code instead.
+
+    Save the project as a .3mf, exactly what File > Save / Save Project As writes: plates,
     object placement, per-object and per-plate settings, height-range modifiers, slot presets
     and colours, and unsaved config overrides. No dialog opens; OrcaSlicer's own prompts are
     answered from the arguments. To create a new project file, call new_project and then
@@ -1147,7 +1295,9 @@ async def open_project(
         "presets that were active before the call again (for names that still exist); the "
         "project's own config overrides are not kept in that mode."))] = "project",
 ) -> dict:
-    """Open a saved .3mf project the way File > Open Project does: plates, objects, per-object
+    """Open a saved .3mf project with its plates and settings, replacing the open one; load_model only adds a model's geometry.
+
+    Open a saved .3mf project the way File > Open Project does: plates, objects, per-object
     and per-plate settings, slot presets and colours all come back. This is not load_model,
     which only imports geometry onto the current plate. Use open_recent_project for an entry
     of File > Recent and browse_projects to find project files in a folder.
@@ -1179,7 +1329,9 @@ async def open_recent_project(
         "'project' (default) selects the presets stored in the project; 'keep_current' "
         "selects the presets active before the call again."))] = "project",
 ) -> dict:
-    """Open an entry of File > Recent by its position in list_recent_projects, with the same
+    """Open an entry of File > Recent by its position in list_recent_projects; open_project takes a path instead.
+
+    Open an entry of File > Recent by its position in list_recent_projects, with the same
     behaviour and arguments as open_project. The list can change between calls (a save or an
     open moves its file to the top), so list first and open straight after; a file no longer
     on disk answers file_not_found and forget_recent_project removes the entry. Needs fork
@@ -1201,7 +1353,9 @@ async def new_project(
         "A title for the new project, shown in the window; 'Untitled' when omitted. The file "
         "name is chosen when save_project is called with a path."))] = None,
 ) -> dict:
-    """Start a new, empty project (File > New Project) without a dialog. The unsaved-changes
+    """Start a new, empty project (File > New Project) without a dialog.
+
+    Start a new, empty project (File > New Project) without a dialog. The unsaved-changes
     prompt is answered by if_unsaved. OrcaSlicer's second prompt, keep or discard modified
     presets, is answered with Keep: unsaved preset overrides carry over into the new project
     and the reply names them in kept_changes (select_preset drops them if that is not
@@ -1216,7 +1370,9 @@ async def new_project(
 
 @mcp.tool()
 async def list_recent_projects() -> dict:
-    """File > Recent, most recent first: for each entry its index (for open_recent_project),
+    """List File > Recent, most recent first, with the index that open_recent_project takes.
+
+    File > Recent, most recent first: for each entry its index (for open_recent_project),
     path, project name, whether the file still exists, whether it is the open project, and
     its size and last-modified time. Read-only. Needs fork v2.4.2-mcp.15 or later."""
     try:
@@ -1235,7 +1391,9 @@ async def forget_recent_project(
         "Alternatively, the entry's 0-based index from list_recent_projects."), ge=0)] = None,
     all: Annotated[bool, Field(description="Clear the whole list instead.")] = False,
 ) -> dict:
-    """Take an entry off File > Recent (by path or index), or clear the list. Nothing on disk
+    """Remove an entry from File > Recent, or clear the list; the file on disk stays.
+
+    Take an entry off File > Recent (by path or index), or clear the list. Nothing on disk
     changes; the file stays where it is. Useful after a file was deleted or moved outside
     OrcaSlicer. The reply names what was forgotten and returns the list as it is now. Needs
     fork v2.4.2-mcp.15 or later."""
@@ -1254,7 +1412,9 @@ async def browse_projects(
         "A folder on the OrcaSlicer host. None uses the open project's folder, or the folder "
         "OrcaSlicer's last file dialog used."))] = None,
 ) -> dict:
-    """List the .3mf project files in one folder (not recursive), newest first: path, project
+    """List the .3mf project files in one folder on the OrcaSlicer machine; list_recent_projects shows File > Recent instead.
+
+    List the .3mf project files in one folder (not recursive), newest first: path, project
     name, size and last-modified time, and whether each is the open project. Read-only. Use it
     to find a project to open_project, or to pick a free name before save_project. Needs fork
     v2.4.2-mcp.15 or later."""
@@ -1273,7 +1433,9 @@ async def move_project_file(
         "Replace an existing file at `to`. Off by default. The open project's own file is "
         "never replaced."))] = False,
 ) -> dict:
-    """Move or rename a project file on disk. When it is the open project's file the window
+    """Move or rename a .3mf project file on disk; the window follows when it is the open project.
+
+    Move or rename a project file on disk. When it is the open project's file the window
     follows: title, project name and File > Recent all show the new path, and the next
     save_project writes there. Any other recent-list entry naming the old path is pointed at
     the new one. The file's content and the project's dirty state do not change. Fails with
@@ -1291,7 +1453,9 @@ async def move_project_file(
 async def delete_project_file(
     path: Annotated[str, Field(description="The .3mf file to delete, on the OrcaSlicer host.")],
 ) -> dict:
-    """Delete a project file from disk, permanently (there is no trash), and take it off File >
+    """Delete a .3mf project file from disk for good; forget_recent_project only takes it off File > Recent.
+
+    Delete a project file from disk, permanently (there is no trash), and take it off File >
     Recent. Only .3mf files can be deleted this way, and never the open project's own file:
     new_project or open_project first. Confirm with the user before calling this on a file
     they did not just ask to remove. OrcaSlicer refuses it (blocked_by_remote_api_policy)
@@ -1306,7 +1470,9 @@ async def delete_project_file(
 
 @mcp.tool()
 async def get_job_status() -> dict:
-    """Whether the plate's background job worker is idle or still running. Read-only.
+    """Check whether arranging or orienting is still running; wait for idle before reading positions or slicing.
+
+    Whether the plate's background job worker is idle or still running. Read-only.
 
     arrange_plate and auto_orient start async jobs; poll this until it reports idle before you
     read object positions or slice, so you act on the settled layout rather than a mid-move
@@ -1320,7 +1486,9 @@ async def get_job_status() -> dict:
 
 @mcp.tool()
 async def watch_events(seconds: int = 10) -> dict:
-    """Collect live events (slice.*/config.changed/project.opened) over a bounded window."""
+    """Listen to OrcaSlicer's live events (slices, setting changes, projects opened) for a few seconds.
+
+    Collect live events (slice.*/config.changed/project.opened) over a bounded window."""
     try:
         async with _client() as c:
             return {"events": await c.collect_events(seconds=seconds)}
@@ -1330,7 +1498,9 @@ async def watch_events(seconds: int = 10) -> dict:
 
 @mcp.tool()
 async def find_config_keys(substring: str) -> dict:
-    """Find config keys containing `substring` (helps discover among the ~600 keys)."""
+    """Find setting keys that contain a piece of text, from the live settings; search_settings also matches labels and descriptions, offline.
+
+    Find config keys containing `substring` (helps discover among the ~600 keys)."""
     try:
         async with _client() as c:
             cfg = await c.get_config(None)
@@ -1346,7 +1516,9 @@ _PLATE_CFG_KEYS = ["printable_area", "bed_exclude_area", "skirt_loops", "skirt_d
 
 @mcp.tool()
 async def diagnose_plate() -> dict:
-    """One-call plate diagnosis: app/slice status, objects on the plate, bed + active
+    """Start here when a plate won't slice or fit: status, objects, bed and skirt or brim settings and slice warnings in one call.
+
+    One-call plate diagnosis: app/slice status, objects on the plate, bed + active
     skirt/brim/clearance settings, and the last slice's warnings, so you don't have to
     chain status->objects->config. Start here for 'why won't this slice / fit'.
 
@@ -1371,7 +1543,9 @@ async def diagnose_plate() -> dict:
 
 @mcp.tool()
 async def check_placement() -> dict:
-    """Estimate whether every object (plus its skirt/brim ring) fits inside the printable
+    """Estimate before slicing whether every object, with its skirt or brim, fits the bed; get_slice_warnings has the exact verdict after.
+
+    Estimate whether every object (plus its skirt/brim ring) fits inside the printable
     area. Returns per-object fit, expanded first-layer bbox, per-edge clearance (mm), and
     overflow.
 
@@ -1389,7 +1563,9 @@ async def check_placement() -> dict:
 
 @mcp.tool()
 async def consult(query: str) -> dict:
-    """Retrieve curated slicing knowledge + saved context notes for a topic,
+    """Look up curated slicing advice and saved notes for a goal or symptom; call it before choosing settings.
+
+    Retrieve curated slicing knowledge + saved context notes for a topic,
     symptom, or intent. ALWAYS call before deriving or changing settings for
     a user goal. Composes principles per situation, never returns preset
     bundles. Falls back to find_config_keys/web search if empty.
@@ -1404,7 +1580,9 @@ async def consult(query: str) -> dict:
 
 @mcp.tool()
 async def check_profile_physics(changes: dict | None = None) -> dict:
-    """Deterministic pre-save gate: fetches the live config, overlays optional
+    """Check the live settings, plus optional proposed changes, against flow, temperature, geometry and cooling limits; run it before save_preset.
+
+    Deterministic pre-save gate: fetches the live config, overlays optional
     proposed `changes`, and runs flow/temperature/geometry/cooling math.
     RUN THIS BEFORE save_preset. verdict=blocked means DO NOT SAVE."""
     try:
@@ -1424,7 +1602,9 @@ async def check_profile_physics(changes: dict | None = None) -> dict:
 
 @mcp.tool()
 async def remember(note: str, scope: str) -> dict:
-    """Persist a context fact for future sessions. scope: 'machine:<printer>/<filament>',
+    """Save a short note for future sessions (about a printer, the user or a project); consult finds it again.
+
+    Persist a context fact for future sessions. scope: 'machine:<printer>/<filament>',
     'user', or 'project:<name>'. Local plain files; user-readable and deletable."""
     return {"saved": str(_notes.append_note(note, scope))}
 
@@ -1435,7 +1615,9 @@ def describe_setting(
         "Exact OrcaSlicer config key, e.g. 'layer_height' or 'sparse_infill_density'. Find keys "
         "with search_settings or find_config_keys. Unknown keys return an error."))],
 ) -> dict:
-    """Authoritative definition of one OrcaSlicer setting: label, tooltip, type, unit, valid
+    """Explain one setting from its key: label, meaning, type, unit, allowed range and choices; works offline.
+
+    Authoritative definition of one OrcaSlicer setting: label, tooltip, type, unit, valid
     range, enum values, and default. Read-only and offline, so it works even when OrcaSlicer is
     not running.
 
@@ -1443,13 +1625,15 @@ def describe_setting(
     or edit_preset. To find candidate keys by keyword first, use search_settings."""
     rec = settings_schema.describe(key)
     if rec is None:
-        return {"error": "unknown_setting", "key": key}
+        return {"error": "unknown_setting", "key": key, "detail": _ERROR_DETAILS["unknown_setting"]}
     return rec
 
 
 @mcp.tool()
 def search_settings(query: str, limit: int = 25) -> dict:
-    """Search settings by keyword across key/label/tooltip; returns compact matches (key, label, category, short tooltip), ranked key/label first. Offline."""
+    """Find settings by words in their key, label or description, offline; describe_setting then explains one.
+
+    Search settings by keyword across key/label/tooltip; returns compact matches (key, label, category, short tooltip), ranked key/label first. Offline."""
     return {"results": settings_schema.search(query, limit)}
 
 
@@ -1549,7 +1733,9 @@ def prompt_edit_preset_safely(change: str) -> str:
 
 @mcp.tool()
 async def load_model(path: str) -> dict:
-    """Load a model file (path on the OrcaSlicer host) onto the current plate.
+    """Load a model file (.stl, .obj, .3mf geometry, .step) from the OrcaSlicer machine onto the plate; open_project opens a saved project instead.
+
+    Load a model file (path on the OrcaSlicer host) onto the current plate.
     Accepts .stl/.obj/.3mf, plus .step/.stp on fork v2.3.2-mcp.3+. Large STEP files
     can take a minute to tessellate; the call waits. A .3mf is imported as geometry only;
     to bring back a saved project with its plates and settings use open_project."""
@@ -1563,7 +1749,7 @@ async def load_model(path: str) -> dict:
                     # Builds before mcp.14 answer a missing file with the same
                     # {"error":"not_found"} as a missing route (F18); the model
                     # capability tells them apart.
-                    return {"error": "file_not_found",
+                    return {"error": "file_not_found", "path": path,
                             "detail": f"no file at {path} on the OrcaSlicer machine"}
                 raise
     except ApiError as e:
@@ -1602,7 +1788,9 @@ async def select_preset(
         "Filament only: the 1-based filament slot (extruder/tool, e.g. 1-4 on a 4-head "
         "toolchanger) to set. Omit to switch the preset open in the Filament tab."))] = None,
 ) -> dict:
-    """Make the named preset the active one for its group (print, filament, or printer).
+    """Switch the active print, filament or printer preset; without a filament slot this drops every unsaved edit.
+
+    Make the named preset the active one for its group (print, filament, or printer).
 
     With `slot` (filament only), only that slot's filament preset changes, like picking it
     in the sidebar's combo for that slot, and no unsaved edits are discarded. On a
@@ -1641,7 +1829,9 @@ async def select_preset(
 
 @mcp.tool()
 async def save_preset(type: str, name: str, detach: bool = False) -> dict:
-    """Save the currently edited settings as a named user preset (create or update,
+    """Save the current settings as a named user preset; edit_preset changes a stored preset in one step instead.
+
+    Save the currently edited settings as a named user preset (create or update,
     visible in the GUI immediately). type = print|filament|printer. detach=True saves
     it standalone instead of inheriting the current base preset; use it when creating a
     filament preset for a DIFFERENT material than the one selected, otherwise the new
@@ -1679,7 +1869,9 @@ def _filter_presets(presets: dict, ptype: str | None, include_system: bool) -> d
 
 @mcp.tool()
 async def list_presets(type: str | None = None, include_system: bool = False) -> dict:
-    """List print/filament/printer presets with system/selected/visible flags.
+    """List the print, filament and printer presets: the user's own and the selected ones, or all with include_system.
+
+    List print/filament/printer presets with system/selected/visible flags.
 
     F12: by default returns only USER presets plus whatever is currently SELECTED -
     the built-in system presets are ~400 entries of noise. Pass include_system=True
@@ -1697,7 +1889,9 @@ async def list_presets(type: str | None = None, include_system: bool = False) ->
 
 @mcp.tool()
 async def set_layer_height(object_id: int, mode: str, quality: float = 0.5) -> dict:
-    """Variable layer height for one object. mode='adaptive' (quality 0..1, higher = finer
+    """Turn adaptive layer height on or off for one object; set_height_range sets a fixed height over a Z band instead.
+
+    Variable layer height for one object. mode='adaptive' (quality 0..1, higher = finer
     detail) generates an adaptive profile; mode='reset' (aliases: 'default', 'none')
     restores uniform layers."""
     # F6: the fork only understands adaptive|reset; accept the spellings that
@@ -1719,7 +1913,9 @@ async def set_height_range(
     layer_height: Annotated[float | None, Field(description="Layer height in mm to use within the band, e.g. 0.1. Required unless clear=True.")] = None,
     clear: Annotated[bool, Field(description="If True, remove all height-range overrides on the object and ignore the z and layer_height args.")] = False,
 ) -> dict:
-    """Override the layer height over a Z band of one object (e.g. 0 to 5 mm printed at 0.1 mm
+    """Set a layer height over a Z band of one object; set_layer_height makes the whole object adaptive instead.
+
+    Override the layer height over a Z band of one object (e.g. 0 to 5 mm printed at 0.1 mm
     for finer detail near the base). Passing the same min_z and max_z again updates that band's
     height; clear=True removes every band on the object.
 
@@ -1734,7 +1930,9 @@ async def set_height_range(
 
 @mcp.tool()
 async def get_preset_config(type: str, name: str) -> dict:
-    """Read the full settings of a named preset without selecting it.
+    """Read every setting of a named preset without selecting it; get_config reads the live settings.
+
+    Read the full settings of a named preset without selecting it.
     type = print|filament|printer."""
     try:
         async with _client() as c:
@@ -1745,7 +1943,9 @@ async def get_preset_config(type: str, name: str) -> dict:
 
 @mcp.tool()
 async def delete_preset(type: str, name: str) -> dict:
-    """Delete a USER preset (system presets and the currently-selected one are refused).
+    """Delete one of the user's presets (never a system preset or the selected one).
+
+    Delete a USER preset (system presets and the currently-selected one are refused).
     type = print|filament|printer."""
     try:
         async with _client() as c:
@@ -1756,7 +1956,9 @@ async def delete_preset(type: str, name: str) -> dict:
 
 @mcp.tool()
 async def edit_preset(type: str, name: str, changes: dict) -> dict:
-    """Edit a named preset's settings and persist them: selects it, applies the
+    """Change a stored preset and save it under the same name, after the physics check; set_config changes only the open project.
+
+    Edit a named preset's settings and persist them: selects it, applies the
     changes atomically, saves under the same name. Runs the check_profile_physics
     gate first (F15) and refuses with error=physics_blocked if the changes would
     INTRODUCE a failing physics check (pre-existing failures do not block
@@ -1814,7 +2016,9 @@ async def rename_preset(
     old_name: Annotated[str, Field(description="Current name of the user preset to rename, as shown by list_presets.")],
     new_name: Annotated[str, Field(description="New name for the preset. Should not collide with an existing preset of the same type.")],
 ) -> dict:
-    """Rename a user preset by copying it to new_name, selecting the copy, and deleting the
+    """Rename one of the user's presets; the renamed preset becomes the selected one.
+
+    Rename a user preset by copying it to new_name, selecting the copy, and deleting the
     original. Only user presets can be renamed; system presets are read-only.
 
     Because it selects the renamed preset, this leaves it active and discards unsaved config
@@ -1833,7 +2037,9 @@ async def rename_preset(
 
 @mcp.tool()
 async def get_gcode() -> dict:
-    """Retrieve the last successful slice's G-code as text."""
+    """Return the last slice's G-code as text; save_gcode writes it to a file and records the slice.
+
+    Retrieve the last successful slice's G-code as text."""
     try:
         async with _client() as c:
             data = await c.get_gcode()
@@ -1856,7 +2062,9 @@ def _gcode_cache_key(data: bytes) -> str:
 
 @mcp.tool()
 async def describe_plate() -> dict:
-    """Machine-readable plate facts from the last slice's G-code, per object, so you can answer
+    """Describe from the G-code how each sliced part stands, touches the bed, overhangs, is supported and where its seams are; needs a finished slice.
+
+    Machine-readable plate facts from the last slice's G-code, per object, so you can answer
     orientation and placement questions instead of guessing from Euler angles or a picture:
     how the part stands (flat / tilted / on an edge or corner, from first-layer contact versus its
     widest layer), the first-layer footprint as islands, where overhang extrusions concentrate by
@@ -1931,7 +2139,9 @@ def _gcode_base_dir() -> Path:
 
 @mcp.tool()
 async def save_gcode(filename: str | None = None) -> dict:
-    """Save the last successful slice's G-code and record the slice (model, a fingerprint of the
+    """Save the last slice's G-code to a file and record the slice so the print can be learned from later; hand the path to the printer tools.
+
+    Save the last successful slice's G-code and record the slice (model, a fingerprint of the
     objects' names and sizes, full settings snapshot, and OrcaSlicer's time and filament estimates)
     in the local outcome store under that filename. When that file is printed, list_print_history (or klipper-mcp's recorder) matches the
     finished job by filename, so the real result joins back to these settings. Returns the saved
@@ -2006,7 +2216,9 @@ def _recall_summary(rows: list[dict], subject: str) -> str:
 
 @mcp.tool()
 async def recall_prints(model_name: str | None = None, limit: int = 5) -> dict:
-    """How did past prints of THIS model actually turn out? Matches the current plate by geometry
+    """Recall how past prints of this model turned out and with which settings; call it before slicing.
+
+    How did past prints of THIS model actually turn out? Matches the current plate by geometry
     (or by model_name if given / the slicer is offline), returning each past print's result
     (success/cancelled/error), your recorded verdict (e.g. 'warped'), and the settings it was sliced
     with. Call this BEFORE slicing and tell the user anything relevant (a past warp, a failed layer
@@ -2048,7 +2260,9 @@ async def recall_prints(model_name: str | None = None, limit: int = 5) -> dict:
 async def render_plate(view: str = "editor", angle: str = "iso",
                        width: int = 800, height: int = 600,
                        frame: str | None = None):
-    """Render a PNG picture of the current plate so you can SEE it.
+    """Render a picture of the plate: the models before slicing (editor) or the toolpaths after it (preview).
+
+    Render a PNG picture of the current plate so you can SEE it.
 
     view="editor": the models on the bed BEFORE slicing - use to check
     orientation, plate contact, and first-layer footprint (an Euler triple is
@@ -2107,6 +2321,14 @@ def _remembered_note(target) -> str:
     return f"OrcaSlicer isn't running or can't be reached, so this uses the printer remembered {age}."
 
 
+def _remembered_lead(target) -> str:
+    """Said first when the printer comes from memory: OrcaSlicer could not be read, so this may
+    not be the printer selected there now (usability test 2026-11-09)."""
+    name = f" ({target.profile})" if target.profile else ""
+    return (f"The printer you last used{name}, not necessarily the one selected in OrcaSlicer now "
+            "(OrcaSlicer can't be read): ")
+
+
 async def _with_printer(fn) -> dict:
     """Find the printer (override > OrcaSlicer profile > remembered), open the protocol that
     answers, and run fn(target, client). Printer problems come back as {error, message, hint, ...};
@@ -2120,6 +2342,8 @@ async def _with_printer(fn) -> dict:
         if target.source == "remembered" and isinstance(out, dict):
             notes = out.get("notes")
             out["notes"] = (notes if isinstance(notes, list) else []) + [_remembered_note(target)]
+            if isinstance(out.get("headline"), str):
+                out["headline"] = _remembered_lead(target) + out["headline"]
         return out
     except PrinterError as e:
         out = e.as_dict()
@@ -2130,7 +2354,9 @@ async def _with_printer(fn) -> dict:
 
 @mcp.tool()
 async def get_printer_status() -> dict:
-    """What the 3D printer is doing right now: state (idle, heating, printing, paused, finished,
+    """Read what the 3D printer is doing now (state, temperatures, job progress, problems); wait_for_printer waits for a point in a print.
+
+    What the 3D printer is doing right now: state (idle, heating, printing, paused, finished,
     cancelled, error, shutdown, offline), nozzle and bed temperatures with their targets, the current
     job (file, progress, layer, time elapsed and left, and what the time left is based on), and any
     problems the printer reports, each in the printer's own words with a plain-English hint for
@@ -2155,7 +2381,9 @@ async def wait_for_printer(
         "Call again to keep waiting."))] = _pwait.DEFAULT_TIMEOUT_S,
     ctx: Context | None = None,
 ) -> dict:
-    """Wait until the printer reaches a point in a print, checking every 5 seconds. Returns as soon as
+    """Wait until the printer is heated, printing, past the first layer or finished, checking every 5 seconds.
+
+    Wait until the printer reaches a point in a print, checking every 5 seconds. Returns as soon as
     it happens (met: true), or at the timeout with the latest status (met: false). It also returns
     early, with stopped_early saying why, when the printer reports a fault, when the job ends before
     the point it waits for (a cancelled print, say), or after losing contact ("Lost contact with the
@@ -2172,7 +2400,9 @@ async def wait_for_printer(
 
 @mcp.tool()
 async def list_print_history(limit: int = 10) -> dict:
-    """How did recent prints on the printer actually end? For each finished job: result (success,
+    """List how recent prints on the printer ended against the slicer's estimates (Klipper only); recall_prints looks up one model's past prints.
+
+    How did recent prints on the printer actually end? For each finished job: result (success,
     cancelled or error), how long it took against the slicer's estimate, filament used, and for failed
     or stopped jobs the printer's own reason while its console still holds it. `summary` says how
     the slicer's time estimates compare with reality once there are a few finished prints. Also copies
@@ -2184,7 +2414,9 @@ async def list_print_history(limit: int = 10) -> dict:
 
 @mcp.tool()
 async def check_printer_match() -> dict:
-    """Does the active OrcaSlicer profile match the printer it will print on? Compares nozzle size,
+    """Check the active OrcaSlicer profile against the printer's own Klipper settings (nozzle, bed, speeds, temperatures); warnings only.
+
+    Does the active OrcaSlicer profile match the printer it will print on? Compares nozzle size,
     bed size and height, the highest speeds and accelerations, nozzle and bed temperatures, and
     firmware retraction against the printer's own Klipper settings. Each check comes back ok, warn or
     unknown with both values and why it matters; relay `headline` and the warnings. Warnings only: it

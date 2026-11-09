@@ -13,6 +13,7 @@ def _env(m):
     m.setenv("ORCA_API_URL", "http://x:13130")
     m.setattr(srv, "_last_user_seq", None)
     m.setattr(srv, "_unsupported_url", None)
+    m.setattr(srv, "_seq_url", "http://x:13130")
 
 
 def _entry(seq, text, group="Print"):
@@ -212,3 +213,34 @@ async def test_seq_never_moves_backwards(monkeypatch):
     _journal({"seq": 7, "changes": []})
     await srv.get_status()
     assert srv._last_user_seq == 10
+
+
+@respx.mock
+async def test_404_expires_and_reprobes(monkeypatch):
+    _env(monkeypatch)
+    _status()
+    route = respx.get(f"{BASE}/user_changes").mock(
+        return_value=httpx.Response(404, json={"error": "not_found"}))
+    await srv.get_status()
+    await srv.get_status()
+    assert route.call_count == 1  # remembered
+    srv._unsupported_at -= srv._UNSUPPORTED_TTL_S + 1  # the 404 is now old
+    route.mock(return_value=httpx.Response(200, json={"seq": 4, "changes": []}))
+    await srv.get_status()
+    assert route.call_count == 2  # probed once more
+    assert srv._last_user_seq == 4
+    assert srv._unsupported_url is None
+
+
+@respx.mock
+async def test_url_change_reseeds(monkeypatch):
+    _env(monkeypatch)
+    _status()
+    srv._last_user_seq = 5
+    srv._seq_url = "http://other:13130"
+    route = _journal({"seq": 9000, "changes": [_entry(9000, "old journal entry")]})
+    out = await srv.get_status()
+    assert "user_changes" not in out
+    assert route.calls[0].request.url.params["since"] == "0"
+    assert srv._last_user_seq == 9000
+    assert srv._seq_url == "http://x:13130"

@@ -53,8 +53,21 @@ mcp = MCPServer("orcaslicer", version=_VERSION)
 _USER_CHANGES_CAP = 8
 _FETCH_TIMEOUT_S = 4.0
 _last_user_seq: int | None = None  # None until the first call of the session seeds it
-_unsupported_url: str | None = None  # base URL that answered 404: an older build, don't ask again
-_changes_lock = asyncio.Lock()
+_seq_url: str | None = None  # base URL _last_user_seq belongs to
+_unsupported_url: str | None = None  # base URL that answered 404: an older build
+_unsupported_at: float = 0.0  # monotonic time of that 404
+_UNSUPPORTED_TTL_S = 300.0  # then probe once more (OrcaSlicer may have been upgraded)
+_changes_lock: asyncio.Lock | None = None
+_changes_lock_loop = None
+
+
+def _get_changes_lock() -> asyncio.Lock:
+    """Created on first use inside the running loop, and again if the loop changes."""
+    global _changes_lock, _changes_lock_loop
+    loop = asyncio.get_running_loop()
+    if _changes_lock is None or _changes_lock_loop is not loop:
+        _changes_lock, _changes_lock_loop = asyncio.Lock(), loop
+    return _changes_lock
 
 
 def _user_changes_note(changes: list) -> str | None:
@@ -75,17 +88,21 @@ def _user_changes_note(changes: list) -> str | None:
 
 
 async def _fetch_user_changes(result: dict) -> None:
-    global _last_user_seq, _unsupported_url
+    global _last_user_seq, _unsupported_url, _unsupported_at, _seq_url
     cfg_url = None
     async with _client() as c:
         cfg_url = c._cfg.base_url
         if _unsupported_url == cfg_url:
-            return
+            if time.monotonic() - _unsupported_at < _UNSUPPORTED_TTL_S:
+                return
+            _unsupported_url = None
+        if _seq_url != cfg_url:  # another OrcaSlicer: its seqs are unrelated, so seed again
+            _last_user_seq, _seq_url = None, cfg_url
         try:
             data = await c._request("GET", "/api/v1/user_changes", _count=False,
                                     params={"since": _last_user_seq or 0})
         except NotFound:
-            _unsupported_url = cfg_url
+            _unsupported_url, _unsupported_at = cfg_url, time.monotonic()
             return
     if not isinstance(data, dict) or not isinstance(data.get("seq"), int):
         return
@@ -107,8 +124,10 @@ async def _attach_user_changes(result):
     if not isinstance(result, dict):
         return result
     try:
-        async with _changes_lock:
-            await asyncio.wait_for(_fetch_user_changes(result), _FETCH_TIMEOUT_S)
+        async def locked():
+            async with _get_changes_lock():
+                await _fetch_user_changes(result)
+        await asyncio.wait_for(locked(), _FETCH_TIMEOUT_S)
     except Exception:  # unreachable, 401, bad JSON, timeout: the tool reply stands
         pass
     return result

@@ -51,14 +51,18 @@ mcp = MCPServer("orcaslicer", version=_VERSION)
 # The fork keeps a journal of GUI edits at GET /api/v1/user_changes?since=. After every
 # tool call that reached OrcaSlicer we fetch what is new and attach it to a dict reply.
 _USER_CHANGES_CAP = 8
+_FETCH_TIMEOUT_S = 4.0
 _last_user_seq: int | None = None  # None until the first call of the session seeds it
+_unsupported_url: str | None = None  # base URL that answered 404: an older build, don't ask again
+_changes_lock = asyncio.Lock()
 
 
-def _user_changes_note(changes: list) -> str:
-    texts = [str(c.get("text", "")) for c in changes if isinstance(c, dict)]
-    shown = texts[:_USER_CHANGES_CAP]
-    parts = list(shown)
-    rest = [c for c in changes[_USER_CHANGES_CAP:] if isinstance(c, dict)]
+def _user_changes_note(changes: list) -> str | None:
+    entries = [c for c in changes if isinstance(c, dict) and str(c.get("text", ""))]
+    if not entries:
+        return None
+    parts = [str(c["text"]) for c in entries[:_USER_CHANGES_CAP]]
+    rest = entries[_USER_CHANGES_CAP:]
     if rest:
         counts: dict[str, int] = {}
         for c in rest:
@@ -70,24 +74,42 @@ def _user_changes_note(changes: list) -> str:
             ". Work from these values; don't undo them without asking.")
 
 
+async def _fetch_user_changes(result: dict) -> None:
+    global _last_user_seq, _unsupported_url
+    cfg_url = None
+    async with _client() as c:
+        cfg_url = c._cfg.base_url
+        if _unsupported_url == cfg_url:
+            return
+        try:
+            data = await c._request("GET", "/api/v1/user_changes", _count=False,
+                                    params={"since": _last_user_seq or 0})
+        except NotFound:
+            _unsupported_url = cfg_url
+            return
+    if not isinstance(data, dict) or not isinstance(data.get("seq"), int):
+        return
+    new_seq = data["seq"]
+    if _last_user_seq is not None and not data.get("reset"):
+        new_seq = max(_last_user_seq, new_seq)
+    seeding = _last_user_seq is None
+    changes = data.get("changes")
+    note = None
+    if not seeding and isinstance(changes, list) and changes:
+        note = _user_changes_note(changes)  # build first; only then advance the seq
+    _last_user_seq = new_seq
+    if note:
+        result["user_changes"] = {"note": note, "changes": changes}
+
+
 async def _attach_user_changes(result):
     """Fetch the journal and add `user_changes` to a dict reply. Never raises."""
-    global _last_user_seq
     if not isinstance(result, dict):
         return result
     try:
-        async with _client() as c:
-            data = await c._request("GET", "/api/v1/user_changes",
-                                    params={"since": _last_user_seq or 0}, timeout=5.0)
-        if not isinstance(data, dict) or not isinstance(data.get("seq"), int):
-            return result
-        seeding = _last_user_seq is None
-        _last_user_seq = data["seq"]
-        changes = data.get("changes")
-        if seeding or not isinstance(changes, list) or not changes:
-            return result
-        result["user_changes"] = {"note": _user_changes_note(changes), "changes": changes}
-    except Exception:  # older build (404), unreachable, mocked-out: the tool reply stands
+        async with _changes_lock:
+            await asyncio.wait_for(_fetch_user_changes(result), _FETCH_TIMEOUT_S)
+    except Exception:  # unreachable, 401, bad JSON, timeout: the tool reply stands
         pass
     return result
 
@@ -95,9 +117,13 @@ async def _attach_user_changes(result):
 def _with_user_changes(fn):
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
-        before = _client_mod.REQUESTS_SENT
-        result = await fn(*args, **kwargs)
-        if _client_mod.REQUESTS_SENT != before:
+        flag = [False]
+        token = _client_mod.REACHED.set(flag)
+        try:
+            result = await fn(*args, **kwargs)
+        finally:
+            _client_mod.REACHED.reset(token)
+        if flag[0]:
             result = await _attach_user_changes(result)
         return result
     return wrapper

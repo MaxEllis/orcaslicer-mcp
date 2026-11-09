@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import contextvars
 import json
 import math
 import httpx
@@ -10,8 +11,15 @@ from .guard import (BlockedKey, sensitive_keys, changed_keys, check_placeholders
                     redact_secrets)
 
 
-# Counts requests sent to OrcaSlicer so the server can tell which tool calls reached it.
-REQUESTS_SENT = 0
+# Per tool call: the server sets a one-item list here before a tool runs, and every request
+# the call sends to OrcaSlicer flips it, so the server can tell which calls reached it.
+REACHED: contextvars.ContextVar = contextvars.ContextVar("orca_reached", default=None)
+
+
+def mark_reached() -> None:
+    flag = REACHED.get()
+    if flag is not None:
+        flag[0] = True
 
 
 class OrcaClient:
@@ -30,9 +38,9 @@ class OrcaClient:
         await self._http.aclose()
 
     async def _request(self, method: str, path: str, *, json=None, params=None,
-                       timeout: float | None = None) -> dict:
-        global REQUESTS_SENT
-        REQUESTS_SENT += 1
+                       timeout: float | None = None, _count: bool = True) -> dict:
+        if _count:
+            mark_reached()
         try:
             resp = await self._http.request(
                 method, path, json=json, params=params,
@@ -289,6 +297,7 @@ class OrcaClient:
 
     async def get_gcode(self) -> bytes:
         try:
+            mark_reached()
             resp = await self._http.get("/api/v1/gcode")
         except httpx.TimeoutException as e:
             raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
@@ -310,6 +319,7 @@ class OrcaClient:
         if frame is not None:
             params["frame"] = frame
         try:
+            mark_reached()
             resp = await self._http.get("/api/v1/plate/render", params=params)
         except httpx.TimeoutException as e:
             raise UiTimeout(f"OrcaSlicer did not respond in time: {e}") from e
@@ -332,6 +342,7 @@ class OrcaClient:
         events: list[dict] = []
         deadline = asyncio.get_event_loop().time() + seconds
         try:
+            mark_reached()
             async with websockets.connect(self._ws_url()) as ws:
                 while True:
                     remaining = deadline - asyncio.get_event_loop().time()

@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 import respx
 
@@ -10,6 +12,7 @@ def _env(m):
     m.setenv("ORCA_API_TOKEN", "tok")
     m.setenv("ORCA_API_URL", "http://x:13130")
     m.setattr(srv, "_last_user_seq", None)
+    m.setattr(srv, "_unsupported_url", None)
 
 
 def _entry(seq, text, group="Print"):
@@ -48,7 +51,7 @@ async def test_changes_attached_once(monkeypatch):
     out = await srv.get_status()
     uc = out["user_changes"]
     assert [c["seq"] for c in uc["changes"]] == [4, 5]
-    assert "Wall loops 2 → 4; Moved bracket.stl" in uc["note"]
+    assert uc["note"].startswith("Since your last action the user changed: Wall loops 2 → 4; Moved bracket.stl.")
     assert "don't undo them without asking" in uc["note"]
     assert route.calls[1].request.url.params["since"] == "3"
     again = await srv.get_status()
@@ -118,3 +121,94 @@ async def test_reset_reseeds_and_reports(monkeypatch):
     assert srv._last_user_seq == 100
     await srv.get_status()
     assert route.calls[2].request.url.params["since"] == "100"
+
+
+@respx.mock
+async def test_cap_boundary(monkeypatch):
+    _env(monkeypatch)
+    _status()
+    e8 = [_entry(i, f"c{i}") for i in range(1, 9)]
+    e9 = [_entry(i, f"c{i}") for i in range(1, 10)]
+    _journal({"seq": 0, "changes": []}, {"seq": 8, "changes": e8}, {"seq": 17, "changes": e9})
+    await srv.get_status()
+    assert "\u2026and" not in (await srv.get_status())["user_changes"]["note"]
+    assert "\u2026and 1 more (Print: 1)" in (await srv.get_status())["user_changes"]["note"]
+
+
+@respx.mock
+async def test_no_request_no_fetch_even_if_peer_in_flight(monkeypatch):
+    _env(monkeypatch)
+    srv._last_user_seq = 1
+    route = _journal({"seq": 2, "changes": [_entry(2, "x")]})
+    gate = asyncio.Event()
+
+    async def slow(_request):
+        await gate.wait()
+        return httpx.Response(200, json={"app_version": "2.5.0"})
+    respx.get(f"{BASE}/status").mock(side_effect=slow)
+
+    async def quiet_tool():
+        return {"ok": True}
+    quiet = srv._with_user_changes(quiet_tool)
+    peer = asyncio.ensure_future(srv.get_status())
+    await asyncio.sleep(0.05)
+    assert await quiet() == {"ok": True}
+    assert route.call_count == 0
+    gate.set()
+    assert "user_changes" in await peer
+
+
+@respx.mock
+async def test_concurrent_calls_attach_each_entry_once(monkeypatch):
+    _env(monkeypatch)
+    srv._last_user_seq = 1
+    _status()
+
+    def journal(request):
+        since = int(request.url.params["since"])
+        ch = [_entry(s, f"c{s}") for s in (2, 3) if s > since]
+        return httpx.Response(200, json={"seq": 3, "changes": ch})
+    respx.get(f"{BASE}/user_changes").mock(side_effect=journal)
+    a, b = await asyncio.gather(srv.get_status(), srv.get_status())
+    seen = [c["seq"] for r in (a, b) for c in r.get("user_changes", {}).get("changes", [])]
+    assert sorted(seen) == [2, 3]
+
+
+@respx.mock
+async def test_fetch_failures_leave_reply_untouched(monkeypatch):
+    for resp in (httpx.Response(401, json={"error": "unauthorized"}),
+                 httpx.Response(200, content=b"not json"),
+                 httpx.Response(200, json={"changes": []}),
+                 httpx.ConnectTimeout("slow")):
+        respx.clear()
+        _env(monkeypatch)
+        srv._last_user_seq = 1
+        _status()
+        if isinstance(resp, Exception):
+            respx.get(f"{BASE}/user_changes").mock(side_effect=resp)
+        else:
+            respx.get(f"{BASE}/user_changes").mock(return_value=resp)
+        out = await srv.get_status()
+        assert out == {"app_version": "2.5.0"}
+        assert srv._last_user_seq == 1
+
+
+@respx.mock
+async def test_404_remembered_per_url(monkeypatch):
+    _env(monkeypatch)
+    _status()
+    route = respx.get(f"{BASE}/user_changes").mock(
+        return_value=httpx.Response(404, json={"error": "not_found"}))
+    await srv.get_status()
+    await srv.get_status()
+    assert route.call_count == 1
+
+
+@respx.mock
+async def test_seq_never_moves_backwards(monkeypatch):
+    _env(monkeypatch)
+    srv._last_user_seq = 10
+    _status()
+    _journal({"seq": 7, "changes": []})
+    await srv.get_status()
+    assert srv._last_user_seq == 10

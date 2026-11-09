@@ -19,7 +19,7 @@ from .client import OrcaClient
 from .plugin_update import plugin_update as _plugin_update
 from .plugin_text import plugin_refusal as _plugin_text
 from .errors import ApiError, Validation, NotFound, Conflict, ConfigError, OutOfRange, PLUGIN_LIMITS
-from .models import summarize_slice
+from .models import summarize_slice, is_out_of_date, OUT_OF_DATE_NOTE
 from . import settings_schema
 from . import placement
 from .knowledge_index import load_knowledge, search_knowledge
@@ -264,6 +264,86 @@ def _err(e: ApiError) -> dict:
     return out
 
 
+# --- Slices that will not start, and empty plates ---------------------------------------
+# A slice OrcaSlicer declines used to come back as {"error": "slice_not_started", "errors": {}}
+# while the panel said "object outside bed or invalid state", although the real cause was the
+# preset (0.8 mm layers on a 0.4 mm nozzle): the assistant started moving the object.
+_GENERIC_SLICE_MESSAGES = ("object outside bed or invalid state",)
+_EMPTY_PLATE = "The plate has no objects; load a model first (load_model)."
+
+
+def _reason_from(d: dict) -> str | None:
+    for k in ("validation", "detail", "reason", "message"):
+        v = d.get(k)
+        if isinstance(v, str) and v.strip() and not any(g in v for g in _GENERIC_SLICE_MESSAGES):
+            return v.strip()
+    errs = d.get("errors")
+    if isinstance(errs, list):
+        texts = [e.get("message") if isinstance(e, dict) else e for e in errs]
+        texts = [t for t in texts if isinstance(t, str) and t.strip()]
+        if texts:
+            return "; ".join(texts)
+    return None
+
+
+async def _slice_refusal(c, e: ApiError) -> dict | None:
+    """The reply for a slice OrcaSlicer would not start, or None when `e` is something else.
+    It relays OrcaSlicer's own validation message (on the reply, else on /slice/status); with
+    none, it runs the physics check and lists what fails. Never raises."""
+    body = getattr(e, "body", None) or {}
+    token = body.get("error") or str(e)
+    if token == "nothing_to_slice":
+        return {"error": "nothing_to_slice", "detail": _EMPTY_PLATE}
+    if token != "slice_not_started":
+        return None
+    out: dict = {"error": "slice_not_started"}
+    reason = _reason_from(body)
+    if reason is None:
+        try:
+            reason = _reason_from(await c.slice_status())
+        except Exception:  # noqa: BLE001 - only refines the reply
+            reason = None
+    if reason:
+        out["detail"] = f"OrcaSlicer won't slice this plate: {reason}"
+        return out
+    fails: list[dict] = []
+    try:
+        fails = [{"name": r.name, "detail": r.detail}
+                 for r in run_checks(await c.get_config(None)) if r.status == "fail"]
+    except Exception:  # noqa: BLE001
+        fails = []
+    if fails:
+        out["detail"] = ("OrcaSlicer won't start this slice and gave no reason. The profile check "
+                         "found: " + "; ".join(f["detail"] for f in fails)
+                         + ". Fix those first; check_profile_physics shows every check.")
+        out["physics_fails"] = fails
+    else:
+        out["detail"] = ("OrcaSlicer won't start this slice and gave no reason. Ask the user to look "
+                         "at the OrcaSlicer window for a message; check_placement checks whether the "
+                         "objects fit the bed.")
+    return out
+
+
+async def _slice_err(c, e: ApiError) -> dict:
+    return (await _slice_refusal(c, e)) or _err(e)
+
+
+async def _plate_is_empty() -> bool:
+    try:
+        async with _client() as c:
+            return not ((await c.get_objects()).get("objects") or [])
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _not_sliced(token: str = "not_sliced") -> dict:
+    if await _plate_is_empty():
+        return {"error": token, "detail": _EMPTY_PLATE}
+    return {"error": token, "detail": "There is no finished slice of this plate yet: slice it first "
+                                      "(slice_and_wait)."}
+
+
+
 @mcp.tool()
 async def get_status() -> dict:
     """Snapshot of the current OrcaSlicer session: app and project info, the active
@@ -350,7 +430,10 @@ async def slice() -> dict:
     Prefer slice_and_wait when you want the finished stats back in one call."""
     try:
         async with _client() as c:
-            return await c.slice()
+            try:
+                return await c.slice()
+            except Validation as e:
+                return await _slice_err(c, e)
     except ApiError as e:
         return _err(e)
 
@@ -365,7 +448,14 @@ async def get_slice_status() -> dict:
     per-feature time and filament breakdown use get_slice_breakdown."""
     try:
         async with _client() as c:
-            return summarize_slice(await c.slice_status())
+            st = await c.slice_status()
+            valid = None
+            if st.get("state") == "done" and "valid" not in st and "stale" not in st:
+                try:  # builds without valid/stale on /slice/status: ask /status
+                    valid = (await c.get_status()).get("slice_result_valid")
+                except Exception:  # noqa: BLE001 - only decides the out-of-date note
+                    pass
+            return summarize_slice(st, valid)
     except ApiError as e:
         return _err(e)
 
@@ -383,10 +473,13 @@ async def get_slice_warnings() -> dict:
         async with _client() as c:
             st = await c.slice_status()
             status = await c.get_status()
-        s = summarize_slice(st)
-        return {"state": s["state"], "valid": status.get("slice_result_valid"),
-                "warnings": s["warnings"], "errors": st.get("errors", []),
-                "message": s["message"]}
+        s = summarize_slice(st, status.get("slice_result_valid"))
+        out = {"state": s["state"], "valid": status.get("slice_result_valid"),
+               "warnings": s["warnings"], "errors": st.get("errors", []),
+               "message": s["message"]}
+        if s.get("out_of_date"):
+            out["out_of_date"], out["note"] = True, s["note"]
+        return out
     except ApiError as e:
         return _err(e)
 
@@ -406,7 +499,16 @@ async def get_slice_breakdown() -> dict:
         async with _client() as c:
             status = await c.slice_status()
             cfg = await c.get_config(None)
-        return build_breakdown(status, cfg)
+            valid = None
+            if status.get("state") == "done" and "valid" not in status and "stale" not in status:
+                try:
+                    valid = (await c.get_status()).get("slice_result_valid")
+                except Exception:  # noqa: BLE001 - only decides the out-of-date note
+                    pass
+        out = build_breakdown(status, cfg)
+        if is_out_of_date(status, valid):
+            out["out_of_date"], out["note"] = True, OUT_OF_DATE_NOTE
+        return out
     except ApiError as e:
         return _err(e)
 
@@ -437,7 +539,10 @@ async def slice_and_wait(
     compare_settings."""
     try:
         async with _client() as c:
-            started = await _start_slice(c)
+            try:
+                started = await _start_slice(c)
+            except Validation as e:
+                return await _slice_err(c, e)
             if started.get("already_valid"):
                 return summarize_slice(await c.slice_status())
             return summarize_slice(await _wait_for_slice(c, timeout))
@@ -463,7 +568,11 @@ async def apply_and_slice(
             if (refusal := await _plugin_refusal(c)) is not None:  # it cannot slice
                 return refusal
             applied = await c.put_config(changes)
-            started = await _start_slice(c)
+            try:
+                started = await _start_slice(c)
+            except Validation as e:
+                return {"applied": applied.get("applied", []),
+                        "errors": applied.get("errors", {}), "result": await _slice_err(c, e)}
             if not started.get("already_valid"):
                 await _wait_for_slice(c, 300)
             result = summarize_slice(await c.slice_status())
@@ -1213,10 +1322,11 @@ async def diagnose_plate() -> dict:
             except NotFound:
                 objs = {"count": 0, "objects": [], "note": "objects API needs M4b build"}
             cfg = await c.get_config(_PLATE_CFG_KEYS)
-            sl = summarize_slice(await c.slice_status())
+            sl = summarize_slice(await c.slice_status(), status.get("slice_result_valid"))
         return {"status": status, "objects": objs, "adhesion_bed": cfg,
                 "slice": {"state": sl["state"], "warnings": sl["warnings"],
-                          "valid": status.get("slice_result_valid")}}
+                          "valid": status.get("slice_result_valid"),
+                          **({"out_of_date": True, "note": sl["note"]} if sl.get("out_of_date") else {})}}
     except ApiError as e:
         return _err(e)
 
@@ -1691,7 +1801,7 @@ async def get_gcode() -> dict:
             data = await c.get_gcode()
             return {"bytes": len(data), "gcode": data.decode("utf-8", errors="replace")}
     except Conflict:
-        return {"error": "not_sliced"}
+        return await _not_sliced()
     except ApiError as e:
         return _m4a_err(e)
 
@@ -1727,7 +1837,7 @@ async def describe_plate() -> dict:
             except ApiError:
                 objs = []
     except Conflict:
-        return {"error": "not_sliced"}
+        return await _not_sliced()
     except ApiError as e:
         return _m4a_err(e)
     key = _gcode_cache_key(data)
@@ -1809,7 +1919,7 @@ async def save_gcode(filename: str | None = None) -> dict:
             except ApiError:
                 pass
     except Conflict:
-        return {"error": "not_sliced"}
+        return await _not_sliced()
     except ApiError as e:
         return _m4a_err(e)
     model_name = objs[0]["name"] if objs else "plate"
@@ -1919,8 +2029,12 @@ async def render_plate(view: str = "editor", angle: str = "iso",
                                            width=width, height=height, frame=frame)
             return Image(data=png, format="png")
     except Conflict:
+        if await _plate_is_empty():
+            return {"error": "no_slice_result", "detail": _EMPTY_PLATE,
+                    "hint": "load a model, slice, then render view='preview'"}
         return {"error": "no_slice_result",
-                "hint": "slice first, then render view='preview'"}
+                "detail": "There is no finished slice to show yet.",
+                "hint": "slice first (slice_and_wait), then render view='preview'"}
     except ApiError as e:
         return _m4_err(e, "plate_render (fork v2.3.2-mcp.4+)")
 

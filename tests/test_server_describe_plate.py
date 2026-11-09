@@ -18,7 +18,8 @@ def _env(m):
 async def test_describe_plate_not_sliced(monkeypatch):
     _env(monkeypatch)
     respx.get(f"{B}/api/v1/gcode").mock(return_value=httpx.Response(409, json={"error": "no_slice"}))
-    assert await srv.describe_plate() == {"error": "not_sliced"}
+    out = await srv.describe_plate()
+    assert out["error"] == "not_sliced" and "slice" in out["detail"]
 
 
 @respx.mock

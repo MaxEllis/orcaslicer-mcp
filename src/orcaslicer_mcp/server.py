@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import contextvars
 import functools
 import json
 import os
@@ -16,6 +17,7 @@ from .config import load_config
 from . import client as _client_mod
 from .client import OrcaClient
 from .plugin_update import plugin_update as _plugin_update
+from .plugin_text import plugin_refusal as _plugin_text
 from .errors import ApiError, Validation, NotFound, Conflict, ConfigError, OutOfRange, PLUGIN_LIMITS
 from .models import summarize_slice
 from . import settings_schema
@@ -169,15 +171,21 @@ async def _attach_plugin_update(result):
     return result
 
 
+# The tool being run, so a refusal can name the action that failed.
+_CURRENT_TOOL: contextvars.ContextVar = contextvars.ContextVar("orca_tool", default=None)
+
+
 def _with_user_changes(fn):
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
         flag = [False]
         token = _client_mod.REACHED.set(flag)
+        tool_token = _CURRENT_TOOL.set(fn.__name__)
         try:
             result = await fn(*args, **kwargs)
         finally:
             _client_mod.REACHED.reset(token)
+            _CURRENT_TOOL.reset(tool_token)
         if flag[0]:
             result = await _attach_user_changes(result)
             result = await _attach_plugin_update(result)
@@ -239,6 +247,8 @@ async def _start_slice(c) -> dict:
 
 
 def _err(e: ApiError) -> dict:
+    if isinstance(e, NotFound) and e.plugin:
+        return _plugin_text(_CURRENT_TOOL.get())
     out = {"error": str(e)}
     if isinstance(e, Validation):
         out["errors"] = e.errors
@@ -598,7 +608,7 @@ def _m4_err(e: ApiError, milestone: str) -> dict:
     # 404 (unknown_object / unknown_preset / missing file) must keep its message (F7).
     if isinstance(e, NotFound) and e.route_missing:
         if e.plugin:
-            return {"error": str(e)}
+            return _plugin_text(_CURRENT_TOOL.get())
         return {"error": f"not available on this OrcaSlicer build (needs {milestone})"}
     return _err(e)
 
@@ -1420,7 +1430,7 @@ async def _plugin_refusal(c) -> dict | None:
     except ApiError:
         return None  # let the tool's own call report the problem
     if status.get("backend") == "plugin":
-        return {"error": "not available: " + PLUGIN_LIMITS}
+        return _plugin_text(_CURRENT_TOOL.get())
     return None
 
 

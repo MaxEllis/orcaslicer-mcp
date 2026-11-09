@@ -43,3 +43,13 @@ def _isolate_printer_state(monkeypatch, tmp_path_factory):
         importlib.import_module("orcaslicer_mcp.printer.target")._PROBE_CACHE.clear()
     except (ImportError, AttributeError):
         pass
+
+
+@pytest.fixture(autouse=True)
+def _fresh_status_cache():
+    """The sensitive-key decision keeps /status for a few seconds per address; no test may
+    inherit another test's answer."""
+    from orcaslicer_mcp import client
+    client._STATUS_SEEN.clear()
+    yield
+    client._STATUS_SEEN.clear()

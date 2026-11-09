@@ -26,16 +26,14 @@ def _flat(s):
     return " ".join(s.split())
 
 
-def test_refusal_names_both_switches_and_where_they_live():
+def test_refusal_gives_one_plain_step():
     text = _flat(str(guard.BlockedKey(["machine_start_gcode"])))
-    assert text.startswith("blocked_by_local_policy:")
-    assert "TWO separate switches" in text
-    assert "Preferences > Remote API > 'Allow script, G-code and connection edits'" in text
-    assert "ORCA_MCP_ALLOW_KEYS" in text
-    assert "Settings > Extensions > OrcaSlicer MCP > Configure" in text
-    assert "'Allow sensitive config keys'" in text      # the .mcpb field title
-    assert "env block" in text and "Restart the app" in text
-    assert "Simplest: ask the user to make this change themselves" in text
+    assert text.startswith("blocked_by_local_policy: machine_start_gcode is locked.")
+    assert ("tick 'Allow script, G-code and connection edits' in OrcaSlicer's Preferences > "
+            "Remote API, then ask again") in text
+    for gone in ("ORCA_MCP_ALLOW_KEYS", "TWO", "switch", "Extensions", "env"):
+        assert gone not in text, gone
+    assert "make this change themselves in the OrcaSlicer window" in text
 
 
 def test_mcpb_field_title_matches_the_refusal():
@@ -47,12 +45,16 @@ def test_mcpb_field_title_matches_the_refusal():
 
 
 @respx.mock
-async def test_refusal_says_when_the_preferences_box_is_already_on():
+async def test_box_on_lets_the_key_through():
     respx.get(f"{BASE}/api/v1/config").mock(return_value=httpx.Response(200, json={"config": {"machine_start_gcode": "G28"}}))
     respx.get(f"{BASE}/api/v1/status").mock(return_value=httpx.Response(200, json={"sensitive_keys_allowed": True}))
-    respx.post(NOTE).mock(return_value=httpx.Response(200, json={}))
+    note = respx.post(NOTE).mock(return_value=httpx.Response(200, json={}))
+    put = respx.put(f"{BASE}/api/v1/config").mock(return_value=httpx.Response(
+        200, json={"applied": ["machine_start_gcode"], "errors": {}}))
     out = await srv.set_config({"machine_start_gcode": "G28 X"})
-    assert "(already on)" in out["error"]
+    assert out["applied"] == ["machine_start_gcode"]
+    assert json.loads(put.calls.last.request.content) == {"machine_start_gcode": "G28 X"}
+    assert note.call_count == 0
 
 
 @respx.mock
@@ -96,8 +98,9 @@ async def test_a_failing_note_never_changes_the_reply():
     assert out["error"].startswith("out_of_range")
 
 
-def test_fork_policy_hint_names_the_second_switch():
+def test_fork_policy_hint_is_one_plain_step():
     from orcaslicer_mcp.errors import error_from_status
     e = error_from_status(422, {"applied": [], "errors": {"machine_start_gcode": "blocked_by_remote_api_policy"}})
     out = srv._err(e)
-    assert "second of the two switches" in out["hint"]
+    assert "Ask the user to tick it, then ask again" in out["hint"]
+    assert "switch" not in out["hint"] and "ORCA_MCP_ALLOW_KEYS" not in out["hint"]

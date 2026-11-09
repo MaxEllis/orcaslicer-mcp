@@ -64,14 +64,15 @@ async def test_plugin_policy_422_hint_names_no_box(monkeypatch):
 
 
 @respx.mock
-async def test_build_policy_422_keeps_the_two_switch_hint(monkeypatch):
+async def test_build_policy_422_hint_is_one_plain_step(monkeypatch):
+    # ORCA_MCP_ALLOW_KEYS lets the key past the connector; the build's own box is off.
     monkeypatch.setenv("ORCA_MCP_ALLOW_KEYS", "machine_start_gcode")
     respx.get(f"{BASE}/api/v1/config").mock(return_value=httpx.Response(200, json={"config": {"machine_start_gcode": "G28"}}))
     respx.put(f"{BASE}/api/v1/config").mock(return_value=httpx.Response(
         422, json={"applied": [], "errors": {"machine_start_gcode": "blocked_by_remote_api_policy"}}))
     respx.get(f"{BASE}/api/v1/status").mock(return_value=httpx.Response(200, json={}))
     out = await srv.set_config({"machine_start_gcode": "G28 X"})
-    assert "second of the two switches" in out["hint"]
+    assert "Ask the user to tick it, then ask again" in out["hint"]
 
 
 # --- I2: a connect or pool timeout means not reachable ----------------------------------------

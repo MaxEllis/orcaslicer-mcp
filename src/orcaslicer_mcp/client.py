@@ -84,9 +84,15 @@ def _label(key: str) -> str:
 
 
 # Where the panel's refused row says why (the fork names the Preferences box the same way).
-REFUSED_KEYS_DETAIL = ("Refused by the AI app's OrcaSlicer MCP connector: scripts, custom G-code and "
-                       "printer connection settings are locked. Change it yourself here, or allow it in "
-                       "Preferences > Remote API and in the connector's allowed keys.")
+REFUSED_KEYS_DETAIL = ("Scripts, custom G-code and printer connection settings are locked. Tick 'Allow "
+                       "script, G-code and connection edits' in Preferences > Remote API to let the "
+                       "assistant change them, or change it yourself here.")
+
+# The last /status each address answered, for the sensitive-key decision. Kept briefly, so
+# unticking the Preferences box takes effect within seconds.
+_STATUS_TTL_S = 5.0
+_STATUS_READ_TIMEOUT_S = 5.0
+_STATUS_SEEN: dict[str, tuple[float, dict]] = {}
 REFUSED_KEYS_DETAIL_PLUGIN = ("The OrcaSlicer MCP plugin never lets the assistant change scripts, custom "
                               "G-code or printer connection settings. Change it yourself here.")
 
@@ -148,6 +154,7 @@ class OrcaClient:
         data = resp.json()
         if path == "/api/v1/status" and isinstance(data, dict):
             _BACKENDS[self._cfg.base_url] = "plugin" if data.get("backend") == "plugin" else "build"
+            _STATUS_SEEN[self._cfg.base_url] = (time.monotonic(), data)
         return data
 
     async def get_status(self) -> dict:
@@ -245,18 +252,33 @@ class OrcaClient:
                                      "; ".join(r["detail"] for r in found.values()))
             raise OutOfRange(found)
 
-    async def _refuse_keys(self, keys: list[str]) -> None:
-        box_on, plugin = None, _BACKENDS.get(self._cfg.base_url) == "plugin"
+    async def _recent_status(self) -> dict | None:
+        """/status as OrcaSlicer reported it within the last few seconds, or None when it can't be
+        read now."""
+        url = self._cfg.base_url
+        seen = _STATUS_SEEN.get(url)
+        if seen is not None and time.monotonic() - seen[0] < _STATUS_TTL_S:
+            return seen[1]
         try:
-            st = await self._request("GET", "/api/v1/status", _count=False, timeout=_NOTE_TIMEOUT_S)
-            box_on = st.get("sensitive_keys_allowed")
-            plugin = st.get("backend") == "plugin"
-        except Exception:  # noqa: BLE001 - only refines the wording of the refusal
-            pass
+            st = await self._request("GET", "/api/v1/status", _count=False,
+                                     timeout=_STATUS_READ_TIMEOUT_S)
+        except Exception:  # noqa: BLE001 - unreadable: the caller refuses
+            return None
+        return st if isinstance(st, dict) else None
+
+    async def _judge_keys(self, keys: list[str]) -> None:
+        """Protected keys pass when the OrcaSlicer MCP build says its Preferences box 'Allow
+        script, G-code and connection edits' is ticked (sensitive_keys_allowed); OrcaSlicer
+        checks that box again itself. Otherwise, the plugin, or a /status that can't be read:
+        refuse (fail closed)."""
+        st = await self._recent_status()
+        plugin = (st or {}).get("backend") == "plugin" or (
+            st is None and _BACKENDS.get(self._cfg.base_url) == "plugin")
+        if st is not None and not plugin and st.get("sensitive_keys_allowed") is True:
+            return
         await self._refused_note(", ".join(_label(k) for k in sorted(keys)), "Not allowed",
                                  REFUSED_KEYS_DETAIL_PLUGIN if plugin else REFUSED_KEYS_DETAIL)
-        raise BlockedKey(keys, preferences_box_on=box_on if isinstance(box_on, bool) else None,
-                         plugin=plugin)
+        raise BlockedKey(keys, plugin=plugin, status_unknown=st is None and not plugin)
 
     async def _live_values(self, keys: list[str]) -> dict:
         return await self.get_config(keys, timeout=_NOTE_TIMEOUT_S)
@@ -272,7 +294,7 @@ class OrcaClient:
         current = await self.get_config(hits)
         changed = changed_keys(changes, hits, current)
         if changed:
-            await self._refuse_keys(changed)
+            await self._judge_keys(changed)
 
     async def guard_preset_edit(self, ptype: str, name: str, changes: dict) -> None:
         """The same refusal for edit_preset, judged against the named preset's stored values
@@ -292,14 +314,14 @@ class OrcaClient:
                                       json={"type": ptype, "name": name})).get("config", {})
         changed = changed_keys(changes, hits, stored)
         if changed:
-            await self._refuse_keys(changed)
+            await self._judge_keys(changed)
 
     async def set_object_config(self, obj_id: int, changes: dict) -> dict:
         check_placeholders(changes)
         await self._check_ranges(changes, self._live_values)
         hits = sensitive_keys(changes or {})
         if hits:
-            await self._refuse_keys(hits)
+            await self._judge_keys(hits)
         return await self._request("PUT", f"/api/v1/objects/{obj_id}/config", json=changes)
 
     async def transform_object(self, obj_id: int, translate=None, rotate=None, scale=None) -> dict:

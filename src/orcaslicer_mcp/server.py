@@ -372,10 +372,9 @@ def _err(e: ApiError) -> dict:
                            "in the OrcaSlicer window.")
         elif "blocked_by_remote_api_policy" in (e.errors or {}).values():
             out["hint"] = ("OrcaSlicer itself refused these keys: Preferences > Remote API > "
-                           "'Allow script, G-code and connection edits' is off. This connector's "
-                           "own allowed keys (ORCA_MCP_ALLOW_KEYS) already let them through; that "
-                           "box in OrcaSlicer is the second of the two switches. Simplest: ask the "
-                           "user to make the change themselves in the OrcaSlicer window.")
+                           "'Allow script, G-code and connection edits' is off. Ask the user to "
+                           "tick it, then ask again; or to make the change themselves in the "
+                           "OrcaSlicer window.")
     return out
 
 

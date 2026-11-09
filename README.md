@@ -60,7 +60,7 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
 
 **1. Turn on the connection in OrcaSlicer.**
 - **Build:** open **Preferences → Remote API**, tick **Enable Remote API** and copy the token (a password for your AI app).
-- **Plugin:** subscribe on OrcaCloud and install it from OrcaSlicer's **File → Plugins**, or there choose **Install local plugin** (the arrow beside **Install plugin**) and pick the downloaded file. Tick **Activate** and allow the two permissions it asks for, then copy the token from its **Config** tab. Use one install or the other: each keeps its own token.
+- **Plugin:** subscribe on OrcaCloud and install it from OrcaSlicer's main menu (the icon beside **File**) → **Plugins**, or there choose **Install local plugin** (the arrow beside **Install plugin**) and pick the downloaded file. Tick **Activate** and allow the two permissions it asks for, then copy the token from its **Config** tab. Use one install or the other: each keeps its own token.
 
 **2. Add the connector to your AI app.**
 - **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest), open it, and paste the token into its settings. Nothing else to install.

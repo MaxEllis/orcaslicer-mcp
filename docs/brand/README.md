@@ -1,8 +1,8 @@
 # Brand
 
-The OrcaSlicer MCP mark: one printed line traces a speech bubble and ends at the tool, the amber dot.
+The OrcaSlicer MCP mark: one printed line traces a speech bubble and ends at the tool, the teal dot.
 
-OrcaSlicer MCP is an independent project. The mark avoids OrcaSlicer's orca logo, wordmark and teal on purpose, so please don't represent this project with OrcaSlicer's own logo.
+OrcaSlicer MCP is an independent project. The dot is a brighter take on OrcaSlicer's teal, a nod to the slicer it works with. Everything else is our own, so please don't represent this project with OrcaSlicer's orca logo or wordmark.
 
 ## Files
 
@@ -21,7 +21,7 @@ OrcaSlicer MCP is an independent project. The mark avoids OrcaSlicer's orca logo
 | --- | --- |
 | Tile, text on light backgrounds | `#232428` |
 | Line, text on dark backgrounds | `#F2EEE6` |
-| Tool dot | `#FFB547` |
+| Tool dot | `#1FB8A6` |
 
 ## Type
 

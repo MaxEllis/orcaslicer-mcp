@@ -17,13 +17,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `describe_plate` says whether the G-code was sliced with the settings that are set now (`settings_check`), naming any setting the slice used instead, such as a plate's own bed type, print sequence or spiral vase.
 - With enough recorded prints, `get_slice_status` and `slice_and_wait` give a `forecast`: how long the slice will really take on your printer from start to finish, from how past prints compared with their estimates, per OrcaSlicer version when there are enough of them. `save_gcode` now records the OrcaSlicer version with each slice for this.
 - An agent skill (`skills/orcaslicer-mcp`) that teaches Claude Code, Codex and other agents how to work with these tools. In Claude Code: `/plugin install orcaslicer-mcp --marketplace MaxEllis/orcaslicer-mcp`. Instructions only; it runs no code.
-- The OrcaSlicer MCP plugin's Config tab has a **Connect your AI app** section: pick Claude Desktop, Claude Code, Codex, VS Code or another app and copy what it needs, with the token already in it.
+- The OrcaSlicer MCP plugin helps you connect your AI app. Its panel does it on first run, and the Config tab after that: pick Claude, OpenAI, Cursor, VS Code or another app, then one button per step (the Claude app's extension to download, a command to copy for Claude Code or Codex, a one-click install for Cursor and VS Code) and a question to ask. None of it holds the token. Once an app connects, the panel suggests three goals to try.
+- The plugin's Config tab says whether an AI app has connected, which one and when, with the assistant access switch beside it. orcaslicer-mcp tells the plugin its AI app's name for this.
 
 ### Changed
 - Arguments sent under a name close to a tool's own are read as that argument instead of being dropped or failing the call: `key` for `keys`, `settings` for `changes`, `id` for `object_id`, camelCase names, a single value where a list is expected, and a comma-separated list of keys.
 - `search_settings` ranks everyday settings above advanced ones when they match equally well, so "infill density" finds `sparse_infill_density` first.
 - The plugin keeps loading on an OrcaSlicer build that refuses one of its permission requests; OrcaSlicer then asks the first time it is needed. On a build too old for the plugin, it says which OrcaSlicer it needs.
-- The Claude Desktop extension's token field says where the plugin shows its token.
+- The Claude Desktop extension's token field is optional and says when it is needed.
 - The README's setup for VS Code: its `mcp.json` takes the entry under `servers`, not `mcpServers`.
 
 ## [0.1.22] - 2026-11-11

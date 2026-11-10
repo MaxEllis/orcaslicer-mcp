@@ -2737,7 +2737,7 @@ input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);
 <button class="lnk again" id="again" hidden>Connect another app</button>
 <details class="adv" id="adv">
   <summary>Token and port</summary>
-  <p class="muted small" style="margin:8px 0 0">AI apps on this computer find OrcaSlicer by themselves. The token is only for an AI app on another computer.</p>
+  <p class="muted small" style="margin:8px 0 0">AI apps on this computer find OrcaSlicer by themselves. If yours says it can't find OrcaSlicer, give it this token.</p>
   <div class="form">
     <label>Token</label>
     <div class="inline"><span class="tok" id="tok"></span><button class="lnk" id="show">Show</button><button class="lnk" id="copytok">Copy</button></div>

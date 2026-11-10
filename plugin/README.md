@@ -46,11 +46,13 @@ MCP build, and the 4 printer tools work as before because they talk to the print
    127.0.0.1, permission to create a thread, and read access to its own temporary `orcaslicer_model`
    folder (where it saves the G-code of each slice); click **Yes** (No stops the plugin loading).
    Updating from 0.1.0 asks once more, for the folder.
-4. Open the plugin's **Config** tab in that dialog: it shows the token (hidden until Show, with Copy
-   and New token), the port, and the switch that turns assistant access off and on.
-5. orcaslicer-mcp: set `ORCA_API_TOKEN` to that token. The URL default
-   (`http://127.0.0.1:13130`) already matches. A port changed in the Config tab takes effect after a
-   restart. For tests, `settings.json` in the plugin's data folder
+4. The panel opens beside the 3D view and shows how to connect an AI app: pick one, follow its one
+   or two buttons, then ask the question it shows. The plugin's **Config** tab in the Plugins dialog
+   has the same setup, whether an app has connected and when, the switch that turns assistant
+   access off and on, and (folded) the token and port.
+5. orcaslicer-mcp needs no token here: while the plugin runs it writes `connection.json` (address
+   and token, readable only by you) in its data folder, and orcaslicer-mcp reads it when
+   `ORCA_API_TOKEN` is not set. A port changed in the Config tab takes effect after a restart. For tests, `settings.json` in the plugin's data folder
    (`<OrcaSlicer data folder>/orca_plugins/plugin_data/orcaslicer_mcp_plugin/`) overrides it, and
    `"trace": true` there writes a diagnostic `plugin-trace.log`.
 

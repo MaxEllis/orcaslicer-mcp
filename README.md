@@ -60,15 +60,15 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
 ## Get started
 
 **1. Turn on the connection in OrcaSlicer.**
-- **Build:** open **Preferences → Remote API**, tick **Enable Remote API** and copy the token (a password for your AI app).
+- **Build:** open **Preferences → Remote API** and tick **Enable Remote API**.
 - **Plugin:** open OrcaSlicer's main menu (the icon beside **File**) → **Plugins**, then install it one of two ways:
   - **From OrcaCloud:** subscribe on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), then install OrcaSlicer MCP from the list.
   - **From a downloaded file:** download `orcaslicer_mcp_plugin.py` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest). Click the arrow beside **Install plugin** and choose **Install local plugin**. The first time, this only renames the green button, so click **Install local plugin** again and pick the file.
 
-  Tick **Activate**. OrcaSlicer then shows **Plugin permissions**: network access to `127.0.0.1`, which means this computer only; permission to create a thread, which keeps the connection running; and read access to OrcaSlicer's own temporary `orcaslicer_model` folder, where it saves the G-code of each slice. Choose **Yes**; **No** stops the plugin. Then copy the token from the plugin's **Config** tab. Use one install or the other: each keeps its own token.
+  Tick **Activate**. OrcaSlicer then shows **Plugin permissions**: network access to `127.0.0.1`, which means this computer only; permission to create a thread, which keeps the connection running; and read access to OrcaSlicer's own temporary `orcaslicer_model` folder, where it saves the G-code of each slice. Choose **Yes**; **No** stops the plugin. The plugin's panel then opens beside the 3D view and walks you through step 2. Use one install or the other.
 
 **2. Add the connector to your AI app.**
-- **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest), open it, and paste the token into its settings. Nothing else to install.
+- **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest), and open it. Nothing else to install, and its token field stays empty.
 - **Other apps (Cursor, LM Studio and the like):** install [uv](https://docs.astral.sh/uv/getting-started/installation/) once, a small tool that runs the connector: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS and Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows. Then add this to the app's MCP settings:
 
   ```json
@@ -76,14 +76,13 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
     "mcpServers": {
       "orcaslicer": {
         "command": "uvx",
-        "args": ["orcaslicer-mcp"],
-        "env": { "ORCA_API_TOKEN": "<your token>" }
+        "args": ["orcaslicer-mcp"]
       }
     }
   }
   ```
 
-  VS Code reads the same entry from `.vscode/mcp.json` under `servers` instead of `mcpServers`, with `"type": "stdio"` added. The plugin's Config tab gives each of these apps its own copy-ready text with your token in it.
+  VS Code reads the same entry from `.vscode/mcp.json` under `servers` instead of `mcpServers`, with `"type": "stdio"` added. No token is needed: the connector finds OrcaSlicer on the same computer by itself. The plugin's panel and Config tab have a one-click install for Cursor and VS Code and a ready command for Claude Code and Codex. If OrcaSlicer was started with its own settings folder (`--datadir`), add `"env": { "ORCA_DATADIR": "<that folder>" }`. For the build on another computer, set `ORCA_API_URL` and `ORCA_API_TOKEN` ([troubleshooting](docs/troubleshooting.md)).
 
 **Optional: the agent skill.** It teaches Claude Code, Codex and other agents how to work with these tools (where to start, which settings to check first, the traps). In Claude Code: `/plugin install orcaslicer-mcp --marketplace MaxEllis/orcaslicer-mcp`. For other agents, copy the [`skills/orcaslicer-mcp`](skills/orcaslicer-mcp) folder into `~/.agents/skills`. It is instructions only and runs no code.
 

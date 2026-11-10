@@ -48,7 +48,7 @@
     "api_token": {
       "type": "string",
       "title": "Remote API token",
-      "description": "Leave empty when OrcaSlicer runs on this computer: the connector finds it by itself. For OrcaSlicer on another computer: the token from its Preferences -> Remote API (build) or the plugin's Config tab.",
+      "description": "Leave empty when OrcaSlicer runs on this computer: the connector finds it by itself. Otherwise paste the token from OrcaSlicer's Preferences -> Remote API (build) or the plugin's Config tab.",
       "sensitive": true,
       "required": false
     },

@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.22] - 2026-11-11
 
 ### Added
 - With the OrcaSlicer MCP plugin 0.2.0 on stock OrcaSlicer, the assistant reads the slice you make with Slice plate. `get_slice_status` gives its time, filament, cost and layer count, and says when a later change has made it out of date. `get_gcode`, `describe_plate` and `save_gcode` work on it too, so the print is recorded for `recall_prints`. The plugin still can't start a slice, see OrcaSlicer's slice warnings or give the per-feature breakdown.

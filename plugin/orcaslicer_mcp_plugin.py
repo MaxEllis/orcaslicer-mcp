@@ -1488,8 +1488,6 @@ def custom_datadir(storage: str) -> str | None:
 # ---------------------------------------------------------------------------------------------
 RELEASES_URL = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"
 SETUP_ASK = "Which printer is OrcaSlicer set up for?"
-SETUP_GOALS = ("Make these brackets as strong as possible.", "Print this faster without losing quality.",
-               "Explain what my infill settings do.")
 _SVG = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"'
 # Plain symbols, all different, none a company's logo (their brand rules need permission first).
 SETUP_ICONS = {
@@ -1559,9 +1557,38 @@ def setup_apps(datadir: str | None) -> list[dict]:
 
 
 def setup_message(datadir: str | None, status: dict | None, paused: bool) -> dict:
-    """What the panel shows before the first change: the setup, or once an app has connected, goals to try."""
+    """What the panel shows before the first change: the setup, or once an app has connected, that it has."""
     return {"type": "setup", "apps": [{**a, "icon": SETUP_ICONS[a["id"]]} for a in setup_apps(datadir)],
-            "ask": SETUP_ASK, "goals": list(SETUP_GOALS), "status": status or None, "paused": bool(paused)}
+            "ask": SETUP_ASK, "status": status or None, "paused": bool(paused)}
+
+
+# The OrcaSlicer MCP build has the connection and this panel built in. Inside it the plugin stays off, so there is one
+# panel and one server. The build names itself in app_info (orca_mcp_version, from the build after 2.5.0-mcp.16); older
+# builds are recognised by the panel page they ship in their resources folder, which OrcaSlicer lets plugins read. The
+# bundled Python sits at <install>/python on Windows, Contents/MacOS/python on macOS and <prefix>/lib/python on Linux.
+MCP_BUILD_PAGE = os.path.join("web", "orcaslicer_mcp", "panel.html")
+IN_BUILD_TEXT = ("not needed here: this is the OrcaSlicer MCP build, which has the connection built in (Preferences > "
+                 "Remote API). The plugin stays off; you can deactivate it.")
+
+
+def app_info() -> dict | None:
+    try:
+        info = orca.host.app_info()
+    except Exception:
+        return None
+    return info if isinstance(info, dict) else None
+
+
+def running_in_mcp_build(info=None) -> bool:
+    if isinstance(info, dict) and info.get("orca_mcp_version"):
+        return True
+    home = os.path.normpath(sys.prefix)
+    for resources in (os.path.join(home, os.pardir, "resources"),               # Windows
+                      os.path.join(home, os.pardir, os.pardir, "Resources"),    # macOS
+                      os.path.join(home, os.pardir, os.pardir, "resources")):   # Linux
+        if os.path.isfile(os.path.join(resources, MCP_BUILD_PAGE)):
+            return True
+    return False
 
 
 # Links the Config tab and the panel may ask the plugin to open (neither page can open anything itself): exactly the
@@ -1601,17 +1628,30 @@ def write_connection_file(folder: str, port: int, token: str) -> None:
             "token": token, "pid": os.getpid(), "written": int(time.time())}
     path = os.path.join(folder, CONNECTION_FILE)
     tmp = path + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # owner-only where the OS has modes
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-    os.replace(tmp, path)
+    # Made owner-only first (where the OS has modes), then written through its PATH. OrcaSlicer's permission check
+    # lets a plugin write in its own folder without asking, but only when it can see the path: writing through the
+    # file descriptor (os.fdopen) showed it a bare number, and it asked the user about an unnamed "open" (seen on a
+    # real OrcaSlicer 2.5, 2026-11-11).
+    try:
+        os.close(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600))
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except BaseException:
+        _remove_quietly(tmp)
+        raise
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def remove_connection_file(folder: str) -> None:
-    try:
-        os.remove(os.path.join(folder, CONNECTION_FILE))
-    except OSError:
-        pass
+    for name in (CONNECTION_FILE, CONNECTION_FILE + ".tmp"):
+        _remove_quietly(os.path.join(folder, name))
 
 
 def load_or_create_token(folder: str, renew: bool = False) -> str:
@@ -2692,7 +2732,7 @@ CONFIG_HTML = """<!doctype html><html><head><meta charset="utf-8"><style>
 --edge:color-mix(in srgb,var(--fg) 22%,var(--bg));--soft:color-mix(in srgb,var(--fg) 6%,var(--bg));
 --ok:#3fb27f;--wait:#d9a441;--off:#8a8a90;--bad:#e5484d}
 *{box-sizing:border-box}
-body{margin:0;padding:12px 16px 16px;background:var(--bg);color:var(--fg);font:13px/1.45 var(--orca-font,"Segoe UI",system-ui,sans-serif)}
+body{margin:0;padding:12px 16px 16px;max-width:640px;background:var(--bg);color:var(--fg);font:13px/1.45 var(--orca-font,"Segoe UI",system-ui,sans-serif)}
 button{font:inherit;color:inherit;cursor:pointer}
 .status{display:flex;align-items:flex-start;gap:10px;padding:2px 0 12px;border-bottom:1px solid var(--line)}
 .dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:6px}
@@ -2719,7 +2759,7 @@ border:1px solid var(--line);background:var(--soft);border-radius:8px;padding:6p
 .route.off{border-style:dashed} .route.off b{color:var(--muted);font-weight:500}
 .act{border-radius:4px;padding:4px 12px;border:1px solid var(--edge);background:transparent;white-space:nowrap}
 .act:hover{border-color:var(--accent)} .act.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
-.done{color:var(--ok);font-size:12px;white-space:nowrap} .warn{color:var(--bad);font-size:12px}
+.done{color:var(--ok);font-size:12px;white-space:nowrap} .warn{color:var(--bad);font-size:12px} .note{color:var(--muted);font-size:12px}
 .peek{grid-column:1 / 3;margin-top:2px} .peek summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none;width:max-content}
 .peek summary::-webkit-details-marker{display:none} .peek summary::before{content:"▸ ";font-size:10px} .peek[open] summary::before{content:"▾ "}
 .peek pre{margin:6px 0 0;padding:7px 9px;border:1px solid var(--line);border-radius:4px;background:var(--soft);
@@ -2762,13 +2802,15 @@ input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);
 <script>
 var TOKEN = __TOKEN__, LISTENING = __PORT__;
 var APPS = __SETUP__, ASK = __ASK__, ICON = __ICONS__;
-var cfg = window.orca.getConfig() || {}, S = { app: "claude", done: null, open: false, shown: false, opening: null }, armed = null;
+var cfg = window.orca.getConfig() || {}, S = { app: "claude", done: null, open: false, shown: false, opened: null }, armed = null;
 function $(i){ return document.getElementById(i); }
 function esc(t){ return String(t).replace(/[&<>"]/g, function(c){ return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
-function save(patch){ cfg = Object.assign({}, cfg, patch); window.orca.saveConfig(cfg); draw(); }
-function ago(t){ var s = Math.max(0, Math.round(Date.now() / 1000 - t)); if (s < 90) return "just now";
-  var m = Math.round(s / 60); if (m < 60) return m + " minutes ago"; var h = Math.round(m / 60); if (h < 36) return h + (h === 1 ? " hour ago" : " hours ago");
-  var d = Math.round(h / 24); return d + " days ago"; }
+function save(patch){ cfg = Object.assign({}, cfg, patch); window.orca.saveConfig(cfg); draw(); }  // the plugin rewrites a status this carries back stale
+// OrcaSlicer hands this page its settings when the tab opens and after the page's own saves, never when the plugin
+// writes them: the status is as of opening the tab, so it names a time of day, not a "minutes ago" that would tick on.
+function when(t){ var d = new Date(t * 1000), now = new Date();
+  var hm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return d.toDateString() === now.toDateString() ? "at " + hm : "on " + d.toLocaleDateString([], { day: "numeric", month: "short" }) + " at " + hm; }
 function copyText(text, done){
   function fallback(){ var a = document.createElement("textarea"); a.value = text; document.body.appendChild(a); a.select();
     var ok = false; try { ok = document.execCommand("copy"); } catch (e) {} document.body.removeChild(a); done(ok); }
@@ -2777,7 +2819,7 @@ function copyText(text, done){
 function drawStatus(){
   var off = cfg.paused === true, st = cfg.status || {}, h;
   if (off) h = '<span class="dot off"></span><div class="what"><b>Paused</b><span>OrcaSlicer refuses your AI app’s requests.</span></div>';
-  else if (st.seen) h = '<span class="dot ok"></span><div class="what"><b>' + esc(st.app ? "Connected to " + st.app : "Connected") + '</b><span>Last request ' + ago(st.seen) + '</span></div>';
+  else if (st.seen) h = '<span class="dot ok"></span><div class="what"><b>' + esc(st.app ? "Connected to " + st.app : "Connected") + '</b><span>Last request ' + when(st.seen) + '</span></div>';
   else h = '<span class="dot wait"></span><div class="what"><b>Waiting for your AI app</b><span>Turns green when it connects.</span></div>';
   h += '<button class="switch" role="switch" id="sw" aria-checked="' + !off + '" aria-label="Assistant access"><span>Assistant access</span><span class="track"></span></button>';
   $("status").innerHTML = h;
@@ -2791,19 +2833,20 @@ function drawConnect(){
   [].forEach.call($("apps").children, function(b){ b.onclick = function(){ S.app = b.getAttribute("data-app"); S.done = null; draw(); }; });
   var app = APPS.filter(function(a){ return a.id === S.app; })[0];
   var routes = app.routes.map(function(r, j){
-    var right = r.off ? "<span></span>" : (S.done === j ? '<span class="done">' + (r.open ? "Opening…" : "Copied") + "</span>" :
+    var right = r.off ? "<span></span>" : (S.done === j && !r.open ? '<span class="done">Copied</span>' :
       '<button class="act' + (r.primary ? " primary" : "") + '" data-r="' + j + '">' + esc(r.act) + "</button>");
     var also = r.also ? "<small>" + esc(r.also) + "</small>" : "";
     var peek = r.copy && !r.off ? '<details class="peek"><summary>' + esc(r.open ? r.copy_label : "Show what it copies") + '</summary><pre>' + esc(r.copy) + "</pre>" +
       (r.open ? '<button class="lnk" data-c="' + j + '">Copy</button>' : "") + "</details>" : "";
-    var failed = S.opening && S.opening.r === j && S.opening.failed ? '<span class="warn" style="grid-column:1 / 3">Couldn’t open it from OrcaSlicer. Copy the link and paste it in your browser. <button class="lnk" data-l="' + j + '">Copy link</button></span>' : "";
+    // The plugin opens it; this page never hears back (see when()), so it says what to do if nothing opened.
+    var failed = S.opened === j ? '<span class="note" style="grid-column:1 / 3">Opening in your browser. Nothing opened? <button class="lnk" data-l="' + j + '">Copy link</button></span>' : "";
     return '<div class="route' + (r.off ? " off" : "") + '"><div><b>' + esc(r.label) + "</b><small>" + esc(r.hint) + "</small>" + also + "</div>" + right + peek + failed + "</div>";
   }).join("");
   $("steps").innerHTML = '<li><span>Set it up where you use ' + esc(app.where) + '</span><span></span><div class="routes">' + routes + "</div></li>" +
     '<li><span>' + esc(app.ask) + ": “" + esc(ASK) + '”</span><button class="act" id="askcopy">Copy</button></li>';
   [].forEach.call($("steps").querySelectorAll("[data-r]"), function(b){ b.onclick = function(){
     var j = Number(b.getAttribute("data-r")), r = app.routes[j];
-    if (r.open) { var n = (cfg.open && cfg.open.n || 0) + 1; S.opening = { n: n, r: j, url: r.open, failed: false, t: Date.now() }; S.done = j; save({ open: { n: n, url: r.open, at: Date.now() / 1000 } }); }
+    if (r.open) { var n = (cfg.open && cfg.open.n || 0) + 1; S.opened = j; save({ open: { n: n, url: r.open, at: Date.now() / 1000 } }); }
     else copyText(r.copy, function(ok){ S.done = ok ? j : null; draw(); });
   }; });
   [].forEach.call($("steps").querySelectorAll("[data-l]"), function(b){ b.onclick = function(){ var r = app.routes[Number(b.getAttribute("data-l"))]; copyText(r.open, function(ok){ b.textContent = ok ? "Copied" : "Copy failed"; }); }; });
@@ -2831,19 +2874,17 @@ $("saveport").onclick = function(){
   save({ port: p });
   $("pnote").textContent = p === LISTENING ? "Saved." : "Saved. It takes effect after OrcaSlicer restarts (or the plugin is deactivated and activated).";
 };
-// The plugin saves the connection status and the result of opening a link in these same settings.
-function refresh(){
-  var c = window.orca.getConfig() || {};
-  var answered = S.opening && c.opened && c.opened.n === S.opening.n;
-  // No answer in 6 s: the plugin only reads this tab's requests while its panel is open.
-  var failedNow = S.opening && !S.opening.failed && (answered ? !c.opened.ok : Date.now() - S.opening.t > 6000);
-  if (failedNow) { S.opening.failed = true; S.done = null; }  // the button comes back, to try again
-  if (failedNow || JSON.stringify(c) !== JSON.stringify(cfg)) { cfg = c; draw(); }
-}
 if (window.orca.onConfig) window.orca.onConfig(function(c){ cfg = c || {}; draw(); });
-setInterval(refresh, 2000);
 draw();
 </script></body></html>"""
+
+
+# The Config tab inside the OrcaSlicer MCP build, where the plugin stays off.
+IN_BUILD_HTML = CONFIG_HTML[:CONFIG_HTML.index("</style>")] + """</style></head><body>
+<div class="status"><span class="dot off"></span><div class="what"><b>Not needed in this OrcaSlicer</b>
+<span>This is the OrcaSlicer MCP build: the connection and the panel are built in (Preferences &gt; Remote API).
+The plugin stays off here, and you can deactivate it.</span></div></div>
+</body></html>"""
 
 
 def _inline(value) -> str:
@@ -2867,6 +2908,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         self._token = ""
         self._port = DEFAULT_PORT
         self._error = ""
+        self._in_build = False  # inside the OrcaSlicer MCP build: stays off (running_in_mcp_build)
         self._paused = False
         self._renew_seen = 0
         self._open_seen = 0
@@ -2884,6 +2926,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         return True
 
     def get_config_ui(self):
+        if self._in_build:
+            return IN_BUILD_HTML
         return CONFIG_HTML.replace("__TOKEN__", _inline(self._token)).replace("__PORT__", _inline(self._port)) \
             .replace("__SETUP__", _inline(setup_apps(custom_datadir(self._folder)))) \
             .replace("__ASK__", _inline(SETUP_ASK)).replace("__ICONS__", _inline(SETUP_ICONS))
@@ -2911,7 +2955,11 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         if seen is None:
             return
         last = self._seen_written
-        if last is not None and last[1] == seen[1] and seen[0] - last[0] < SEEN_WRITE_EVERY:
+        stored = cfg.get("status")
+        # The Config tab saves its whole copy, status included, from when it opened: a status that isn't the one written
+        # last is put back at once.
+        intact = last is not None and stored == {"seen": int(last[0]), "app": last[1]}
+        if intact and last[1] == seen[1] and seen[0] - last[0] < SEEN_WRITE_EVERY:
             return
         first = last is None or last[1] != seen[1]
         self._seen_written = seen
@@ -2942,11 +2990,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             url, at = req.get("url"), req.get("at")
             fresh = isinstance(at, (int, float)) and not isinstance(at, bool) and \
                 abs(time.time() - at) <= OPEN_REQUEST_MAX_AGE_S
-            ok = fresh and openable(url, custom_datadir(self._folder)) and open_url(url)
-            try:
-                self.save_config(json.dumps({**self._read_config(), "opened": {"n": n, "ok": bool(ok)}}))
-            except Exception as e:
-                trace(f"open result not saved: {type(e).__name__}: {e}")
+            if fresh and openable(url, custom_datadir(self._folder)) and not open_url(url):
+                self._notify("couldn't open the link; the Config tab has it to copy", True)
 
     def _renew_token(self) -> None:
         try:
@@ -2976,6 +3021,11 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             if settings.get("trace") is True:
                 _TRACE_PATH = os.path.join(self._folder, "plugin-trace.log")
             trace("on_load")
+            if running_in_mcp_build(app_info()):
+                self._in_build = True
+                trace("inside the OrcaSlicer MCP build: staying off")
+                self._notify(IN_BUILD_TEXT)
+                return
             cfg = self._read_config()
             self._paused = cfg.get("paused") is True
             renew = cfg.get("renew", 0)
@@ -3229,11 +3279,13 @@ class OrcaSlicerMcpPlugin(orca.base):
     def register_capabilities(self):
         # One thread for the server, a socket on this computer only, and reading the folder OrcaSlicer writes the
         # G-code of a slice to (a folder grant can only be asked for here); OrcaSlicer asks once.
-        wanted = {"threading": True, "network_socket": [BIND_HOST]}
-        folders = current_slice_folders()
-        if folders:
-            wanted["fs_read"] = [f + "/*" for f in folders]
-        request_permissions(wanted)
+        # Inside the OrcaSlicer MCP build the plugin starts nothing (running_in_mcp_build), so it asks for nothing.
+        if not running_in_mcp_build(app_info()):
+            wanted = {"threading": True, "network_socket": [BIND_HOST]}
+            folders = current_slice_folders()
+            if folders:
+                wanted["fs_read"] = [f + "/*" for f in folders]
+            request_permissions(wanted)
         orca.register_capability(McpCapability)
 
 
@@ -3294,7 +3346,7 @@ PANEL_HTML = (
     "  .empty button { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }\n"
     "  .offnote { border-bottom: 1px solid var(--border); }\n"
     "\n"
-    "  /* First run (a host that sends \"setup\"): how to connect an AI app, then goals to try. */\n"
+    "  /* First run (a host that sends \"setup\"): how to connect an AI app, then that it connected. */\n"
     "  .setup { padding: 14px 12px; }\n"
     "  .setup .sh { font-weight: 600; font-size: 13.5px; margin-bottom: 3px; }\n"
     "  .setup .slead { color: var(--muted); font-size: 12px; line-height: 1.45; margin-bottom: 10px; }\n"
@@ -3317,8 +3369,6 @@ PANEL_HTML = (
     "  .sstat { display: flex; align-items: center; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }\n"
     "  .sstat.top { margin: 0 0 12px; padding: 0; border: 0; color: var(--fg); }\n"
     "  .sdot { width: 8px; height: 8px; border-radius: 50%; background: #d9a441; flex: none; } .sdot.ok { background: #3fb27f; }\n"
-    "  .sgoals { list-style: none; margin: 4px 0 10px; padding: 0; }\n"
-    "  .sgoals li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; }\n"
     "\n"
     "  /* Links that act: underlined in the link colour. Unavailable ones: faint, no underline, no pointer. */\n"
     "  .lnk { color: var(--link); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; border-radius: 2px; }\n"
@@ -4192,11 +4242,7 @@ PANEL_HTML = (
     "    var st = setup.status;\n"
     "    if (st && st.seen) {\n"
     "      return '<div class=\"setup\"><div class=\"sstat top\"><span class=\"sdot ok\"></span><b>' + esc(st.app ? 'Connected to ' + st.app : 'Connected') + '</b></div>' +\n"
-    "        '<div class=\"sh\">Now tell it what you want</div><div class=\"slead\">A goal works better than a setting. For example:</div>' +\n"
-    "        '<ul class=\"sgoals\">' + (setup.goals || []).map(function (g, i) {\n"
-    "          return '<li><span>' + esc(g) + '</span>' + (setupDone['g' + i] ? '<span class=\"sdone\">Copied</span>'\n"
-    "            : '<button type=\"button\" class=\"lnk\" data-scopy=\"g' + i + '\" data-fk=\"sg' + i + '\">Copy</button>') + '</li>';\n"
-    "        }).join('') + '</ul><div class=\"slead\">Its changes will appear here, each with Revert.</div></div>';\n"
+    "        '<div class=\"slead\">Ask it for the print you want. Its changes will appear here, each with Revert.</div></div>';\n"
     "    }\n"
     "    var app = setupCurrent();\n"
     "    var squares = setup.apps.map(function (a) {\n"
@@ -4328,8 +4374,7 @@ PANEL_HTML = (
     "      return true;\n"
     "    }\n"
     "    if ((el = ancestor(target, 'data-scopy'))) {\n"
-    "      var ck = el.getAttribute('data-scopy'), text = ck === 'ask' ? setup.ask : ck.charAt(0) === 'g' ? (setup.goals || [])[Number(ck.slice(1))]\n"
-    "        : (setupCurrent().routes[Number(ck.slice(1))] || {}).copy;\n"
+    "      var ck = el.getAttribute('data-scopy'), text = ck === 'ask' ? setup.ask : (setupCurrent().routes[Number(ck.slice(1))] || {}).copy;\n"
     "      if (text) copyToClipboard(text, function (done) { if (done) { setupDone[ck] = true; render(); } });\n"
     "      return true;\n"
     "    }\n"

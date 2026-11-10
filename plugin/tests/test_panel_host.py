@@ -749,35 +749,36 @@ def test_config_ui_fills_in_its_values(plugin):
     assert "LISTENING = " in html and json.dumps(plugin._token) in html
 
 
-def test_config_tab_asks_the_plugin_to_open_links_and_hears_back(plugin, monkeypatch):
+def test_config_tab_asks_the_plugin_to_open_links(plugin, monkeypatch):
+    """OrcaSlicer never hands the open Config tab what the plugin saves, so there is no reply to write: the plugin opens
+    a fresh, listed link once and drops anything else."""
     opened = []
     monkeypatch.setattr(mod, "open_url", lambda url: opened.append(url) or True)
     url = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"
     S.config = {**S.config, "open": {"n": 1, "url": url, "at": time.time()}}
     UI.run_blocking(plugin._poll_config)
-    assert opened == [url] and S.config["opened"] == {"n": 1, "ok": True}
+    assert opened == [url] and "opened" not in S.config
     UI.run_blocking(plugin._poll_config)  # the same request is not opened twice
     assert opened == [url]
     S.config = {**S.config, "open": {"n": 2, "url": "https://example.com/phish", "at": time.time()}}
-    UI.run_blocking(plugin._poll_config)  # anything off the list is refused, and the page hears so
-    assert opened == [url] and S.config["opened"] == {"n": 2, "ok": False}
+    UI.run_blocking(plugin._poll_config)  # anything off the list is refused
+    assert opened == [url]
     # a request made while the panel was closed (nobody polled) is dropped when the panel opens, not opened late
     S.config = {**S.config, "open": {"n": 3, "url": url, "at": time.time() - 60}}
     UI.run_blocking(plugin._poll_config)
-    assert opened == [url] and S.config["opened"] == {"n": 3, "ok": False}
     S.config = {**S.config, "open": {"n": 4, "url": url}}  # no time: an old page's request
     UI.run_blocking(plugin._poll_config)
-    assert opened == [url] and S.config["opened"] == {"n": 4, "ok": False}
+    assert opened == [url]
 
 
-def test_the_panel_gets_the_setup_until_an_app_connects_then_goals(plugin):
+def test_the_panel_gets_the_setup_until_an_app_connects(plugin):
     """First run: with no change yet, the panel shows how to connect (setup message); the first request from an app
-    switches it to 'Connected to <app>' with goals to try."""
+    switches it to 'Connected to <app>'. No example prompts."""
     page(plugin, {"action": "ready"})
     time.sleep(0.2)
     first = last(plugin, "setup")
     assert [a["id"] for a in first["apps"]] == ["claude", "openai", "cursor", "vscode", "other"]
-    assert first["status"] is None and first["ask"] == mod.SETUP_ASK and len(first["goals"]) == 3
+    assert first["status"] is None and first["ask"] == mod.SETUP_ASK and "goals" not in first
     assert all(a["icon"].startswith("<svg") for a in first["apps"])
     assert plugin._token not in json.dumps(first)
     import urllib.request
@@ -796,3 +797,32 @@ def test_the_panel_opens_only_listed_links(plugin, monkeypatch):
     page(plugin, {"action": "open", "url": "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"})
     page(plugin, {"action": "open", "url": "https://example.com/elsewhere"})
     assert opened == ["https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"]
+
+
+def test_the_config_tab_neither_polls_nor_claims_a_failed_open(plugin):
+    """On a real OrcaSlicer 2.5 the open Config tab never sees the plugin's saves (2026-11-11): it doesn't poll, says
+    'Opening in your browser' with Copy link instead of reporting a failure it can't know, and names a time of day."""
+    html = plugin.get_config_ui()
+    assert "setInterval" not in html and "Couldn" not in html and "c.opened" not in html
+    assert "Opening in your browser. Nothing opened?" in html and "Last request ' + when(st.seen)" in html
+    assert "max-width:640px" in html  # squares stay squares on a wide dialog
+
+
+def test_inside_the_mcp_build_the_plugin_stays_off(tmp_path, monkeypatch):
+    """One panel, one server: the OrcaSlicer MCP build has both built in."""
+    assert mod.running_in_mcp_build({"version": "2.5.0", "orca_mcp_version": "2.5.0-mcp.17"})
+    assert not mod.running_in_mcp_build({"version": "2.5.0"})
+    for home, resources in ((("OrcaSlicer", "python"), ("OrcaSlicer", "resources")),                       # Windows
+                            (("OrcaSlicer.app", "Contents", "MacOS", "python"), ("OrcaSlicer.app", "Contents", "Resources")),
+                            (("usr", "lib", "python"), ("usr", "resources"))):                              # Linux
+        root = tmp_path / home[0]
+        prefix = tmp_path.joinpath(*home)
+        prefix.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(mod.sys, "prefix", str(prefix))
+        assert not mod.running_in_mcp_build({"version": "2.5.0"}), home  # stock: no panel page
+        page = tmp_path.joinpath(*resources, "web", "orcaslicer_mcp", "panel.html")
+        page.parent.mkdir(parents=True)
+        page.write_text("<html></html>")
+        assert mod.running_in_mcp_build({"version": "2.5.0"}), home
+        import shutil
+        shutil.rmtree(root)

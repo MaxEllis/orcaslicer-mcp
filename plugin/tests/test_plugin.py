@@ -380,6 +380,10 @@ def test_requests_record_which_app_connected_for_the_config_tab(plugin):
     fake_orca.UI.run_blocking(plugin._poll_config)
     assert S.config["status"]["app"] == "Codex"
     assert S.config.get("paused") is not True  # the rest of the settings are kept
+    codex = S.config["status"]
+    S.config = {**S.config, "status": first}  # the Config tab saved its copy from when it opened
+    fake_orca.UI.run_blocking(plugin._poll_config)
+    assert S.config["status"] == codex  # put back at once
 
 
 def test_a_plugin_that_cannot_start_leaves_no_connection_file(tmp_path, monkeypatch):
@@ -400,3 +404,60 @@ def test_a_plugin_that_cannot_start_leaves_no_connection_file(tmp_path, monkeypa
         assert cap._error and not (storage / "connection.json").exists()
     finally:
         cap.on_unload()
+
+
+def test_the_connection_file_is_written_through_its_path(tmp_path, monkeypatch):
+    """OrcaSlicer lets a plugin write in its own folder without asking only when its audit check sees the path; a write
+    through a file descriptor (os.fdopen) made it ask the user about an unnamed "open" on a real OrcaSlicer 2.5."""
+    import builtins
+    opened, real = [], builtins.open
+    monkeypatch.setattr(mod, "open", lambda f, *a, **k: opened.append(f) or real(f, *a, **k), raising=False)
+    monkeypatch.setattr(mod.os, "fdopen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("os.fdopen used")))
+    mod.write_connection_file(str(tmp_path), 13130, "t" * 48)
+    assert opened and all(isinstance(f, str) for f in opened)
+    assert json.loads((tmp_path / "connection.json").read_text())["url"] == "http://127.0.0.1:13130"
+    assert not (tmp_path / "connection.json.tmp").exists()
+
+
+def test_a_failed_connection_write_leaves_nothing_behind(tmp_path, monkeypatch):
+    def refuse(*a, **k):
+        raise PermissionError("refused by OrcaSlicer")
+    monkeypatch.setattr(mod.json, "dump", refuse)
+    import pytest
+    with pytest.raises(PermissionError):
+        mod.write_connection_file(str(tmp_path), 13130, "t" * 48)
+    assert list(tmp_path.iterdir()) == []
+    (tmp_path / "connection.json.tmp").write_text("{}")
+    mod.remove_connection_file(str(tmp_path))  # a .tmp left by an older version goes too
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_activated_inside_the_mcp_build_it_starts_nothing(tmp_path, monkeypatch):
+    storage = tmp_path / "orca_plugins" / "plugin_data" / "orcaslicer_mcp_plugin"
+    storage.mkdir(parents=True)
+    fake_orca.STATE.reset(storage=str(storage))
+    monkeypatch.setattr(mod.orca.host, "app_info", lambda: {"version": "2.5.0", "orca_mcp_version": "2.5.0-mcp.17"},
+                        raising=False)
+    notes = []
+    cap = mod.McpCapability()
+    monkeypatch.setattr(cap, "_notify", lambda text, *a, **k: notes.append(text))
+    made = []
+    monkeypatch.setattr(mod.orca.host.ui, "create_dock_panel", lambda *a, **k: made.append(1), raising=False)
+    cap.on_load()
+    try:
+        assert cap._service is None and not made and not (storage / "connection.json").exists()
+        assert notes == [mod.IN_BUILD_TEXT] and not cap._error
+        assert cap.get_config_ui() == mod.IN_BUILD_HTML and "Not needed in this OrcaSlicer" in mod.IN_BUILD_HTML
+    finally:
+        cap.on_unload()
+
+
+def test_inside_the_mcp_build_it_asks_for_no_permissions(monkeypatch):
+    """The build has the connection built in and the plugin starts nothing there, so OrcaSlicer shows no permission
+    prompt for it (seen on the real build 2026-11-11: it asked, then the plugin stood down)."""
+    S.permissions = None
+    mod.orca.registered.clear()
+    monkeypatch.setattr(mod.orca.host, "app_info", lambda: {"version": "2.5.0", "orca_mcp_version": "2.5.0-mcp.17"},
+                        raising=False)
+    mod.OrcaSlicerMcpPlugin().register_capabilities()
+    assert S.permissions is None and mod.orca.registered == [mod.McpCapability]

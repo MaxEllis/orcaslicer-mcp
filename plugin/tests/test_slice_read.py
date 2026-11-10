@@ -323,12 +323,12 @@ def test_slice_folder_skips_a_variable_whose_folder_is_missing():
 
 def test_in_slice_folder_windows_paths():
     import ntpath
-    folders = ["G:\\orca-dev\\tmp\\orcaslicer_model"]
-    reported = "G:\\orca-dev\\tmp/orcaslicer_model/Tue_Nov_10/10_51_04#13368#44/Metadata/.13368.0.gcode"
+    folders = ["D:\\SlicerTemp\\orcaslicer_model"]
+    reported = "D:\\SlicerTemp/orcaslicer_model/Tue_Nov_10/09_00_00#1234#7/Metadata/.1234.0.gcode"
     assert mod.in_slice_folder(reported, folders, ntpath)
     assert mod.in_slice_folder(reported.upper(), folders, ntpath)
-    assert not mod.in_slice_folder("H:\\orca-dev\\tmp\\orcaslicer_model\\x.gcode", folders, ntpath)
-    assert not mod.in_slice_folder("G:\\orca-dev\\tmp\\orcaslicer_model\\..\\x.gcode", folders, ntpath)
+    assert not mod.in_slice_folder("E:\\SlicerTemp\\orcaslicer_model\\x.gcode", folders, ntpath)
+    assert not mod.in_slice_folder("D:\\SlicerTemp\\orcaslicer_model\\..\\x.gcode", folders, ntpath)
 
 
 # ------------------------------------------------------------------ over HTTP

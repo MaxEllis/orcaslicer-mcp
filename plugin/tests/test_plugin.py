@@ -325,6 +325,7 @@ def test_the_connection_file_lets_the_connector_find_the_plugin(tmp_path, monkey
     storage.mkdir(parents=True)
     fake_orca.STATE.reset(storage=str(storage))
     (storage / "settings.json").write_text(json.dumps({"port": 0}))
+    (storage / "connection.json").write_text(json.dumps({"product": "orcaslicer-mcp-plugin", "url": "x", "token": "y"}))
     cap = mod.McpCapability()
     saved, mod.load_port = mod.load_port, (lambda folder: 0)
     try:
@@ -379,3 +380,23 @@ def test_requests_record_which_app_connected_for_the_config_tab(plugin):
     fake_orca.UI.run_blocking(plugin._poll_config)
     assert S.config["status"]["app"] == "Codex"
     assert S.config.get("paused") is not True  # the rest of the settings are kept
+
+
+def test_a_plugin_that_cannot_start_leaves_no_connection_file(tmp_path, monkeypatch):
+    """A file left by a crash is removed at load; if the server then can't start, none is written, so the connector
+    doesn't send this plugin's token to whatever owns the port now."""
+    storage = tmp_path / "orca_plugins" / "plugin_data" / "orcaslicer_mcp_plugin"
+    storage.mkdir(parents=True)
+    fake_orca.STATE.reset(storage=str(storage))
+    (storage / "connection.json").write_text(json.dumps({"product": "orcaslicer-mcp-plugin", "url": "x", "token": "y"}))
+
+    class Broken:
+        def __init__(self, *a, **k):
+            raise OSError("address already in use")
+    monkeypatch.setattr(mod, "Service", Broken)
+    cap = mod.McpCapability()
+    cap.on_load()
+    try:
+        assert cap._error and not (storage / "connection.json").exists()
+    finally:
+        cap.on_unload()

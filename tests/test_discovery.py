@@ -20,12 +20,17 @@ def datadir(tmp_path, monkeypatch):
     return tmp_path
 
 
-def plugin_file(datadir, token=TOKEN_A, port=13130, folder="orcaslicer_mcp_plugin", product="orcaslicer-mcp-plugin"):
+def plugin_file(datadir, token=TOKEN_A, port=13130, folder="orcaslicer_mcp_plugin", product="orcaslicer-mcp-plugin",
+                url=None, pid=None):
     d = datadir / "orca_plugins" / "plugin_data" / folder
     d.mkdir(parents=True, exist_ok=True)
     f = d / "connection.json"
-    f.write_text(json.dumps({"product": product, "url": f"http://127.0.0.1:{port}", "token": token}))
+    f.write_text(json.dumps({"product": product, "url": url or f"http://127.0.0.1:{port}", "token": token,
+                             "pid": os.getpid() if pid is None else pid}))
     return f
+
+
+DEAD_PID = 2 ** 22 + 12345  # above Linux's pid_max default: no such process
 
 
 def build_conf(datadir, token=TOKEN_B, enabled="true", port="13131"):
@@ -73,11 +78,62 @@ def test_never_for_an_address_on_another_computer(datadir, monkeypatch):
     assert str(e.value) == NOT_FOUND
 
 
-def test_an_explicit_local_address_keeps_its_port(datadir, monkeypatch):
-    plugin_file(datadir, port=13130)
+def test_an_explicit_local_address_on_the_found_port_is_kept(datadir, monkeypatch):
+    plugin_file(datadir, port=13999)
     monkeypatch.setenv("ORCA_API_URL", "http://localhost:13999/")
     cfg = load_config()
     assert cfg.base_url == "http://localhost:13999" and cfg.token == TOKEN_A
+
+
+def test_a_local_address_on_a_port_nobody_uses_follows_the_token(datadir, monkeypatch):
+    """The Claude extension used to send http://127.0.0.1:13130 always: with the plugin moved to another port, the
+    token goes where it belongs, not to whatever answers on 13130."""
+    plugin_file(datadir, port=13135)
+    monkeypatch.setenv("ORCA_API_URL", "http://127.0.0.1:13130")
+    cfg = load_config()
+    assert cfg.base_url == "http://127.0.0.1:13135" and cfg.token == TOKEN_A
+
+
+def test_a_local_address_picks_the_source_on_its_port(datadir, monkeypatch):
+    plugin_file(datadir, port=13130)
+    build_conf(datadir, port="13131")
+    monkeypatch.setenv("ORCA_API_URL", "http://127.0.0.1:13131")
+    cfg = load_config()
+    assert cfg.source == "build" and cfg.token == TOKEN_B
+
+
+def test_a_plugin_installed_from_orcacloud_is_found(datadir):
+    """OrcaSlicer keeps a subscribed plugin's data in plugin_data/_subscribed/<user>/<plugin>/."""
+    plugin_file(datadir, folder="_subscribed/user-1/16d116a6bc41", port=13140)
+    cfg = load_config()
+    assert cfg.source == "plugin" and cfg.base_url == "http://127.0.0.1:13140"
+
+
+def test_a_file_naming_another_computer_is_never_used(datadir):
+    """Another plugin could write a look-alike file: its address must be this computer, or the token and every reply
+    would go elsewhere."""
+    plugin_file(datadir, url="http://attacker.example:13130", folder="other_plugin")
+    with pytest.raises(RuntimeError, match="wasn't found"):
+        load_config()
+    build_conf(datadir)
+    assert load_config().source == "build"
+
+
+def test_a_file_left_by_a_crashed_orcaslicer_comes_after_the_build(datadir):
+    plugin_file(datadir, pid=DEAD_PID)
+    build_conf(datadir)
+    assert load_config().source == "build"
+
+
+def test_a_left_file_is_still_used_when_nothing_else_is_there(datadir):
+    plugin_file(datadir, pid=DEAD_PID, port=13150)
+    assert load_config().base_url == "http://127.0.0.1:13150"
+
+
+def test_pid_alive():
+    assert discovery.pid_alive(os.getpid()) is True
+    assert discovery.pid_alive(DEAD_PID) is False
+    assert discovery.pid_alive(None) is None and discovery.pid_alive("12") is None and discovery.pid_alive(True) is None
 
 
 def test_the_newest_plugin_file_wins_and_strangers_are_ignored(datadir):

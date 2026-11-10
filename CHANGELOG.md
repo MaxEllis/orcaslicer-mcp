@@ -24,7 +24,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Arguments sent under a name close to a tool's own are read as that argument instead of being dropped or failing the call: `key` for `keys`, `settings` for `changes`, `id` for `object_id`, camelCase names, a single value where a list is expected, and a comma-separated list of keys.
 - `search_settings` ranks everyday settings above advanced ones when they match equally well, so "infill density" finds `sparse_infill_density` first.
 - The plugin keeps loading on an OrcaSlicer build that refuses one of its permission requests; OrcaSlicer then asks the first time it is needed. On a build too old for the plugin, it says which OrcaSlicer it needs.
-- The Claude Desktop extension's token field is optional and says when it is needed.
+- The Claude Desktop extension's token and address fields are optional and empty by default: the connector finds OrcaSlicer's address and port by itself. A new **OrcaSlicer settings folder** field is for an OrcaSlicer started with its own settings folder.
 - The README's setup for VS Code: its `mcp.json` takes the entry under `servers`, not `mcpServers`.
 
 ## [0.1.22] - 2026-11-11

@@ -1468,10 +1468,17 @@ def standard_datadir() -> str:
 
 def custom_datadir(storage: str) -> str | None:
     """The settings folder OrcaSlicer runs with, when it is not the standard one (then the connector needs
-    ORCA_DATADIR to find it). The plugin's storage is <datadir>/orca_plugins/plugin_data/<plugin>."""
+    ORCA_DATADIR to find it). The plugin's storage is <datadir>/orca_plugins/plugin_data/<plugin> when installed
+    from a file, and <datadir>/orca_plugins/plugin_data/_subscribed/<user>/<plugin> from OrcaCloud."""
     if not storage:
         return None
-    datadir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.normpath(storage))))
+    path = os.path.normpath(storage)
+    while os.path.basename(path) != "orca_plugins":
+        parent = os.path.dirname(path)
+        if parent == path:
+            return None  # not under an orca_plugins folder: nothing to name
+        path = parent
+    datadir = os.path.dirname(path)
     norm = lambda x: os.path.normcase(os.path.normpath(x))
     return None if norm(datadir) == norm(standard_datadir()) else datadir
 
@@ -1494,16 +1501,15 @@ SETUP_ICONS = {
 }
 
 
-def setup_apps(port: int, datadir: str | None) -> list[dict]:
+def setup_apps(datadir: str | None) -> list[dict]:
     """Each AI app and the routes to connect it, with the exact text a Copy copies and the link an Open opens.
-    No token anywhere: the connector finds OrcaSlicer by itself (orcaslicer-mcp discovery.py). Only what it
-    can't find is named: a port other than 13130, or OrcaSlicer's own settings folder (--datadir)."""
+    No token anywhere: the connector finds OrcaSlicer by itself (orcaslicer-mcp discovery.py), port included, so
+    changing the port later breaks nothing. Only what it can't find is named: OrcaSlicer's own settings folder
+    (--datadir)."""
     import base64
     env = {}
     if datadir:
         env["ORCA_DATADIR"] = datadir
-    if port != DEFAULT_PORT:
-        env["ORCA_API_URL"] = f"http://{BIND_HOST}:{port}"
     env_args = "".join(f' --env {k}="{v}"' if " " in v else f" --env {k}={v}" for k, v in env.items())
 
     def server(extra=None):
@@ -1524,7 +1530,8 @@ def setup_apps(port: int, datadir: str | None) -> list[dict]:
     return [
         {"id": "claude", "name": "Claude", "where": "Claude", "ask": "Ask Claude", "routes": [
             route("Claude app", "For chats. Download the extension, then open the file.", "Download", primary=True,
-                  open=RELEASES_URL),
+                  open=RELEASES_URL, also=("In the extension's settings, set OrcaSlicer settings folder to "
+                                           + datadir + ".") if datadir else ""),
             route("Claude Code", "In a terminal, an editor or the app's Code tab. Needs uv.", "Copy command",
                   copy=cmd("claude mcp add --scope user orcaslicer"))]},
         {"id": "openai", "name": "OpenAI", "where": "OpenAI", "ask": "In a Codex chat, ask", "routes": [
@@ -1551,19 +1558,22 @@ def setup_apps(port: int, datadir: str | None) -> list[dict]:
     ]
 
 
-def setup_message(port: int, datadir: str | None, status: dict | None, paused: bool) -> dict:
+def setup_message(datadir: str | None, status: dict | None, paused: bool) -> dict:
     """What the panel shows before the first change: the setup, or once an app has connected, goals to try."""
-    return {"type": "setup", "apps": [{**a, "icon": SETUP_ICONS[a["id"]]} for a in setup_apps(port, datadir)],
+    return {"type": "setup", "apps": [{**a, "icon": SETUP_ICONS[a["id"]]} for a in setup_apps(datadir)],
             "ask": SETUP_ASK, "goals": list(SETUP_GOALS), "status": status or None, "paused": bool(paused)}
 
 
-# Links the Config tab may ask the plugin to open (it can't open anything itself); nothing else is opened.
+# Links the Config tab and the panel may ask the plugin to open (neither page can open anything itself): exactly the
+# ones the setup offers, compared whole, so a link that only starts like one is never opened.
 OPENABLE = (RELEASES_URL, "https://docs.astral.sh/uv/")
-OPENABLE_PREFIXES = ("cursor://anysphere.cursor-deeplink/mcp/install?", "https://vscode.dev/redirect/mcp/install?")
+OPEN_REQUEST_MAX_AGE_S = 6  # a Config-tab request older than this (the panel was closed) is dropped, not opened late
 
 
-def openable(url) -> bool:
-    return isinstance(url, str) and len(url) < 8000 and (url in OPENABLE or url.startswith(OPENABLE_PREFIXES))
+def openable(url, datadir: str | None = None) -> bool:
+    if not isinstance(url, str):
+        return False
+    return url in OPENABLE or url in {r["open"] for a in setup_apps(datadir) for r in a["routes"] if r.get("open")}
 
 
 def open_url(url: str) -> bool:
@@ -1571,7 +1581,7 @@ def open_url(url: str) -> bool:
     OrcaSlicer asks the person the first time."""
     try:
         if sys.platform.startswith("win"):
-            os.startfile(url)  # noqa: S606 - only links from OPENABLE reach here
+            os.startfile(url)  # noqa: S606 - only links openable() lists reach here
             return True
         import webbrowser
         return bool(webbrowser.open(url))
@@ -2786,16 +2796,17 @@ function drawConnect(){
     var also = r.also ? "<small>" + esc(r.also) + "</small>" : "";
     var peek = r.copy && !r.off ? '<details class="peek"><summary>' + esc(r.open ? r.copy_label : "Show what it copies") + '</summary><pre>' + esc(r.copy) + "</pre>" +
       (r.open ? '<button class="lnk" data-c="' + j + '">Copy</button>' : "") + "</details>" : "";
-    var failed = S.opening && S.opening.r === j && S.opening.failed ? '<span class="warn" style="grid-column:1 / 3">Couldn’t open it from OrcaSlicer: the link is copied, paste it in your browser.</span>' : "";
+    var failed = S.opening && S.opening.r === j && S.opening.failed ? '<span class="warn" style="grid-column:1 / 3">Couldn’t open it from OrcaSlicer. Copy the link and paste it in your browser. <button class="lnk" data-l="' + j + '">Copy link</button></span>' : "";
     return '<div class="route' + (r.off ? " off" : "") + '"><div><b>' + esc(r.label) + "</b><small>" + esc(r.hint) + "</small>" + also + "</div>" + right + peek + failed + "</div>";
   }).join("");
   $("steps").innerHTML = '<li><span>Set it up where you use ' + esc(app.where) + '</span><span></span><div class="routes">' + routes + "</div></li>" +
     '<li><span>' + esc(app.ask) + ": “" + esc(ASK) + '”</span><button class="act" id="askcopy">Copy</button></li>';
   [].forEach.call($("steps").querySelectorAll("[data-r]"), function(b){ b.onclick = function(){
     var j = Number(b.getAttribute("data-r")), r = app.routes[j];
-    if (r.open) { var n = (cfg.open && cfg.open.n || 0) + 1; S.opening = { n: n, r: j, url: r.open, failed: false }; S.done = j; save({ open: { n: n, url: r.open } }); }
+    if (r.open) { var n = (cfg.open && cfg.open.n || 0) + 1; S.opening = { n: n, r: j, url: r.open, failed: false, t: Date.now() }; S.done = j; save({ open: { n: n, url: r.open, at: Date.now() / 1000 } }); }
     else copyText(r.copy, function(ok){ S.done = ok ? j : null; draw(); });
   }; });
+  [].forEach.call($("steps").querySelectorAll("[data-l]"), function(b){ b.onclick = function(){ var r = app.routes[Number(b.getAttribute("data-l"))]; copyText(r.open, function(ok){ b.textContent = ok ? "Copied" : "Copy failed"; }); }; });
   [].forEach.call($("steps").querySelectorAll("[data-c]"), function(b){ b.onclick = function(){ var r = app.routes[Number(b.getAttribute("data-c"))]; copyText(r.copy, function(){ b.textContent = "Copied"; }); }; });
   $("askcopy").onclick = function(){ copyText(ASK, function(ok){ if (ok) $("askcopy").textContent = "Copied"; }); };
 }
@@ -2823,8 +2834,10 @@ $("saveport").onclick = function(){
 // The plugin saves the connection status and the result of opening a link in these same settings.
 function refresh(){
   var c = window.orca.getConfig() || {};
-  var failedNow = S.opening && c.opened && c.opened.n === S.opening.n && !c.opened.ok && !S.opening.failed;
-  if (failedNow) { S.opening.failed = true; copyText(S.opening.url, function(){}); }
+  var answered = S.opening && c.opened && c.opened.n === S.opening.n;
+  // No answer in 6 s: the plugin only reads this tab's requests while its panel is open.
+  var failedNow = S.opening && !S.opening.failed && (answered ? !c.opened.ok : Date.now() - S.opening.t > 6000);
+  if (failedNow) { S.opening.failed = true; S.done = null; }  // the button comes back, to try again
   if (failedNow || JSON.stringify(c) !== JSON.stringify(cfg)) { cfg = c; draw(); }
 }
 if (window.orca.onConfig) window.orca.onConfig(function(c){ cfg = c || {}; draw(); });
@@ -2872,7 +2885,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
 
     def get_config_ui(self):
         return CONFIG_HTML.replace("__TOKEN__", _inline(self._token)).replace("__PORT__", _inline(self._port)) \
-            .replace("__SETUP__", _inline(setup_apps(self._port, custom_datadir(self._folder)))) \
+            .replace("__SETUP__", _inline(setup_apps(custom_datadir(self._folder)))) \
             .replace("__ASK__", _inline(SETUP_ASK)).replace("__ICONS__", _inline(SETUP_ICONS))
 
     def get_default_config(self):
@@ -2926,8 +2939,10 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         n = req.get("n") if isinstance(req, dict) else None
         if isinstance(n, int) and not isinstance(n, bool) and n > self._open_seen:
             self._open_seen = n
-            url = req.get("url")
-            ok = openable(url) and open_url(url)
+            url, at = req.get("url"), req.get("at")
+            fresh = isinstance(at, (int, float)) and not isinstance(at, bool) and \
+                abs(time.time() - at) <= OPEN_REQUEST_MAX_AGE_S
+            ok = fresh and openable(url, custom_datadir(self._folder)) and open_url(url)
             try:
                 self.save_config(json.dumps({**self._read_config(), "opened": {"n": n, "ok": bool(ok)}}))
             except Exception as e:
@@ -2956,6 +2971,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             if missing:
                 raise RuntimeError(NEEDS_NEWER_TEXT.format(missing=", ".join(missing)))
             self._folder = orca.host.plugin.storage()
+            remove_connection_file(self._folder)  # one left by a crash would point the connector at a dead server
             settings = load_settings(self._folder)
             if settings.get("trace") is True:
                 _TRACE_PATH = os.path.join(self._folder, "plugin-trace.log")
@@ -2990,6 +3006,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             self._error = str(e) if isinstance(e, RuntimeError) and str(e).startswith("needs OrcaSlicer") \
                 else f"{type(e).__name__}: {e}"
             self._service = None
+            if self._folder:
+                remove_connection_file(self._folder)
             trace("on_load failed: " + self._error)
             self._notify("could not start: " + self._error, True)
             print(f"[orcaslicer-mcp-plugin] not started: {self._error}")
@@ -3097,7 +3115,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
     def _setup_msg(self) -> dict:
         """The panel's first run: how to connect an AI app, or goals to try once one has (setup_message)."""
         status = self._read_config().get("status")
-        return setup_message(self._port, custom_datadir(self._folder), status if isinstance(status, dict) else None,
+        return setup_message(custom_datadir(self._folder), status if isinstance(status, dict) else None,
                              self._paused)
 
     def _state(self) -> dict:
@@ -3150,7 +3168,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
                 self._notify(SETTINGS_HINT)
             elif action == "open":  # a setup link in the panel: only the fixed list (openable) is opened
                 url = message.get("url")
-                if openable(url) and not open_url(url):
+                if openable(url, custom_datadir(self._folder)) and not open_url(url):
                     self._notify("couldn't open the link; the Config tab has it to copy", True)
         self._pump.run_pending()
 

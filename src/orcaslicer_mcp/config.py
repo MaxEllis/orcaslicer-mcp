@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from .discovery import discover, names_this_computer
+from .discovery import discover, env_value as _env, names_this_computer, port_of
 
 NOT_FOUND = ("ORCA_API_TOKEN is not set and OrcaSlicer wasn't found on this computer: open OrcaSlicer with the "
              "OrcaSlicer MCP plugin activated (or the OrcaSlicer MCP build with its Remote API on). If OrcaSlicer uses "
@@ -17,13 +17,6 @@ class Config:
     source: str = "env"  # env, plugin or build: where the token came from
 
 
-def _env(name: str) -> str:
-    """An environment value, with an unexpanded placeholder (a Claude Desktop extension field left empty can arrive
-    as the literal "${user_config.api_token}") read as not set."""
-    v = os.environ.get(name, "").strip()
-    return "" if v.startswith("${") and v.endswith("}") else v
-
-
 def load_config() -> Config:
     token = _env("ORCA_API_TOKEN")
     url = _env("ORCA_API_URL").rstrip("/")
@@ -32,8 +25,11 @@ def load_config() -> Config:
         return Config(base_url=url or "http://127.0.0.1:13130", token=token, timeout=timeout)
     # No token: find OrcaSlicer on this computer (discovery.py). Never for an address elsewhere, whose token
     # this computer's files can't know.
+    # A local ORCA_API_URL picks the source on its port; when none is there (an extension that still sends the old
+    # default 13130 while the plugin moved to another port), the address found wins, since the token belongs to it.
     if not url or names_this_computer(url):
-        found = discover()
+        found = discover(port_of(url) if url else None)
         if found:
-            return Config(base_url=url or found.url, token=found.token, timeout=timeout, source=found.source)
+            base = url if url and port_of(url) == port_of(found.url) else found.url
+            return Config(base_url=base, token=found.token, timeout=timeout, source=found.source)
     raise RuntimeError(NOT_FOUND)

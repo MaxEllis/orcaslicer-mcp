@@ -655,8 +655,8 @@ def test_multiline_cases_ported_from_the_builds_standalone_test():
     assert t(seven, None) == "Lines 1 to 5 of 7:\nL1\nL2\nL3\nL4\nL5\n" + E
 
 
-def _routes(port=13130, datadir=None):
-    return {a["id"]: a for a in mod.setup_apps(port, datadir)}
+def _routes(datadir=None):
+    return {a["id"]: a for a in mod.setup_apps(datadir)}
 
 
 def test_config_tab_offers_five_companies_and_no_token_anywhere(plugin):
@@ -692,16 +692,26 @@ def test_config_tab_one_click_links_carry_the_server_and_no_secret():
         "type": "stdio", "command": "uvx", "args": ["orcaslicer-mcp"]}
     assert mod.openable(cur) and mod.openable(vs) and mod.openable(apps["claude"]["routes"][0]["open"])
     assert not mod.openable("https://example.com/") and not mod.openable("file:///etc/passwd")
+    # only the links offered now, whole: one that merely starts like them installs something else
+    assert not mod.openable("cursor://anysphere.cursor-deeplink/mcp/install?name=x&config=e30=")
+    assert not mod.openable(vs + "&x=1") and not mod.openable(None)
+    own = _routes("D:/portable/data")["cursor"]["routes"][0]["open"]
+    assert own != cur and not mod.openable(own) and mod.openable(own, "D:/portable/data")
 
 
 def test_config_tab_names_only_what_the_connector_cant_find_by_itself():
-    apps = _routes(port=13200, datadir="D:/Orca Data/profile")
+    """The settings folder, when OrcaSlicer uses its own. Never the port: the connector reads it from the plugin's
+    connection file, so moving the port later breaks no app set up before."""
+    apps = _routes(datadir="D:/Orca Data/profile")
     assert apps["claude"]["routes"][1]["copy"] == (
-        'claude mcp add --scope user orcaslicer --env ORCA_DATADIR="D:/Orca Data/profile" '
-        "--env ORCA_API_URL=http://127.0.0.1:13200 -- uvx orcaslicer-mcp")
+        'claude mcp add --scope user orcaslicer --env ORCA_DATADIR="D:/Orca Data/profile" -- uvx orcaslicer-mcp')
     assert json.loads(apps["other"]["routes"][0]["copy"])["mcpServers"]["orcaslicer"]["env"] == {
-        "ORCA_DATADIR": "D:/Orca Data/profile", "ORCA_API_URL": "http://127.0.0.1:13200"}
+        "ORCA_DATADIR": "D:/Orca Data/profile"}
     assert "ORCA_DATADIR = D:/Orca Data/profile" in apps["openai"]["routes"][0]["also"]
+    # the Claude extension has a field for it
+    assert apps["claude"]["routes"][0]["also"] == (
+        "In the extension's settings, set OrcaSlicer settings folder to D:/Orca Data/profile.")
+    assert _routes()["claude"]["routes"][0]["also"] == "" and "ORCA_API_URL" not in json.dumps(_routes())
 
 
 def test_config_tab_script_runs_on_the_data(plugin):
@@ -725,6 +735,11 @@ def test_custom_datadir_is_named_only_when_orcaslicer_uses_its_own(monkeypatch, 
     own = tmp_path / "own-datadir"
     assert mod.custom_datadir(str(own / "orca_plugins" / "plugin_data" / "orcaslicer_mcp_plugin")) == str(own)
     assert mod.custom_datadir("") is None
+    # installed from OrcaCloud: plugin_data/_subscribed/<user>/<plugin>
+    cloud = ("orca_plugins", "plugin_data", "_subscribed", "user-1", "16d116a6bc41")
+    assert mod.custom_datadir(str(std.joinpath(*cloud))) is None
+    assert mod.custom_datadir(str(own.joinpath(*cloud))) == str(own)
+    assert mod.custom_datadir(str(tmp_path / "elsewhere" / "plugin")) is None
 
 
 def test_config_ui_fills_in_its_values(plugin):
@@ -738,14 +753,21 @@ def test_config_tab_asks_the_plugin_to_open_links_and_hears_back(plugin, monkeyp
     opened = []
     monkeypatch.setattr(mod, "open_url", lambda url: opened.append(url) or True)
     url = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"
-    S.config = {**S.config, "open": {"n": 1, "url": url}}
+    S.config = {**S.config, "open": {"n": 1, "url": url, "at": time.time()}}
     UI.run_blocking(plugin._poll_config)
     assert opened == [url] and S.config["opened"] == {"n": 1, "ok": True}
     UI.run_blocking(plugin._poll_config)  # the same request is not opened twice
     assert opened == [url]
-    S.config = {**S.config, "open": {"n": 2, "url": "https://example.com/phish"}}
+    S.config = {**S.config, "open": {"n": 2, "url": "https://example.com/phish", "at": time.time()}}
     UI.run_blocking(plugin._poll_config)  # anything off the list is refused, and the page hears so
     assert opened == [url] and S.config["opened"] == {"n": 2, "ok": False}
+    # a request made while the panel was closed (nobody polled) is dropped when the panel opens, not opened late
+    S.config = {**S.config, "open": {"n": 3, "url": url, "at": time.time() - 60}}
+    UI.run_blocking(plugin._poll_config)
+    assert opened == [url] and S.config["opened"] == {"n": 3, "ok": False}
+    S.config = {**S.config, "open": {"n": 4, "url": url}}  # no time: an old page's request
+    UI.run_blocking(plugin._poll_config)
+    assert opened == [url] and S.config["opened"] == {"n": 4, "ok": False}
 
 
 def test_the_panel_gets_the_setup_until_an_app_connects_then_goals(plugin):

@@ -5,10 +5,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.23] - 2026-11-11
+The OrcaSlicer MCP plugin 0.2.1 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.
 
 ### Added
-- No token needed on the same computer: with `ORCA_API_TOKEN` unset, the connector finds OrcaSlicer by itself, through the file the OrcaSlicer MCP plugin writes while it runs, or the OrcaSlicer MCP build's own settings. For OrcaSlicer's own settings folder (`--datadir`) set `ORCA_DATADIR`; for OrcaSlicer on another computer set `ORCA_API_URL` and `ORCA_API_TOKEN` as before. The Claude Desktop extension's token field is now optional.
+- No token needed on the same computer: with `ORCA_API_TOKEN` unset, the connector finds OrcaSlicer by itself, through the file the OrcaSlicer MCP plugin (0.2.1 and later) writes while it runs, or the OrcaSlicer MCP build's own settings. For OrcaSlicer's own settings folder (`--datadir`) set `ORCA_DATADIR`; for OrcaSlicer on another computer set `ORCA_API_URL` and `ORCA_API_TOKEN` as before. The Claude Desktop extension's token field is now optional.
 - `get_config` with `keys` also says what each setting means, with its unit, range and choices, from OrcaSlicer's own tooltips.
 - `set_config` and `apply_and_slice` take `null` for a key to put it back to the value saved in its preset, one setting at a time. Script, G-code and printer-connection settings are never put back this way.
 - The server now sends instructions with its handshake: where to start, which tools explain a setting, how to check a result.
@@ -27,6 +28,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - The plugin keeps loading on an OrcaSlicer build that refuses one of its permission requests; OrcaSlicer then asks the first time it is needed. On a build too old for the plugin, it says which OrcaSlicer it needs.
 - The Claude Desktop extension's token and address fields are optional and empty by default: the connector finds OrcaSlicer's address and port by itself. A new **OrcaSlicer settings folder** field is for an OrcaSlicer started with its own settings folder.
 - The README's setup for VS Code: its `mcp.json` takes the entry under `servers`, not `mcpServers`.
+- orcaslicer-mcp now tells you when your plugin is older than 0.2.1.
 
 ## [0.1.22] - 2026-11-11
 

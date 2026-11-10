@@ -1487,7 +1487,6 @@ def custom_datadir(storage: str) -> str | None:
 # Connecting an AI app: one description, rendered by the Config tab and by the panel's first run
 # ---------------------------------------------------------------------------------------------
 RELEASES_URL = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"
-SETUP_ASK = "Which printer is OrcaSlicer set up for?"
 _SVG = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"'
 # Plain symbols, all different, none a company's logo (their brand rules need permission first).
 SETUP_ICONS = {
@@ -1526,13 +1525,13 @@ def setup_apps(datadir: str | None) -> list[dict]:
                                             "also": kw.get("also", ""), "copy_label": kw.get("copy_label", "")}
     also = ("Also add " + ", ".join(f"{k} = {v}" for k, v in env.items()) + " as an environment variable.") if env else ""
     return [
-        {"id": "claude", "name": "Claude", "where": "Claude", "ask": "Ask Claude", "routes": [
+        {"id": "claude", "name": "Claude", "where": "Claude", "routes": [
             route("Claude app", "For chats. Download the extension, then open the file.", "Download", primary=True,
                   open=RELEASES_URL, also=("In the extension's settings, set OrcaSlicer settings folder to "
                                            + datadir + ".") if datadir else ""),
             route("Claude Code", "In a terminal, an editor or the app's Code tab. Needs uv.", "Copy command",
                   copy=cmd("claude mcp add --scope user orcaslicer"))]},
-        {"id": "openai", "name": "OpenAI", "where": "OpenAI", "ask": "In a Codex chat, ask", "routes": [
+        {"id": "openai", "name": "OpenAI", "where": "OpenAI", "routes": [
             route("ChatGPT desktop app", "Settings › Plugins › MCPs › Add, choose STDIO and paste this. Works in Codex "
                   "chats; ordinary ChatGPT chats can't use it yet.", "Copy", primary=True, copy="uvx orcaslicer-mcp",
                   also=also),
@@ -1540,17 +1539,17 @@ def setup_apps(datadir: str | None) -> list[dict]:
                   copy=cmd("codex mcp add orcaslicer")),
             route("ChatGPT on the web or phone", "Can't connect: it only reaches servers on the internet, not programs "
                   "on your computer.", "", off=True)]},
-        {"id": "cursor", "name": "Cursor", "where": "Cursor", "ask": "Ask Cursor", "routes": [
+        {"id": "cursor", "name": "Cursor", "where": "Cursor", "routes": [
             route("Add to Cursor", "Cursor opens and asks you to confirm. Needs uv.", "Add to Cursor", primary=True,
                   open="cursor://anysphere.cursor-deeplink/mcp/install?name=orcaslicer&config="
                        + quote(base64.b64encode(compact(server()).encode()).decode()),
                   copy=pretty({"mcpServers": {"orcaslicer": server()}}), copy_label="Copy settings instead")]},
-        {"id": "vscode", "name": "VS Code", "where": "VS Code", "ask": "Ask Copilot", "routes": [
+        {"id": "vscode", "name": "VS Code", "where": "VS Code", "routes": [
             route("Add to VS Code", "VS Code opens and asks you to confirm. Needs uv.", "Add to VS Code", primary=True,
                   open="https://vscode.dev/redirect/mcp/install?name=orcaslicer&config=" + quote(compact(server({"type": "stdio"}))),
                   copy=pretty({"servers": {"orcaslicer": server({"type": "stdio"})}}),
                   copy_label="Copy .vscode/mcp.json settings instead")]},
-        {"id": "other", "name": "Other app", "where": "your app", "ask": "Ask your app", "routes": [
+        {"id": "other", "name": "Other app", "where": "your app", "routes": [
             route("Your app's MCP settings", "LM Studio, Windsurf and most others take this form. Needs uv.",
                   "Copy settings", primary=True, copy=pretty({"mcpServers": {"orcaslicer": server()}}))]},
     ]
@@ -1559,7 +1558,7 @@ def setup_apps(datadir: str | None) -> list[dict]:
 def setup_message(datadir: str | None, status: dict | None, paused: bool) -> dict:
     """What the panel shows before the first change: the setup, or once an app has connected, that it has."""
     return {"type": "setup", "apps": [{**a, "icon": SETUP_ICONS[a["id"]]} for a in setup_apps(datadir)],
-            "ask": SETUP_ASK, "status": status or None, "paused": bool(paused)}
+            "status": status or None, "paused": bool(paused)}
 
 
 # The OrcaSlicer MCP build has the connection and this panel built in. Inside it the plugin stays off, so there is one
@@ -2750,12 +2749,10 @@ border:1px solid var(--line);background:var(--soft);border-radius:8px;padding:6p
 .apps button svg{width:28px;height:28px;flex:none}
 .apps button:hover{border-color:var(--edge);color:var(--fg)}
 .apps button[aria-pressed=true]{border:1.5px solid var(--accent);color:var(--fg);background:color-mix(in srgb,var(--accent) 16%,var(--bg))}
-.steps{list-style:none;margin:12px 0 0;padding:0;counter-reset:s}
-.steps>li{display:grid;grid-template-columns:18px 1fr auto;gap:2px 8px;align-items:center;padding:6px 0}
-.steps>li::before{counter-increment:s;content:counter(s);color:var(--muted);align-self:start;padding-top:1px}
-.routes{grid-column:2 / 4;display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.step{margin:12px 0 0}
+.routes{display:flex;flex-direction:column;gap:4px;margin-top:6px}
 .route{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center;padding:7px 10px;border:1px solid var(--line);border-radius:6px}
-.route b{font-weight:600} .route small,.steps small{display:block;color:var(--muted);font-size:12px}
+.route b{font-weight:600} .route small,.step small{display:block;color:var(--muted);font-size:12px}
 .route.off{border-style:dashed} .route.off b{color:var(--muted);font-weight:500}
 .act{border-radius:4px;padding:4px 12px;border:1px solid var(--edge);background:transparent;white-space:nowrap}
 .act:hover{border-color:var(--accent)} .act.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
@@ -2782,7 +2779,7 @@ input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);
 <section id="connect">
   <h2>Connect your AI app</h2>
   <div class="apps" id="apps" role="group" aria-label="Your AI app"></div>
-  <ol class="steps" id="steps"></ol>
+  <div class="step" id="steps"></div>
 </section>
 <button class="lnk again" id="again" hidden>Connect another app</button>
 <details class="adv" id="adv">
@@ -2801,7 +2798,7 @@ input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);
 </details>
 <script>
 var TOKEN = __TOKEN__, LISTENING = __PORT__;
-var APPS = __SETUP__, ASK = __ASK__, ICON = __ICONS__;
+var APPS = __SETUP__, ICON = __ICONS__;
 var cfg = window.orca.getConfig() || {}, S = { app: "claude", done: null, open: false, shown: false, opened: null }, armed = null;
 function $(i){ return document.getElementById(i); }
 function esc(t){ return String(t).replace(/[&<>"]/g, function(c){ return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
@@ -2820,7 +2817,7 @@ function drawStatus(){
   var off = cfg.paused === true, st = cfg.status || {}, h;
   if (off) h = '<span class="dot off"></span><div class="what"><b>Paused</b><span>OrcaSlicer refuses your AI app’s requests.</span></div>';
   else if (st.seen) h = '<span class="dot ok"></span><div class="what"><b>' + esc(st.app ? "Connected to " + st.app : "Connected") + '</b><span>Last request ' + when(st.seen) + '</span></div>';
-  else h = '<span class="dot wait"></span><div class="what"><b>Waiting for your AI app</b><span>Turns green when it connects.</span></div>';
+  else h = '<span class="dot wait"></span><div class="what"><b>Waiting for your AI app</b><span>The panel beside the 3D view shows when it connects.</span></div>';
   h += '<button class="switch" role="switch" id="sw" aria-checked="' + !off + '" aria-label="Assistant access"><span>Assistant access</span><span class="track"></span></button>';
   $("status").innerHTML = h;
   $("sw").onclick = function(){ save({ paused: !(cfg.paused === true) }); };
@@ -2842,8 +2839,8 @@ function drawConnect(){
     var failed = S.opened === j ? '<span class="note" style="grid-column:1 / 3">Opening in your browser. Nothing opened? <button class="lnk" data-l="' + j + '">Copy link</button></span>' : "";
     return '<div class="route' + (r.off ? " off" : "") + '"><div><b>' + esc(r.label) + "</b><small>" + esc(r.hint) + "</small>" + also + "</div>" + right + peek + failed + "</div>";
   }).join("");
-  $("steps").innerHTML = '<li><span>Set it up where you use ' + esc(app.where) + '</span><span></span><div class="routes">' + routes + "</div></li>" +
-    '<li><span>' + esc(app.ask) + ": “" + esc(ASK) + '”</span><button class="act" id="askcopy">Copy</button></li>';
+  // One step, no question to ask: the first request from the app is what connects it.
+  $("steps").innerHTML = '<span>Set it up where you use ' + esc(app.where) + '</span><div class="routes">' + routes + "</div>";
   [].forEach.call($("steps").querySelectorAll("[data-r]"), function(b){ b.onclick = function(){
     var j = Number(b.getAttribute("data-r")), r = app.routes[j];
     if (r.open) { var n = (cfg.open && cfg.open.n || 0) + 1; S.opened = j; save({ open: { n: n, url: r.open, at: Date.now() / 1000 } }); }
@@ -2851,7 +2848,6 @@ function drawConnect(){
   }; });
   [].forEach.call($("steps").querySelectorAll("[data-l]"), function(b){ b.onclick = function(){ var r = app.routes[Number(b.getAttribute("data-l"))]; copyText(r.open, function(ok){ b.textContent = ok ? "Copied" : "Copy failed"; }); }; });
   [].forEach.call($("steps").querySelectorAll("[data-c]"), function(b){ b.onclick = function(){ var r = app.routes[Number(b.getAttribute("data-c"))]; copyText(r.copy, function(){ b.textContent = "Copied"; }); }; });
-  $("askcopy").onclick = function(){ copyText(ASK, function(ok){ if (ok) $("askcopy").textContent = "Copied"; }); };
 }
 function drawAdv(){
   $("tok").textContent = S.shown ? TOKEN : "•".repeat(16); $("tok").className = "tok" + (S.shown ? " shown" : "");
@@ -2930,7 +2926,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             return IN_BUILD_HTML
         return CONFIG_HTML.replace("__TOKEN__", _inline(self._token)).replace("__PORT__", _inline(self._port)) \
             .replace("__SETUP__", _inline(setup_apps(custom_datadir(self._folder)))) \
-            .replace("__ASK__", _inline(SETUP_ASK)).replace("__ICONS__", _inline(SETUP_ICONS))
+            .replace("__ICONS__", _inline(SETUP_ICONS))
 
     def get_default_config(self):
         return {"port": DEFAULT_PORT, "paused": False, "renew": 0}
@@ -3356,10 +3352,8 @@ PANEL_HTML = (
     "  .ssq svg { width: 26px; height: 26px; flex: none; }\n"
     "  .ssq:hover { color: var(--fg); }\n"
     "  .ssq[aria-pressed=\"true\"] { border: 1.5px solid var(--accent); color: var(--fg); background: color-mix(in srgb, var(--accent) 16%, transparent); }\n"
-    "  .ssteps { list-style: none; margin: 12px 0 0; padding: 0; counter-reset: s; }\n"
-    "  .ssteps > li { display: grid; grid-template-columns: 14px 1fr; column-gap: 6px; padding: 5px 0; font-size: 12.5px; }\n"
-    "  .ssteps > li::before { counter-increment: s; content: counter(s); color: var(--muted); }\n"
-    "  .sroutes { grid-column: 2; display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }\n"
+    "  .sstep { margin: 12px 0 0; font-size: 12.5px; }\n"
+    "  .sroutes { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }\n"
     "  .sroute { border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; }\n"
     "  .sroute b { font-weight: 600; display: block; } .sroute small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.4; margin: 1px 0 6px; }\n"
     "  .sroute.off { border-style: dashed; } .sroute.off b { color: var(--muted); font-weight: 500; } .sroute.off small { margin-bottom: 0; }\n"
@@ -4257,9 +4251,8 @@ PANEL_HTML = (
     "    }).join('');\n"
     "    return '<div class=\"setup\"><div class=\"sh\">Connect your AI app</div>' +\n"
     "      '<div class=\"slead\">Then tell it the print you want. Every change it makes shows up here, and you can undo any of it.</div>' +\n"
-    "      '<div class=\"ssqs\">' + squares + '</div><ol class=\"ssteps\"><li><span>Set it up where you use ' + esc(app.where || app.name) + '</span><div class=\"sroutes\">' + routes + '</div></li>' +\n"
-    "      '<li><span>' + esc(app.ask) + ': \\u201c' + esc(setup.ask) + '\\u201d ' + (setupDone.ask ? '<span class=\"sdone\">Copied</span>'\n"
-    "        : '<button type=\"button\" class=\"lnk\" data-scopy=\"ask\" data-fk=\"sk\">Copy</button>') + '</span></li></ol>' +\n"
+    "      '<div class=\"ssqs\">' + squares + '</div><div class=\"sstep\"><span>Set it up where you use ' + esc(app.where || app.name) + '</span><div class=\"sroutes\">' + routes + '</div></div>' +\n"
+    "      // No test question to ask: the first request from the app switches this to the connected view by itself.\n"
     "      '<div class=\"sstat\"><span class=\"sdot\"></span>Waiting for ' + esc(app.where || app.name) + '\\u2026</div></div>';\n"
     "  }\n"
     "  function copyToClipboard(text, done) {\n"
@@ -4374,7 +4367,7 @@ PANEL_HTML = (
     "      return true;\n"
     "    }\n"
     "    if ((el = ancestor(target, 'data-scopy'))) {\n"
-    "      var ck = el.getAttribute('data-scopy'), text = ck === 'ask' ? setup.ask : (setupCurrent().routes[Number(ck.slice(1))] || {}).copy;\n"
+    "      var ck = el.getAttribute('data-scopy'), text = (setupCurrent().routes[Number(ck.slice(1))] || {}).copy;\n"
     "      if (text) copyToClipboard(text, function (done) { if (done) { setupDone[ck] = true; render(); } });\n"
     "      return true;\n"
     "    }\n"

@@ -669,7 +669,8 @@ def test_config_tab_offers_five_companies_and_no_token_anywhere(plugin):
     assert openai["ChatGPT desktop app"]["copy"] == "uvx orcaslicer-mcp" and openai["ChatGPT desktop app"]["also"] == ""
     assert openai["Codex in a terminal or editor"]["copy"] == "codex mcp add orcaslicer -- uvx orcaslicer-mcp"
     assert openai["ChatGPT on the web or phone"]["off"] is True
-    assert apps["openai"]["ask"] == "In a Codex chat, ask"
+    assert all("ask" not in a for a in apps.values())  # no question to ask: the first request connects it
+    assert "Works in Codex chats" in openai["ChatGPT desktop app"]["hint"]
     assert json.loads(apps["other"]["routes"][0]["copy"]) == {
         "mcpServers": {"orcaslicer": {"command": "uvx", "args": ["orcaslicer-mcp"]}}}
     assert json.loads(apps["vscode"]["routes"][0]["copy"]) == {
@@ -744,7 +745,7 @@ def test_custom_datadir_is_named_only_when_orcaslicer_uses_its_own(monkeypatch, 
 
 def test_config_ui_fills_in_its_values(plugin):
     html = plugin.get_config_ui()
-    for marker in ("__TOKEN__", "__PORT__", "__SETUP__", "__ASK__", "__ICONS__"):
+    for marker in ("__TOKEN__", "__PORT__", "__SETUP__", "__ICONS__"):
         assert marker not in html
     assert "LISTENING = " in html and json.dumps(plugin._token) in html
 
@@ -778,7 +779,7 @@ def test_the_panel_gets_the_setup_until_an_app_connects(plugin):
     time.sleep(0.2)
     first = last(plugin, "setup")
     assert [a["id"] for a in first["apps"]] == ["claude", "openai", "cursor", "vscode", "other"]
-    assert first["status"] is None and first["ask"] == mod.SETUP_ASK and "goals" not in first
+    assert first["status"] is None and "ask" not in first and "goals" not in first
     assert all(a["icon"].startswith("<svg") for a in first["apps"])
     assert plugin._token not in json.dumps(first)
     import urllib.request
@@ -826,3 +827,11 @@ def test_inside_the_mcp_build_the_plugin_stays_off(tmp_path, monkeypatch):
         assert mod.running_in_mcp_build({"version": "2.5.0"}), home
         import shutil
         shutil.rmtree(root)
+
+
+def test_setup_is_one_step_with_no_question_to_copy(plugin):
+    """Once connected, the panel goes to the connected state. No step 2 with a test question and a Copy link."""
+    html = plugin.get_config_ui()
+    assert "askcopy" not in html and "Which printer" not in html and "counter(s)" not in html
+    assert "Turns green" not in html  # the open tab can't see the connection arrive; the panel can
+    assert "Which printer" not in mod.PANEL_HTML and "setup.ask" not in mod.PANEL_HTML

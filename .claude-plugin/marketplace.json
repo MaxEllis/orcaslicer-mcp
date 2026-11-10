@@ -1,0 +1,15 @@
+{
+  "name": "maxellis",
+  "description": "OrcaSlicer MCP skill",
+  "owner": {
+    "name": "Max Ellis",
+    "url": "https://github.com/MaxEllis"
+  },
+  "plugins": [
+    {
+      "name": "orcaslicer-mcp",
+      "source": "./",
+      "description": "How to work with OrcaSlicer through the orcaslicer-mcp server: settings and why they matter, the physics gate, checking slices, printer limits and past prints. Instructions only; it runs no code."
+    }
+  ]
+}

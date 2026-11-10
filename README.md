@@ -83,6 +83,8 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
   }
   ```
 
+**Optional: the agent skill.** It teaches Claude Code, Codex and other agents how to work with these tools (where to start, which settings to check first, the traps). In Claude Code: `/plugin install orcaslicer-mcp --marketplace MaxEllis/orcaslicer-mcp`. For other agents, copy the [`skills/orcaslicer-mcp`](skills/orcaslicer-mcp) folder into `~/.agents/skills`. It is instructions only and runs no code.
+
 **3. Check it works.** With OrcaSlicer open, ask *"Which printer and filament is OrcaSlicer set up for?"* The answer should name your printer and filament presets. If it can't connect, or your app warns about too many tools, see [troubleshooting](docs/troubleshooting.md).
 
 ## You stay in charge

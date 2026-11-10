@@ -15,6 +15,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `check_profile_physics` reads the printer's start and end G-code (`gcode_scripts`): a fixed temperature where a placeholder would follow the filament, relative positioning left on, no homing, heaters never turned off, moves outside the printable area. Warnings only; scripts that call a printer macro are trusted to do that work.
 - `describe_plate` says whether the G-code was sliced with the settings that are set now (`settings_check`), naming any setting the slice used instead, such as a plate's own bed type, print sequence or spiral vase.
 - With enough recorded prints, `get_slice_status` and `slice_and_wait` give a `forecast`: how long the slice will really take on your printer from start to finish, from how past prints compared with their estimates, per OrcaSlicer version when there are enough of them. `save_gcode` now records the OrcaSlicer version with each slice for this.
+- An agent skill (`skills/orcaslicer-mcp`) that teaches Claude Code, Codex and other agents how to work with these tools. In Claude Code: `/plugin install orcaslicer-mcp --marketplace MaxEllis/orcaslicer-mcp`. Instructions only; it runs no code.
 - The OrcaSlicer MCP plugin's Config tab has a **Connect your AI app** section: pick Claude Desktop, Claude Code, Codex or another app and copy what it needs, with the token already in it.
 
 ### Changed

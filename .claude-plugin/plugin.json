@@ -1,0 +1,20 @@
+{
+  "name": "orcaslicer-mcp",
+  "displayName": "OrcaSlicer MCP skill",
+  "version": "0.1.0",
+  "description": "How to work with OrcaSlicer through the orcaslicer-mcp server: settings and why they matter, the physics gate, checking slices, printer limits and past prints. Instructions only; it runs no code.",
+  "author": {
+    "name": "Max Ellis",
+    "url": "https://github.com/MaxEllis"
+  },
+  "homepage": "https://github.com/MaxEllis/orcaslicer-mcp",
+  "repository": "https://github.com/MaxEllis/orcaslicer-mcp",
+  "license": "AGPL-3.0-only",
+  "keywords": [
+    "orcaslicer",
+    "3d-printing",
+    "slicer",
+    "mcp"
+  ],
+  "icon": "docs/brand/icon-512.png"
+}

@@ -53,3 +53,34 @@ def call(cap, method, path, body=None, token=None):
             return r.status, json.loads(r.read())
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read())
+
+
+# ---- the user's own slice (plugin 0.2.0): a slice folder the plugin may read, and the events of a slice
+@pytest.fixture
+def folder(tmp_path, monkeypatch):
+    """The plugin's slice folder, set before the plugin loads (request `folder` before `plugin`)."""
+    f = tmp_path / "temp" / "orcaslicer_model"
+    (f / "Tue_Nov_10" / "10_51_04#1#44" / "Metadata").mkdir(parents=True)
+    monkeypatch.setattr(mod, "current_slice_folders", lambda: [str(f)])
+    return f
+
+
+def gcode_file(folder, body: str, name: str = ".1.0.gcode") -> str:
+    p = folder / "Tue_Nov_10" / "10_51_04#1#44" / "Metadata" / name
+    p.write_text(body)
+    return str(p)
+
+
+def event_ctx(code="Ok", msg="", index=-1):
+    import types
+    codes = fake_orca.build_module().LifecycleEvtCode
+    return types.SimpleNamespace(code=getattr(codes, code), msg=msg, index=index, name="", id="")
+
+
+def slice_now(cap, path, code="Ok", msg=""):
+    """What OrcaSlicer sends when the user presses Slice plate: two events on the slicing worker, one on the UI
+    thread."""
+    ev = fake_orca.build_module().LifecycleEvent
+    cap.on_lifecycle_event(ev.SliceStarted, event_ctx())
+    cap.on_lifecycle_event(ev.GCodeExportFinished, event_ctx(msg=path))
+    fake_orca.UI.run_blocking(lambda: cap.on_lifecycle_event(ev.SlicingJobComplete, event_ctx(code, msg)))

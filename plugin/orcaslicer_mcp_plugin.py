@@ -3,9 +3,9 @@
 #
 # [tool.orcaslicer.plugin]
 # name = "OrcaSlicer MCP"
-# description = "Lets an AI assistant read your OrcaSlicer setup and change settings, through the orcaslicer-mcp server. Loading models, slicing, plates, renders and projects need the OrcaSlicer MCP build."
+# description = "Lets an AI assistant read your OrcaSlicer setup, change settings and read the slices you make, through the orcaslicer-mcp server. Loading models, starting a slice, plates, renders and projects need the OrcaSlicer MCP build."
 # author = "Max Ellis"
-# version = "0.1.0"
+# version = "0.2.0"
 # ///
 """OrcaSlicer MCP: part of the OrcaSlicer MCP Remote API, served by a plugin on stock OrcaSlicer 2.5.
 
@@ -15,8 +15,10 @@ routes, same JSON, same X-Api-Token header. The plugin can only do what OrcaSlic
   can     read the settings, presets, the objects on the plate and the project's name and state;
           change settings (unsaved edits, visible in the settings tabs); switch presets
           report what the user changed by hand since the last request (GET /user_changes)
-  cannot  load, move or delete models; slice; read slice results or G-code; render the plate;
-          manage plates; open or save projects; save, rename or delete presets
+          read the slice the user makes with Slice plate: time, filament, layers and the G-code
+          (GET /slice/status, GET /gcode), from OrcaSlicer's lifecycle events and its temp G-code file
+  cannot  load, move or delete models; start a slice; see slice warnings or the per-feature breakdown;
+          render the plate; manage plates; open or save projects; save, rename or delete presets
 
 Every other route answers 404 with "backend": "plugin", so orcaslicer-mcp can say the tool needs the
 OrcaSlicer MCP build.
@@ -51,17 +53,18 @@ import socketserver
 import sys
 import threading
 import time
+import types
 import urllib.parse
 
 import orca
 
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.2.0"
 DEFAULT_PORT = 13130
 BIND_HOST = "127.0.0.1"
 MAX_BODY = 4 * 1024 * 1024
 UI_TIMEOUT_S = 10.0
 CAPABILITIES = ["status", "config", "objects", "preset_select", "preset_read", "project_read",
-                "sensitive_key_policy"]
+                "sensitive_key_policy", "slice_read"]
 FORK_ONLY = "needs the OrcaSlicer MCP build: the stock-OrcaSlicer plugin cannot do this"
 
 # Diagnostics: plugin-trace.log in the plugin's data folder, on when settings.json has "trace": true.
@@ -153,6 +156,224 @@ class ApiReply(Exception):
 
 def _not_found() -> ApiReply:
     return ApiReply(404, {"error": "not_found", "backend": "plugin", "detail": FORK_ONLY})
+
+
+# ---------------------------------------------------------------------------------------------
+# The user's own slice. A plugin cannot start a slice, but OrcaSlicer tells every plugin when one
+# starts, where its G-code went and how it ended (lifecycle events), and the G-code's closing
+# comments carry the time, filament and layer count. So once the user presses Slice, the plugin
+# serves /slice/status and /gcode the way the build does.
+# ---------------------------------------------------------------------------------------------
+SLICE_TAIL_BYTES = 64 * 1024
+SLICE_IDLE_TEXT = ("Nothing sliced yet: ask the user to press Slice plate (top right of the OrcaSlicer window), "
+                   "then read the result again.")
+SLICE_DONE_TEXT = ("Read from the G-code of the slice made in OrcaSlicer. The plugin can't see OrcaSlicer's slice "
+                   "warnings: ask the user to check the window for any.")
+SLICE_STALE_TEXT = "out of date: something changed since this slice; slice again for current numbers"
+SLICE_OUTSIDE_TEXT = ("OrcaSlicer saved this slice outside the folder the plugin may read, so the plugin can't "
+                      "read it")
+SLICE_GONE_TEXT = "the G-code of this slice is gone: ask the user to slice again"
+SLICE_RUNNING_TEXT = "OrcaSlicer is slicing"
+SLICE_FAILED_TEXT = "Slicing failed"
+
+_DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)([dhms])")
+_DURATION_UNIT = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+_SUMMARY_LINE = re.compile(r"^;\s*(filament used \[mm\]|filament used \[g\]|total filament used \[g\]|"
+                           r"total filament cost|total layers count|estimated printing time \(normal mode\))"
+                           r"\s*=\s*(.*?)\s*$", re.M)
+
+
+def parse_duration(text: str) -> float | None:
+    """OrcaSlicer's time text ("1d 2h 3m 4s", "6m 42s", "0.93s") in seconds; None for anything else."""
+    parts = (text or "").split()
+    if not parts:
+        return None
+    total = 0.0
+    for part in parts:
+        m = _DURATION_PART.fullmatch(part)
+        if m is None:
+            return None
+        total += float(m[1]) * _DURATION_UNIT[m[2]]
+    return total
+
+
+def _numbers(text: str) -> list[float]:
+    out = []
+    for part in text.split(","):
+        try:
+            out.append(float(part))
+        except ValueError:
+            pass
+    return out
+
+
+def parse_gcode_summary(tail: str) -> dict:
+    """The build's /slice/status stats, from the comments OrcaSlicer writes at the end of the G-code: keys
+    estimated_time (OrcaSlicer's text), estimated_time_seconds, filament_used_mm and filament_used_g (summed over
+    filaments), total_cost, plus layers. Only what the file says; {} when it says nothing."""
+    found = {k: v for k, v in _SUMMARY_LINE.findall(tail)}
+    out: dict = {}
+    text = found.get("estimated printing time (normal mode)")
+    if text:
+        out["estimated_time"] = text
+        seconds = parse_duration(text)
+        if seconds is not None:
+            out["estimated_time_seconds"] = seconds
+    mm = _numbers(found.get("filament used [mm]", ""))
+    if mm:
+        out["filament_used_mm"] = round(sum(mm), 2)
+    grams = _numbers(found.get("total filament used [g]", "")) or _numbers(found.get("filament used [g]", ""))
+    if grams:
+        out["filament_used_g"] = round(sum(grams), 2)
+    cost = _numbers(found.get("total filament cost", ""))
+    if cost:
+        out["total_cost"] = cost[0]
+    layers = _numbers(found.get("total layers count", ""))
+    if layers:
+        out["layers"] = int(layers[0])
+    return out
+
+
+def slice_folders(env, windows: bool, uid) -> list[str]:
+    """Where OrcaSlicer writes the G-code of a slice: <temp>/orcaslicer_model, <temp> being wxFileName::GetTempDir()
+    (TMPDIR, TMP, TEMP, then the system's: GetTempPath falls back to USERPROFILE on Windows, "/tmp" elsewhere) with
+    "/orcaslicer_<uid>" after it off Windows (OrcaSlicer.cpp per_user_temp_dir). [] when it can't be told."""
+    names = ("TMPDIR", "TMP", "TEMP", "USERPROFILE") if windows else ("TMPDIR", "TMP", "TEMP")
+    base = next((env.get(n) for n in names if env.get(n)), None) or ("" if windows else "/tmp")
+    if not base:
+        return []
+    seps = "\\/" if windows else "/"
+    base = base.rstrip(seps) or base[:1]
+    sep = "\\" if windows else "/"
+    if not windows:
+        base = base.rstrip("/") + "/orcaslicer_" + str(uid)
+    return [base.rstrip(seps) + sep + "orcaslicer_model"]
+
+
+def current_slice_folders() -> list[str]:
+    windows = sys.platform == "win32"
+    return slice_folders(os.environ, windows, None if windows else os.getuid())
+
+
+def in_slice_folder(path: str, folders) -> bool:
+    """path lies inside one of the folders (after resolving "..", without touching the disk)."""
+    if not path or not os.path.isabs(path):
+        return False
+    p = os.path.normcase(os.path.normpath(path))
+    for f in folders:
+        root = os.path.normcase(os.path.normpath(f))
+        if p.startswith(root.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
+def _code_name(code) -> str:
+    return getattr(code, "name", str(code)).rsplit(".", 1)[-1]
+
+
+SLICE_OBJECT_EVENTS = frozenset({"ObjectAdded", "ObjectDeleted", "ObjectTransformed", "ObjectChanged"})
+SLICE_PROJECT_EVENTS = frozenset({"NewProject", "ProjectOpened", "ProjectClosed"})
+SLICE_EVENTS = SLICE_OBJECT_EVENTS | SLICE_PROJECT_EVENTS | {
+    "SliceStarted", "GCodeExportFinished", "SlicingJobComplete", "PlateSelected"}
+
+
+class SliceWatch:
+    """The user's slices, one per plate, from OrcaSlicer's lifecycle events.
+
+    SliceStarted and GCodeExportFinished arrive on the slicing worker thread, the rest on the UI thread, so event()
+    only records, under a lock; the fingerprint (a UI-thread read of settings and objects, see slice_fingerprint) is
+    taken when a slice completes. A plate is known by the last PlateSelected index, or by a start key for the plate
+    shown when the project opened (PlateSelected is not sent while a project loads), so a slice is never served for
+    another plate or another project. A slice is out of date once an object event arrives or the fingerprint
+    differs."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._gen = 0
+        self._plate = ("start", 0)
+        self._records: dict = {}
+        self._slicing = None  # plate key of a slice that started and has not finished
+        self._pending = None  # (path, plate key) of the G-code this slice wrote
+        self._changes = 0
+
+    def event(self, name: str, ctx, fingerprint) -> None:
+        if name not in SLICE_EVENTS:
+            return
+        code = _code_name(getattr(ctx, "code", "Ok"))
+        msg = getattr(ctx, "msg", "") or ""
+        fp = None
+        if name == "SlicingJobComplete" and code == "Ok":
+            with self._lock:
+                wanted = self._pending is not None
+            if wanted:
+                try:
+                    fp = fingerprint()
+                except Exception as e:  # the slice still counts; it just reads as out of date
+                    trace(f"slice fingerprint failed: {type(e).__name__}: {e}")
+        with self._lock:
+            if name in SLICE_OBJECT_EVENTS:
+                self._changes += 1
+            elif name in SLICE_PROJECT_EVENTS:
+                self._gen += 1
+                self._plate = ("start", self._gen)
+                self._records.clear()
+                self._slicing = self._pending = None
+            elif name == "PlateSelected":
+                index = getattr(ctx, "index", -1)
+                if isinstance(index, int) and not isinstance(index, bool) and index >= 0:
+                    self._plate = ("plate", index)
+            elif name == "SliceStarted":
+                self._slicing, self._pending = self._plate, None
+            elif name == "GCodeExportFinished":
+                if code == "Ok" and msg.strip():
+                    self._pending = (msg.strip(), self._slicing if self._slicing is not None else self._plate)
+            elif name == "SlicingJobComplete":
+                if self._pending is not None:
+                    key = self._pending[1]
+                else:
+                    key = self._slicing if self._slicing is not None else self._plate
+                if code == "Ok":
+                    if self._pending is not None:
+                        self._records[key] = {"state": "done", "path": self._pending[0], "fp": fp,
+                                              "changes": self._changes}
+                elif code == "Error":
+                    self._records[key] = {"state": "error", "message": msg.strip() or SLICE_FAILED_TEXT}
+                else:  # Warn: cancelled
+                    self._records.pop(key, None)
+                self._slicing = self._pending = None
+
+    def current(self, fingerprint) -> dict:
+        """The current plate's slice: {"state": "idle"|"slicing"} | {"state": "error", "message"} |
+        {"state": "done", "path", "valid"}. Calls fingerprint (UI thread) only for a finished slice."""
+        with self._lock:
+            plate, slicing = self._plate, self._slicing
+            rec = self._records.get(plate)
+            changes = self._changes
+        if slicing is not None and slicing == plate:
+            return {"state": "slicing"}
+        if rec is None:
+            return {"state": "idle"}
+        if rec["state"] == "error":
+            return {"state": "error", "message": rec["message"]}
+        valid = rec["fp"] is not None and rec["changes"] == changes and fingerprint() == rec["fp"]
+        return {"state": "done", "path": rec["path"], "valid": valid}
+
+
+def slice_fingerprint() -> str:
+    """UI thread: one hash of everything the journal compares (presets and their edits, filament slots, project
+    settings, objects with their own settings and placements). Equal hashes: nothing a slice depends on changed."""
+    snap = capture_baseline(types.SimpleNamespace(project_gen=0, project_text=""))
+    snap.pop("project_gen", None)
+    snap.pop("project_text", None)
+    return hashlib.sha256(json.dumps(snap, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+class RawBody:
+    """A reply that is not JSON (GET /gcode)."""
+
+    def __init__(self, data: bytes, content_type: str):
+        self.data = data
+        self.content_type = content_type
 
 
 # ---------------------------------------------------------------------------------------------
@@ -682,8 +903,11 @@ class Api:
     """record(rows) hands the panel host one burst of changes (see PanelHost.record)."""
 
     def __init__(self, pump: UiPump, notify=None, record=None, on_request=None, journal: "Journal | None" = None,
-                 clock=time.time, on_switch=None):
+                 clock=time.time, on_switch=None, slices: "SliceWatch | None" = None, slice_folders=()):
         self.pump = pump
+        self.slices = slices
+        self.slice_folders = list(slice_folders)
+        self._summary = ("", -1, None)  # (path, size, stats) of the last G-code read
         self.notify = notify or (lambda text, warning=False: None)
         self.record = record or (lambda rows, close=False, new_group=False: None)
         self.on_switch = on_switch or (lambda ptype, slot, before, name: [])  # UI thread: row ids it dropped
@@ -745,7 +969,11 @@ class Api:
         url = urllib.parse.urlsplit(target)
         path = url.path
         if method == "GET" and path == "/api/v1/status":
-            return 200, self.pump.call(read_status)
+            return 200, self.pump.call(self._status)
+        if method == "GET" and path == "/api/v1/slice/status" and self.slices is not None:
+            return self._slice_status()
+        if method == "GET" and path == "/api/v1/gcode" and self.slices is not None:
+            return self._gcode()
         if method == "GET" and path == "/api/v1/config":
             q = urllib.parse.parse_qs(url.query)
             keys = [k for part in q.get("keys", []) for k in part.split(",") if k]
@@ -768,6 +996,74 @@ class Api:
         if method == "GET" and path == "/api/v1/user_changes" and self.journal is not None:
             return 200, self.journal.since(parse_since(target))
         raise _not_found()
+
+    # -- the user's own slice -----------------------------------------------------------------
+    def _status(self) -> dict:  # UI thread
+        st = read_status()
+        if self.slices is not None:
+            cur = self.slices.current(slice_fingerprint)
+            st["slice_result_valid"] = cur["state"] == "done" and cur["valid"] is True
+        return st
+
+    def _summary_of(self, path: str) -> tuple[dict | None, str | None]:
+        """(stats, problem) from the end of the G-code. Never opens a file outside the slice folders: OrcaSlicer
+        would deny it and ask the user about that one file."""
+        if not in_slice_folder(path, self.slice_folders):
+            return None, SLICE_OUTSIDE_TEXT
+        try:
+            with open(path, "rb") as f:
+                size = f.seek(0, os.SEEK_END)
+                cached_path, cached_size, cached = self._summary
+                if cached_path == path and cached_size == size:
+                    return cached, None
+                f.seek(max(0, size - SLICE_TAIL_BYTES))
+                tail = f.read().decode("utf-8", "replace")
+        except FileNotFoundError:
+            return None, SLICE_GONE_TEXT
+        except OSError as e:
+            trace(f"slice summary read failed: {type(e).__name__}: {e}")
+            return None, SLICE_OUTSIDE_TEXT
+        stats = parse_gcode_summary(tail) or None
+        self._summary = (path, size, stats)
+        return stats, None
+
+    def _slice_status(self):
+        """GET /slice/status as the build answers it, for the slice the user made."""
+        cur = self.pump.call(lambda: self.slices.current(slice_fingerprint))
+        state = cur["state"]
+        if state == "idle":
+            return 200, {"state": "idle", "percent": 0, "message": SLICE_IDLE_TEXT, "warnings": []}
+        if state == "slicing":
+            return 200, {"state": "slicing", "percent": -1, "message": SLICE_RUNNING_TEXT, "warnings": []}
+        if state == "error":
+            return 200, {"state": "error", "percent": 100, "message": cur["message"], "errors": [cur["message"]],
+                         "warnings": []}
+        valid = cur["valid"]
+        stats, problem = self._summary_of(cur["path"])
+        body = {"state": "done", "percent": 100, "warnings": [], "valid": valid, "stale": not valid,
+                "message": problem or (SLICE_DONE_TEXT if valid else SLICE_STALE_TEXT)}
+        if stats:
+            body["stats"] = stats
+        return 200, body
+
+    def _gcode(self):
+        """GET /gcode: the G-code of the user's slice, if it still matches the plate (else 409 not_sliced, as on
+        the build). The whole file is read at once and closed: OrcaSlicer replaces it by rename when it slices
+        again, which fails on Windows while the file is open."""
+        cur = self.pump.call(lambda: self.slices.current(slice_fingerprint))
+        if cur["state"] != "done" or not cur["valid"]:
+            raise ApiReply(409, {"error": "not_sliced"})
+        path = cur["path"]
+        if not in_slice_folder(path, self.slice_folders):
+            raise ApiReply(500, {"error": "gcode_not_readable", "detail": SLICE_OUTSIDE_TEXT})
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except FileNotFoundError:
+            raise ApiReply(500, {"error": "gcode_file_missing"})
+        except OSError as e:
+            raise ApiReply(500, {"error": "gcode_not_readable", "detail": f"{type(e).__name__}: {e}"})
+        return 200, RawBody(data, "text/plain")
 
     def _note(self, data: dict):
         """POST /activity/note: one row the connector adds itself (the fork's route, same body and limits): a
@@ -947,10 +1243,13 @@ def make_handler(api: Api, token: TokenBox):
         def log_message(self, *args):
             pass
 
-        def _reply(self, status: int, body: dict):
-            data = json.dumps(body).encode("utf-8")
+        def _reply(self, status: int, body):
+            if isinstance(body, RawBody):
+                data, ctype = body.data, body.content_type
+            else:
+                data, ctype = json.dumps(body).encode("utf-8"), "application/json"
             self.send_response(status)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -1201,7 +1500,7 @@ JOURNAL_ROUTES = {
     ("GET", "/api/v1/status"): False, ("GET", "/api/v1/config"): False, ("PUT", "/api/v1/config"): True,
     ("GET", "/api/v1/presets"): False, ("POST", "/api/v1/preset/config"): False,
     ("PUT", "/api/v1/preset"): True, ("GET", "/api/v1/objects"): False, ("GET", "/api/v1/project"): False,
-    ("GET", "/api/v1/user_changes"): False,
+    ("GET", "/api/v1/user_changes"): False, ("GET", "/api/v1/slice/status"): False, ("GET", "/api/v1/gcode"): False,
 }
 _SINCE = re.compile(r"[+-]?[0-9]+")
 
@@ -2192,6 +2491,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         self._service = None
         self._pump = UiPump(self._panel_for_request, self._panel_any)
         self.journal = Journal()
+        self.slices = SliceWatch()
+        self._slice_folders: list[str] = []
         self._folder = ""
         self._token = ""
         self._port = DEFAULT_PORT
@@ -2265,8 +2566,9 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             self.host = PanelHost(self._folder, self._post, self._notify)
             self.host.on_action = self._journal_before_panel
             self.host.on_undone = self._journal_panel
+            self._slice_folders = current_slice_folders()
             api = Api(self._pump, notify=self._notify, record=self.host.record, journal=self.journal,
-                      on_switch=self.host.dropped_after_switch)
+                      on_switch=self.host.dropped_after_switch, slices=self.slices, slice_folders=self._slice_folders)
             self._service = Service(api, self._token, self._port)
             self._port = self._service.port
             self._service.start()
@@ -2306,8 +2608,15 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             except Exception:
                 pass
 
-    def on_lifecycle_event(self, event, ctx):  # UI thread
+    def on_lifecycle_event(self, event, ctx):  # UI thread, except SliceStarted and GCodeExportFinished (slicing worker)
         name = getattr(event, "name", str(event))
+        if name in SLICE_EVENTS:
+            try:  # records only: nothing here may touch OrcaSlicer's UI from the slicing worker
+                self.slices.event(name, ctx, slice_fingerprint)
+            except Exception as e:
+                trace(f"slice event {name} failed: {type(e).__name__}: {e}")
+            if name not in SLICE_PROJECT_EVENTS:
+                return
         if self.host is None or name not in ("ProjectOpened", "NewProject", "ProjectClosed", "ProjectAfterSave"):
             return
         try:
@@ -2476,8 +2785,13 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
 @orca.plugin
 class OrcaSlicerMcpPlugin(orca.base):
     def register_capabilities(self):
-        # One thread for the server and a socket on this computer only; OrcaSlicer asks once.
-        orca.request_permissions(threading=True, network_socket=[BIND_HOST])
+        # One thread for the server, a socket on this computer only, and reading the folder OrcaSlicer writes the
+        # G-code of a slice to (a folder grant can only be asked for here); OrcaSlicer asks once.
+        wanted = {"threading": True, "network_socket": [BIND_HOST]}
+        folders = current_slice_folders()
+        if folders:
+            wanted["fs_read"] = [f + "/*" for f in folders]
+        orca.request_permissions(**wanted)
         orca.register_capability(McpCapability)
 
 

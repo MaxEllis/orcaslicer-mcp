@@ -446,7 +446,10 @@ def build_module():
     orca.plugin = lambda cls: cls
     orca.ExecutionResult = ExecutionResult
     orca.LifecycleEvent = types.SimpleNamespace(**{n: types.SimpleNamespace(name=n) for n in (
-        "NewProject", "ProjectOpened", "ProjectAfterSave", "ProjectClosed", "PresetSelected")})
+        "NewProject", "ProjectOpened", "ProjectAfterSave", "ProjectClosed", "PresetSelected", "SliceStarted",
+        "GCodeExportFinished", "SlicingJobComplete", "PlateSelected", "ObjectAdded", "ObjectDeleted",
+        "ObjectTransformed", "ObjectChanged")})
+    orca.LifecycleEvtCode = types.SimpleNamespace(**{n: types.SimpleNamespace(name=n) for n in ("Ok", "Error", "Warn")})
     orca.PluginResult = types.SimpleNamespace(RecoverableError=1)
     orca.registered = []
     orca.register_capability = orca.registered.append

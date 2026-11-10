@@ -17,7 +17,11 @@ def test_registers_with_minimal_permissions():
         sys.modules["orca"] = saved
     S.permissions = None
     mod.orca.registered.clear()
-    mod.OrcaSlicerMcpPlugin().register_capabilities()
+    saved_folders, mod.current_slice_folders = mod.current_slice_folders, lambda: []
+    try:
+        mod.OrcaSlicerMcpPlugin().register_capabilities()
+    finally:
+        mod.current_slice_folders = saved_folders
     assert S.permissions == {"threading": True, "network_socket": ["127.0.0.1"]}
     assert mod.orca.registered == [mod.McpCapability]
 
@@ -38,7 +42,7 @@ def test_wrong_or_missing_token_is_401(plugin):
 
 
 def test_fork_only_routes_say_so(plugin):
-    for method, path in [("POST", "/api/v1/slice"), ("POST", "/api/v1/model"), ("GET", "/api/v1/gcode"),
+    for method, path in [("POST", "/api/v1/slice"), ("POST", "/api/v1/model"),
                          ("GET", "/api/v1/plate/render"), ("GET", "/api/v1/plates"),
                          ("POST", "/api/v1/project/save"), ("POST", "/api/v1/preset/save"),
                          ("DELETE", "/api/v1/objects/101"), ("GET", "/api/v1/statuses")]:

@@ -39,7 +39,12 @@ ARGS = {
 # Tools that talk to the printer, not OrcaSlicer (the fake printer address is unreachable).
 PRINTER_TOOLS = {"check_printer_match", "get_printer_status", "list_print_history", "wait_for_printer"}
 EXPECT_WORKS = {"get_status", "get_config", "set_config", "list_presets", "get_preset_config",
-                "select_preset", "list_objects", "get_project"}
+                "select_preset", "list_objects", "get_project",
+                # after the user pressed Slice plate (plugin 0.2.0)
+                "get_slice_status", "get_slice_warnings", "get_gcode", "describe_plate", "save_gcode"}
+READS_THE_SLICE = {"get_slice_status", "get_slice_warnings", "get_slice_breakdown", "get_gcode",
+                   "describe_plate", "save_gcode"}
+CUBE = pathlib.Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "cube_flat.gcode.xz"
 
 
 def _fill(schema: dict) -> dict:
@@ -59,7 +64,11 @@ def _text(result) -> str:
     return " ".join(getattr(c, "text", None) or json.dumps(c, default=str) for c in content)
 
 
-def test_every_tool_is_honest_about_the_plugin(plugin, monkeypatch, capsys):
+def test_every_tool_is_honest_about_the_plugin(folder, plugin, monkeypatch, capsys, tmp_path):
+    import lzma
+    from conftest import gcode_file, slice_now
+    gcode = gcode_file(folder, lzma.open(CUBE, "rt").read())
+    monkeypatch.setenv("PRINT_OUTCOMES_DIR", str(tmp_path / "outcomes"))
     monkeypatch.setenv("ORCA_API_URL", plugin.base)
     monkeypatch.setenv("ORCA_API_TOKEN", plugin._token)
     monkeypatch.setenv("ORCA_API_TIMEOUT", "15")
@@ -71,6 +80,8 @@ def test_every_tool_is_honest_about_the_plugin(plugin, monkeypatch, capsys):
         rows = {}
         for tool in await server.mcp.list_tools():
             args = ARGS.get(tool.name) or _fill(tool.input_schema)
+            if tool.name in READS_THE_SLICE:  # earlier tools change settings: the user slices again first
+                slice_now(plugin, gcode)
             try:
                 text = _text(await server.mcp.call_tool(tool.name, args))
             except Exception as e:  # validation of made-up args, etc.
@@ -94,6 +105,6 @@ def test_every_tool_is_honest_about_the_plugin(plugin, monkeypatch, capsys):
         for b, names in buckets.items():
             print(f"\n{b} ({len(names)}): {', '.join(names)}")
         for name in buckets["other"]:
-            print(f"  {name}: {rows[name][:220]}")
+            print(f"  {name}: {rows[name][:220]!r}")
     assert EXPECT_WORKS <= set(buckets["works"]), EXPECT_WORKS - set(buckets["works"])
     assert buckets["other"] == [], buckets["other"]

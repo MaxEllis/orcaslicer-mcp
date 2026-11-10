@@ -9,8 +9,9 @@ from __future__ import annotations
 
 BUILD_URL = "https://github.com/MaxEllis/OrcaSlicer/releases"
 
-_SLICE = ("ask the user to press Slice plate (top right of the OrcaSlicer window) and tell you "
-          "the print time and filament use it shows")
+_SLICE = ("ask the user to press Slice plate (top right of the OrcaSlicer window), then read the "
+          "result with get_slice_status (OrcaSlicer MCP plugin 0.2.0 or later; with an older plugin, "
+          "ask the user for the print time and filament use it shows)")
 _GCODE = ("ask the user to slice in OrcaSlicer and use Export G-code (or Print) themselves")
 _OBJECTS = "ask the user to do it on the plate in the OrcaSlicer window"
 _PLATES = "ask the user to use the plate buttons in the OrcaSlicer window"

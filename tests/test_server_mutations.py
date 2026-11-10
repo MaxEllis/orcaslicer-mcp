@@ -200,4 +200,5 @@ async def test_get_status_notes_the_plugin(monkeypatch):
     respx.get("http://x:13130/api/v1/status").mock(
         return_value=httpx.Response(200, json={"backend": "plugin", "presets": {}}))
     out = await srv.get_status()
-    assert out["note"].startswith("Connected to the OrcaSlicer MCP plugin") and "slicing" in out["note"]
+    assert out["note"].startswith("Connected to the OrcaSlicer MCP plugin") and "starting a slice" in out["note"]
+    assert "read the slice the user makes" in out["note"]

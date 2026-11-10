@@ -455,9 +455,24 @@ async def _plate_is_empty() -> bool:
         return False
 
 
+_NOT_SLICED_PLUGIN = ("There is no finished slice of this plate yet, or something changed since: ask the "
+                      "user to press Slice plate (top right of the OrcaSlicer window), then call this again.")
+
+
+async def _is_plugin() -> bool:
+    """The OrcaSlicer MCP plugin answers at the configured address (asked now: only error paths call this)."""
+    try:
+        async with _client() as c:
+            return (await c.get_status()).get("backend") == "plugin"
+    except Exception:  # noqa: BLE001 - only picks the wording
+        return False
+
+
 async def _not_sliced(token: str = "not_sliced") -> dict:
     if await _plate_is_empty():
         return {"error": token, "detail": _EMPTY_PLATE}
+    if await _is_plugin():
+        return {"error": token, "detail": _NOT_SLICED_PLUGIN}
     return {"error": token, "detail": "There is no finished slice of this plate yet: slice it first "
                                       "(slice_and_wait)."}
 
@@ -626,6 +641,10 @@ async def get_slice_warnings() -> dict:
                "message": s["message"]}
         if s.get("out_of_date"):
             out["out_of_date"], out["note"] = True, s["note"]
+        elif status.get("backend") == "plugin":
+            out["warnings_visible"] = False
+            out["note"] = ("The OrcaSlicer MCP plugin can't see OrcaSlicer's slice warnings; an empty list "
+                           "means nothing. Ask the user to check the OrcaSlicer window for any.")
         return out
     except ApiError as e:
         return _err(e)
@@ -653,6 +672,9 @@ async def get_slice_breakdown() -> dict:
                 except Exception:  # noqa: BLE001 - only decides the out-of-date note
                     pass
         out = build_breakdown(status, cfg)
+        if not out.get("available") and await _is_plugin():
+            out["reason"] = ("the OrcaSlicer MCP plugin can't read the per-feature breakdown; that needs the "
+                             "OrcaSlicer MCP build. get_slice_status has the totals of the user's slice.")
         if is_out_of_date(status, valid):
             out["out_of_date"], out["note"] = True, OUT_OF_DATE_NOTE
         return out

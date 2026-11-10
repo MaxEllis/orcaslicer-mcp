@@ -14,10 +14,11 @@ class Unauthorized(ApiError):
 # "not available on this build" so the assistant can tell the user exactly why.
 PLUGIN_LIMITS = (
     "the OrcaSlicer MCP plugin (stock OrcaSlicer) cannot do this. It can read settings, "
-    "presets, the objects on the plate and the project, and change settings. Loading or moving "
-    "models, slicing, slice results and G-code, plate renders, plates, opening and saving "
-    "projects, and saving or deleting presets need the OrcaSlicer MCP build: "
-    "https://github.com/MaxEllis/OrcaSlicer/releases")
+    "presets, the objects on the plate and the project, change settings, and (plugin 0.2.0 or "
+    "later) read the slice the user makes with Slice plate: its time, filament and G-code. "
+    "Loading or moving models, starting a slice, comparing slices, slice warnings, plate renders, "
+    "plates, opening and saving projects, and saving or deleting presets need the OrcaSlicer MCP "
+    "build: https://github.com/MaxEllis/OrcaSlicer/releases")
 
 
 class NotFound(ApiError):

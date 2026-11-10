@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `get_config` with `keys` also says what each setting means, with its unit, range and choices, from OrcaSlicer's own tooltips.
+- `set_config` and `apply_and_slice` take `null` for a key to put it back to the value saved in its preset, one setting at a time. Script, G-code and printer-connection settings are never put back this way.
+- The server now sends instructions with its handshake: where to start, which tools explain a setting, how to check a result.
+- The OrcaSlicer MCP plugin's Config tab has a **Connect your AI app** section: pick Claude Desktop, Claude Code, Codex or another app and copy what it needs, with the token already in it.
+
+### Changed
+- Arguments sent under a name close to a tool's own are read as that argument instead of being dropped or failing the call: `key` for `keys`, `settings` for `changes`, `id` for `object_id`, camelCase names, a single value where a list is expected, and a comma-separated list of keys.
+- `search_settings` ranks everyday settings above advanced ones when they match equally well, so "infill density" finds `sparse_infill_density` first.
+- The plugin keeps loading on an OrcaSlicer build that refuses one of its permission requests; OrcaSlicer then asks the first time it is needed. On a build too old for the plugin, it says which OrcaSlicer it needs.
+- The Claude Desktop extension's token field says where the plugin shows its token.
+
 ## [0.1.22] - 2026-11-11
 
 ### Added

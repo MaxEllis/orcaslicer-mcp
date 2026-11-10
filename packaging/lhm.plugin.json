@@ -67,11 +67,11 @@
     },
     {
       "name": "get_config",
-      "description": "Read the current value of settings (all, or only `keys`); to learn what a setting means or its allowed range use describe_setting."
+      "description": "Read the current value of settings (all, or only `keys`); with `keys`, `about` also says what each one means, its unit, range and choices."
     },
     {
       "name": "set_config",
-      "description": "Change settings on the open project as unsaved edits, all or nothing; use apply_and_slice to also slice, or edit_preset to change a saved preset."
+      "description": "Change settings on the open project as unsaved edits, all or nothing; a key set to null goes back to its saved preset value; use apply_and_slice to also slice, or edit_preset to change a saved preset."
     },
     {
       "name": "slice",

@@ -4,7 +4,7 @@
 
 | | | |
 |---|---|---|
-| **Settings** | Read and change any of OrcaSlicer's settings while it runs, for the plate, one object, or a band of layers. | `get_config` `set_config` `find_config_keys` `set_layer_height` `set_height_range` `set_object_config` |
+| **Settings** | Read and change any of OrcaSlicer's settings while it runs, for the plate, one object, or a band of layers; reading named settings also says what each one means, and one can be put back to its saved preset value. | `get_config` `set_config` `find_config_keys` `set_layer_height` `set_height_range` `set_object_config` |
 | **Knowing what they mean** | Look settings up in OrcaSlicer's own labels and tooltips, and check a profile against your printer's physical limits before printing. | `describe_setting` `search_settings` `compare_settings` `consult` `check_profile_physics` |
 | **Presets** | Switch, edit, save, rename and delete presets, and choose the filament preset of one slot on a multi-filament printer. | `list_presets` `select_preset` `get_preset_config` `edit_preset` `save_preset` `rename_preset` `delete_preset` |
 | **Models** | Load STL, OBJ, 3MF and STEP files, then move, rotate, scale, duplicate, arrange and auto-orient them. | `load_model` `list_objects` `transform_object` `duplicate_object` `delete_object` `arrange_plate` `auto_orient` `check_placement` `diagnose_plate` |

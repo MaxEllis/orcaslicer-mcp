@@ -14,6 +14,11 @@ def _settings() -> dict:
     return {k: v for k, v in _doc().items() if not k.startswith("_")}
 
 
+# OrcaSlicer's setting modes: Simple (no mode in the schema means Simple) shows by default, Advanced and Expert/Develop
+# only when the user switches the sidebar to them.
+_MODE_ORDER = {None: 0, "comSimple": 0, "comAdvanced": 1, "comExpert": 2, "comDevelop": 2}
+
+
 def describe(key: str) -> dict | None:
     """Full record for one setting key, or None if unknown."""
     rec = _settings().get(key)
@@ -75,5 +80,7 @@ def search(query: str, limit: int = 25) -> list[dict]:
             "category": rec.get("category"),
             "tooltip": tip[:120] + ("…" if len(tip) > 120 else ""),
         }))
-    hits.sort(key=lambda h: (h[0], h[1], h[2]))  # rank, then word score, then key
+    # rank, then word score, then the everyday settings before the advanced ones (so "infill density" finds
+    # sparse_infill_density before skeleton_ and skin_infill_density), then key
+    hits.sort(key=lambda h: (h[0], h[1], _MODE_ORDER.get(_settings()[h[2]].get("mode"), 1), h[2]))
     return [h[3] for h in hits[:limit]]

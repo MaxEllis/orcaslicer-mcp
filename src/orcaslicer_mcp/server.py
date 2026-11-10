@@ -27,7 +27,7 @@ from .knowledge_index import load_knowledge, search_knowledge
 from .physics_check import run_checks, CHECK_LAYERS
 from .breakdown import build_breakdown
 from .compare import compute_comparison
-from .guard import allow_override_warnings
+from .guard import allow_override_warnings, is_sensitive
 from .stdio_compat import run_stdio
 from . import notes as _notes
 from . import outcomes as _outcomes
@@ -41,6 +41,30 @@ from .printer import match as _pmatch
 from .printer.errors import PrinterError
 from .printer.snapshot import take_snapshot
 from .printer.status import _dur as _duration_text
+from .normalize import normalize_arguments
+
+# Sent with initialize (clients keep up to 4096 characters). Clients that load tool schemas on demand see only
+# this and the tool names at first, so it says where to start and which tools answer "what does this setting do".
+SERVER_INSTRUCTIONS = (
+    "OrcaSlicer MCP: work with the user's live OrcaSlicer toward the print they want, and explain why.\n"
+    "1. Start with get_status: build or plugin, the active presets, their unsaved edits, and whether the last "
+    "slice still holds. If it says plugin, tell the user before trying what the plugin cannot do (loading models, "
+    "starting slices, renders, plates, projects, saving presets); they press Slice themselves and you read it.\n"
+    "2. Before changing a setting you are not sure of, look it up: search_settings finds keys by words, "
+    "describe_setting gives the meaning, unit, range and choices, consult has slicing knowledge and the user's own "
+    "notes. get_config with keys also returns what each key means.\n"
+    "3. Change with set_config (unsaved edits; a key set to null goes back to its saved preset value). For "
+    "temperature, speed, acceleration or flow, run check_profile_physics first. Script, G-code and printer-connection "
+    "keys are refused unless the user allows them in OrcaSlicer.\n"
+    "4. Every change shows in the OrcaSlicer MCP panel, where the user can revert it. When a reply carries "
+    "user_changes, the user edited something by hand: build on it, never undo it.\n"
+    "5. Check results through data, not guesses: get_slice_status, get_slice_breakdown, describe_plate (what the "
+    "G-code shows about contact, overhangs, supports, seams), get_slice_warnings, compare_slices for a sweep.\n"
+    "6. A slice in progress: wait with slice_and_wait or get_slice_status; do not start another.\n"
+    "7. Printer tools (get_printer_status, wait_for_printer, list_print_history, check_printer_match) read the "
+    "printer; recall_prints and save_gcode keep slice and print outcomes for next time.\n"
+    "Object tools take the stable id from list_objects; plate tools take the 0-based plate index."
+)
 
 try:
     import importlib.metadata as _md
@@ -48,7 +72,21 @@ try:
 except Exception:  # source checkout without an installed dist
     _VERSION = "0.0.0"
 
-mcp = MCPServer("orcaslicer", version=_VERSION)
+mcp = MCPServer("orcaslicer", instructions=SERVER_INSTRUCTIONS, version=_VERSION)
+
+_orig_call_tool = mcp.call_tool
+
+
+async def _call_tool_normalized(name, arguments, context=None):
+    """Every tools/call passes here: arguments under a name the tool does not take, or a single value where it
+    takes a list, are read in the tool's own form first (normalize.py)."""
+    tool = mcp._tool_manager.get_tool(name)
+    if tool is not None:
+        arguments, _notes = normalize_arguments(tool.parameters, arguments or {})
+    return await _orig_call_tool(name, arguments, context)
+
+
+mcp.call_tool = _call_tool_normalized
 
 
 # --- Changes the user made by hand, passed on in tool replies -------------------------
@@ -534,17 +572,114 @@ async def get_status() -> dict:
     return status
 
 
+_ABOUT_MAX_KEYS = 12  # beyond this the reply would mostly be explanations; describe_setting has them one by one
+
+
+def _about(keys: list[str]) -> dict:
+    """What each named key means, from OrcaSlicer's own tooltips (as the sidebar shows them). Agents read settings
+    far more often than they ask for an explanation, so the explanation comes with the value (OrcaSlicer's own MCP
+    work found the same)."""
+    out = {}
+    for k in keys[:_ABOUT_MAX_KEYS]:
+        rec = settings_schema.describe(k)
+        if rec is None:
+            continue
+        tip = rec.get("tooltip") or ""
+        item = {"label": rec.get("label"), "meaning": tip[:240] + ("…" if len(tip) > 240 else "")}
+        if rec.get("unit"):
+            item["unit"] = rec["unit"]
+        if rec.get("min") is not None or rec.get("max") is not None:
+            item["range"] = [rec.get("min"), rec.get("max")]
+        if rec.get("enum_values"):
+            item["choices"] = rec["enum_values"]
+        out[k] = item
+    return out
+
+
 @mcp.tool()
 async def get_config(keys: list[str] | None = None) -> dict:
-    """Read the current value of settings (all, or only `keys`); to learn what a setting means or its allowed range use describe_setting.
+    """Read the current value of settings (all, or only `keys`); with `keys`, `about` also says what each one means, its unit, range and choices.
 
-    Values come back as text, merged across the active print, filament and printer presets.
+    Values come back as text, merged across the active print, filament and printer presets. Name the keys you
+    need: the whole config is several hundred settings. describe_setting gives the full record of one key.
     """
     try:
         async with _client() as c:
-            return {"config": await c.get_config(keys)}
+            reply = {"config": await c.get_config(keys)}
     except ApiError as e:
         return _err(e)
+    if keys:
+        about = _about(list(keys))
+        if about:
+            reply["about"] = about
+    return reply
+
+
+_GROUP_TYPE = {"print": "print", "filament": "filament", "printer": "printer"}
+
+
+async def _resolve_reverts(c, changes: dict) -> tuple[dict, list, list, dict]:
+    """Keys set to null go back to the value saved in their active preset (OrcaSlicer's own MCP work takes null the
+    same way). Returns (changes with the saved values filled in, reverted keys, keys already at their saved
+    value, errors). Only reads; nothing changes here."""
+    wanted = [k for k, v in changes.items() if v is None]
+    if not wanted:
+        return changes, [], [], {}
+    status = await c.get_status()
+    presets = status.get("presets") or {}
+    modified = status.get("modified") or {}
+    group_of = {}
+    for group, keys in modified.items():
+        for k in keys if isinstance(keys, list) else []:
+            if isinstance(k, str):
+                group_of.setdefault(k.split("#", 1)[0], group)
+    out = {k: v for k, v in changes.items() if v is not None}
+    reverted, unchanged, errors = [], [], {}
+    saved_cache: dict = {}
+    for key in wanted:
+        if is_sensitive(key):
+            errors[key] = "not_revertible: script, G-code and printer-connection keys are not put back this way"
+            continue
+        group = group_of.get(key)
+        if group is None:
+            unchanged.append(key)  # no unsaved edit: it already has its saved value
+            continue
+        if group == "filament":
+            names = [n for n in presets.get("filament") or presets.get("filaments") or [] if n]  # the client says filament
+            if len(set(names)) != 1:
+                errors[key] = ("several filament presets are loaded, so which saved value to use is ambiguous; "
+                               "set the value you want instead")
+                continue
+            name = names[0]
+        else:
+            name = presets.get(group)
+        if not name or group not in _GROUP_TYPE:
+            errors[key] = "the active preset for this setting is unknown"
+            continue
+        if (group, name) not in saved_cache:
+            saved_cache[(group, name)] = (await c.get_preset_config(_GROUP_TYPE[group], name)).get("config", {})
+        saved = saved_cache[(group, name)].get(key)
+        if saved is None:
+            errors[key] = f"not in the saved preset {name!r}"
+            continue
+        out[key] = saved
+        reverted.append(key)
+    return out, reverted, unchanged, errors
+
+
+async def _put_config_with_reverts(c, changes: dict) -> dict:
+    resolved, reverted, unchanged, errors = await _resolve_reverts(c, changes)
+    if errors:
+        return {"applied": [], "errors": errors, "detail": "nothing was changed (all or nothing)"}
+    if resolved:
+        result = await c.put_config(resolved)
+    else:
+        result = {"applied": [], "errors": {}}
+    if reverted:
+        result["reverted"] = reverted
+    if unchanged:
+        result["already_saved"] = unchanged
+    return result
 
 
 @mcp.tool()
@@ -557,12 +692,14 @@ async def set_config(
         "get_config value for a per-filament setting (hot_plate_temp, fan_min_speed, "
         "nozzle_temperature_initial_layer, ...): get_config reports those merged across "
         "every loaded filament ('70,100,70,70,35'), while this writes the one filament "
-        "preset open in the Filament tab, so pass that preset's single value instead."))],
+        "preset open in the Filament tab, so pass that preset's single value instead. A key set to "
+        "null goes back to the value saved in its preset (an unsaved edit undone)."))],
 ) -> dict:
-    """Change settings on the open project as unsaved edits, all or nothing; use apply_and_slice to also slice, or edit_preset to change a saved preset.
+    """Change settings on the open project as unsaved edits, all or nothing; a key set to null goes back to its saved preset value; use apply_and_slice to also slice, or edit_preset to change a saved preset.
 
     Returns {applied, errors}; if any key is invalid the whole batch is rejected and nothing
-    changes.
+    changes. Keys set to null are listed under `reverted` (or `already_saved` when they had no
+    unsaved edit).
 
     Overrides show as modified in get_status, are not written to any preset file, and revert
     if the preset is reselected; call save_preset to persist them. Each apply invalidates the
@@ -575,7 +712,7 @@ async def set_config(
     (docs/order-of-operations.md)."""
     try:
         async with _client() as c:
-            return await c.put_config(changes)
+            return await _put_config_with_reverts(c, changes)
     except ApiError as e:
         return _err(e)
 
@@ -724,8 +861,8 @@ async def slice_and_wait(
 async def apply_and_slice(
     changes: Annotated[dict, Field(description=(
         "Map of OrcaSlicer config key to new value to apply before slicing, e.g. "
-        "{'layer_height': 0.2}. Same format and validation as set_config; discover keys with "
-        "search_settings or find_config_keys."))],
+        "{'layer_height': 0.2}. Same format and validation as set_config (null puts a key back to its "
+        "saved preset value); discover keys with search_settings or find_config_keys."))],
 ) -> dict:
     """Change settings and slice in one call, returning both; use set_config and then slice_and_wait to keep the steps apart.
 
@@ -738,7 +875,9 @@ async def apply_and_slice(
         async with _client() as c:
             if (refusal := await _plugin_refusal(c)) is not None:  # it cannot slice
                 return refusal
-            applied = await c.put_config(changes)
+            applied = await _put_config_with_reverts(c, changes)
+            if applied.get("errors") and not applied.get("applied"):
+                return {"applied": [], "errors": applied["errors"], "result": None}
             try:
                 started = await _start_slice(c)
             except Validation as e:

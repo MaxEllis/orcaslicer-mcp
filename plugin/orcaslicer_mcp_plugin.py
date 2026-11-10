@@ -1405,6 +1405,47 @@ class Service:
 # ---------------------------------------------------------------------------------------------
 # Plugin folder: token and settings
 # ---------------------------------------------------------------------------------------------
+# The host calls the plugin cannot run without. OrcaSlicer 2.5.0 has them all; an older nightly may not, and then
+# the user is told which OrcaSlicer they need instead of a bare AttributeError.
+REQUIRED_HOST_CALLS = ("plugin.storage", "preset_bundle", "plater", "app_info", "preset", "ui.create_dock_panel",
+                       "ui.push_notification")
+NEEDS_NEWER_TEXT = "needs OrcaSlicer 2.5.0 or later (this OrcaSlicer has no {missing}). Update OrcaSlicer, then activate it again."
+
+
+def missing_host_calls() -> list[str]:
+    missing = []
+    for dotted in REQUIRED_HOST_CALLS:
+        obj = getattr(orca, "host", None)
+        for part in dotted.split("."):
+            obj = getattr(obj, part, None) if obj is not None else None
+        if obj is None:
+            missing.append("orca.host." + dotted)
+    return missing
+
+
+def request_permissions(wanted: dict) -> dict:
+    """Ask for everything at once, as OrcaSlicer prefers. Some 2.5 builds refuse a keyword they do not know with a
+    TypeError (another plugin stopped loading on exactly that); then ask again without the newest keywords, and
+    OrcaSlicer asks about the rest the first time the plugin needs it. A refusal by the user, or any other error,
+    still stops the plugin loading, as before. Returns what was granted."""
+    tries = [wanted]
+    if "fs_read" in wanted:
+        tries.append({k: v for k, v in wanted.items() if k != "fs_read"})
+    tries.append({k: v for k, v in wanted.items() if k == "network_socket"})
+    first = None
+    for kwargs in tries:
+        try:
+            orca.request_permissions(**kwargs)
+            if kwargs is not wanted:
+                trace(f"request_permissions: this build took only {sorted(kwargs)} (first try said: {first})")
+            return kwargs
+        except TypeError as e:
+            first = first or f"{type(e).__name__}: {e}"
+            continue
+    trace(f"request_permissions: no declaration accepted ({first}); OrcaSlicer asks on first use")
+    return {}
+
+
 def load_or_create_token(folder: str, renew: bool = False) -> str:
     path = os.path.join(folder, "token.txt")
     if not renew:
@@ -2496,12 +2537,27 @@ button.danger{background:#e5484d;border-color:#e5484d;color:#fff}
 input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:4px;padding:4px 6px}
 .note{color:var(--muted);font-size:12px;margin-top:6px} .note:empty{display:none}
 .switch{display:flex;align-items:center;gap:8px;cursor:pointer}
+select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:4px;padding:4px 6px}
+.snip{flex:1;min-width:0;margin:0;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;padding:6px 8px;border:1px solid var(--edge);border-radius:4px;white-space:pre-wrap;word-break:break-all;user-select:all}
 </style></head><body>
 <div class="sec">
   <h2>Token</h2>
   <div class="muted">Paste this token into your AI app's OrcaSlicer MCP connector.</div>
   <div class="row"><div id="tok" class="tok"></div><button id="copy" class="primary">Copy</button><button id="show">Show</button><button id="renew">New token</button></div>
   <div id="tnote" class="note"></div>
+</div>
+<div class="sec">
+  <h2>Connect your AI app</h2>
+  <div class="muted">Pick the app you use: copy what it needs, with your token already in it.</div>
+  <div class="row"><select id="app">
+    <option value="desktop">Claude Desktop</option>
+    <option value="code">Claude Code</option>
+    <option value="codex">Codex</option>
+    <option value="other">Other apps (Cursor, VS Code, LM Studio...)</option>
+  </select></div>
+  <div id="how" class="note"></div>
+  <div class="row"><pre id="snip" class="snip"></pre><button id="copysnip">Copy</button></div>
+  <div id="snote" class="note"></div>
 </div>
 <div class="sec">
   <h2>Assistant access</h2>
@@ -2516,7 +2572,22 @@ input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);
   <div id="pnote" class="note"></div>
 </div>
 <script>
-var TOKEN = __TOKEN__, LISTENING = __PORT__, shown = false, armed = null, noteTimer = {};
+var TOKEN = __TOKEN__, LISTENING = __PORT__, DEFPORT = __DEFAULT_PORT__, shown = false, armed = null, noteTimer = {};
+var RELEASES = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest", UV = "https://docs.astral.sh/uv/";
+// What each AI app needs. tok is the token as shown (dots until Show) or as copied (always the real one).
+function setup(app, tok){
+  var url = "http://127.0.0.1:" + LISTENING, moved = LISTENING !== DEFPORT;
+  var env = " --env ORCA_API_TOKEN=" + tok + (moved ? " --env ORCA_API_URL=" + url : "");
+  if (app === "desktop") return { how: "Download the orcaslicer-mcp .mcpb file from this page, open it, and paste the token above into its settings" +
+      (moved ? "; set its OrcaSlicer address to " + url : "") + ". Nothing else to install.", text: RELEASES, copy: "Copy link" };
+  if (app === "code") return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Run this once in a terminal, then start a new Claude Code session.",
+      text: "claude mcp add --scope user" + env + " orcaslicer -- uvx orcaslicer-mcp", copy: "Copy" };
+  if (app === "codex") return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Run this once in a terminal, then start a new Codex session.",
+      text: "codex mcp add orcaslicer" + env + " -- uvx orcaslicer-mcp", copy: "Copy" };
+  var e = { ORCA_API_TOKEN: tok }; if (moved) e.ORCA_API_URL = url;
+  return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Add this to the app's MCP settings.",
+      text: JSON.stringify({ mcpServers: { orcaslicer: { command: "uvx", args: ["orcaslicer-mcp"], env: e } } }, null, 2), copy: "Copy" };
+}
 var cfg = window.orca.getConfig() || {};
 function $(i){ return document.getElementById(i); }
 function save(patch){ var c = Object.assign({}, cfg, patch); window.orca.saveConfig(c); cfg = c; draw(); }
@@ -2528,19 +2599,24 @@ function draw(){
   $("show").textContent = shown ? "Hide" : "Show";
   if (document.activeElement !== $("port")) $("port").value = cfg.port || LISTENING;
   $("addr").textContent = "http://127.0.0.1:" + LISTENING;
+  var d = setup($("app").value, shown ? TOKEN : "•".repeat(16));
+  $("how").textContent = d.how; $("snip").textContent = d.text; $("copysnip").textContent = d.copy;
 }
 // A short confirmation ("Copied.") clears itself; a note that asks for something stays until replaced.
 function note(id, t, fade){ clearTimeout(noteTimer[id]); $(id).textContent = t;
   if (fade) noteTimer[id] = setTimeout(function(){ $(id).textContent = ""; }, 3000); }
 $("pause").onclick = function(){ save({ paused: !(cfg.paused === true) }); };
 $("show").onclick = function(){ shown = !shown; draw(); };
-$("copy").onclick = function(){
-  function fallback(){ var a=document.createElement("textarea"); a.value=TOKEN; document.body.appendChild(a); a.select();
+function copyText(text, id, failed){
+  function fallback(){ var a=document.createElement("textarea"); a.value=text; document.body.appendChild(a); a.select();
     var ok=false; try{ ok=document.execCommand("copy"); }catch(e){} document.body.removeChild(a);
-    note("tnote", ok ? "Copied." : "Copy failed: press Show and select the token.", ok); }
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(TOKEN).then(function(){ note("tnote","Copied.",true); }, fallback);
+    note(id, ok ? "Copied." : failed, ok); }
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function(){ note(id,"Copied.",true); }, fallback);
   else fallback();
-};
+}
+$("copy").onclick = function(){ copyText(TOKEN, "tnote", "Copy failed: press Show and select the token."); };
+$("copysnip").onclick = function(){ copyText(setup($("app").value, TOKEN).text, "snote", "Copy failed: press Show above, then select the text."); };
+$("app").onchange = function(){ note("snote", ""); draw(); };
 $("renew").onclick = function(){
   if (armed) { clearTimeout(armed); armed = null; $("renew").textContent = "New token"; $("renew").className = "";
     save({ renew: (cfg.renew || 0) + 1 });
@@ -2595,7 +2671,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         return True
 
     def get_config_ui(self):
-        return CONFIG_HTML.replace("__TOKEN__", _inline(self._token)).replace("__PORT__", _inline(self._port))
+        return CONFIG_HTML.replace("__TOKEN__", _inline(self._token)).replace("__PORT__", _inline(self._port)) \
+            .replace("__DEFAULT_PORT__", _inline(DEFAULT_PORT))
 
     def get_default_config(self):
         return {"port": DEFAULT_PORT, "paused": False, "renew": 0}
@@ -2634,6 +2711,9 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
     def on_load(self):
         try:
             global _TRACE_PATH
+            missing = missing_host_calls()
+            if missing:
+                raise RuntimeError(NEEDS_NEWER_TEXT.format(missing=", ".join(missing)))
             self._folder = orca.host.plugin.storage()
             settings = load_settings(self._folder)
             if settings.get("trace") is True:
@@ -2660,7 +2740,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             trace(f"server thread started, alive={self._service.thread.is_alive()}")
             self._open_panel_at_load()
         except Exception as e:
-            self._error = f"{type(e).__name__}: {e}"
+            self._error = str(e) if isinstance(e, RuntimeError) and str(e).startswith("needs OrcaSlicer") \
+                else f"{type(e).__name__}: {e}"
             self._service = None
             trace("on_load failed: " + self._error)
             self._notify("could not start: " + self._error, True)
@@ -2875,7 +2956,7 @@ class OrcaSlicerMcpPlugin(orca.base):
         folders = current_slice_folders()
         if folders:
             wanted["fs_read"] = [f + "/*" for f in folders]
-        orca.request_permissions(**wanted)
+        request_permissions(wanted)
         orca.register_capability(McpCapability)
 
 

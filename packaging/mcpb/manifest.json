@@ -48,7 +48,7 @@
     "api_token": {
       "type": "string",
       "title": "Remote API token",
-      "description": "In OrcaSlicer (MCP build): Preferences -> Remote API -> Enable Remote API, then copy the token shown there.",
+      "description": "OrcaSlicer MCP build: Preferences -> Remote API -> Enable Remote API, then copy the token. OrcaSlicer MCP plugin: main menu (beside File) -> Plugins -> OrcaSlicer MCP -> Config, then Copy.",
       "sensitive": true,
       "required": true
     },

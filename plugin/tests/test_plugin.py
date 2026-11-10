@@ -254,3 +254,66 @@ def test_orcaslicer_mcp_knows_this_version():
         pytest.skip("orcaslicer-mcp without plugin_update (needs branch plugin-update)")
     assert plugin_update.LATEST_PLUGIN_VERSION == mod.PLUGIN_VERSION, \
         "raise LATEST_PLUGIN_VERSION in orcaslicer-mcp's plugin_update.py with the plugin's version"
+
+
+def _register_with(fake_request):
+    """Run register_capabilities against a request_permissions stand-in; returns the calls it saw."""
+    calls = []
+
+    def request(**kw):
+        calls.append(kw)
+        fake_request(kw)
+    saved_req, mod.orca.request_permissions = mod.orca.request_permissions, request
+    saved_folders, mod.current_slice_folders = mod.current_slice_folders, lambda: ["/tmp/orcaslicer_model"]
+    mod.orca.registered.clear()
+    try:
+        mod.OrcaSlicerMcpPlugin().register_capabilities()
+    finally:
+        mod.orca.request_permissions = saved_req
+        mod.current_slice_folders = saved_folders
+    return calls
+
+
+def test_permissions_asked_in_one_call_when_the_build_takes_them():
+    calls = _register_with(lambda kw: None)
+    assert calls == [{"threading": True, "network_socket": ["127.0.0.1"], "fs_read": ["/tmp/orcaslicer_model/*"]}]
+    assert mod.orca.registered == [mod.McpCapability]
+
+
+def test_a_build_that_refuses_a_keyword_gets_a_smaller_request():
+    """Some 2.5 builds refuse a keyword they do not know (TypeError from the binding): the plugin asks again
+    without it instead of failing to load, and OrcaSlicer asks about the rest on first use."""
+    def older_build(kw):
+        if "fs_read" in kw or "threading" in kw:
+            raise TypeError("request_permissions(): incompatible function arguments.")
+    calls = _register_with(older_build)
+    assert [sorted(c) for c in calls] == [["fs_read", "network_socket", "threading"], ["network_socket", "threading"],
+                                          ["network_socket"]]
+    assert mod.orca.registered == [mod.McpCapability]
+
+
+def test_a_refusal_that_is_not_a_keyword_problem_still_stops_loading():
+    def refused(kw):
+        raise PermissionError("the user said No")
+    try:
+        _register_with(refused)
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("a refusal must still stop the plugin loading")
+    assert mod.orca.registered == []
+
+
+def test_a_host_without_a_needed_call_says_which_orcaslicer_is_needed(tmp_path):
+    fake_orca.STATE.reset(storage=str(tmp_path))
+    saved = mod.orca.host.ui.create_dock_panel
+    del mod.orca.host.ui.create_dock_panel
+    cap = mod.McpCapability()
+    try:
+        fake_orca.UI.run_blocking(cap.on_load)
+        assert cap._service is None
+        assert cap._error.startswith("needs OrcaSlicer 2.5.0 or later") and "orca.host.ui.create_dock_panel" in cap._error
+        assert any("needs OrcaSlicer 2.5.0 or later" in text for _lvl, text in S.notifications)
+    finally:
+        mod.orca.host.ui.create_dock_panel = saved
+        cap.on_unload()

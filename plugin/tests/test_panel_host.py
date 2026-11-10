@@ -413,7 +413,8 @@ def test_panel_opens_when_the_plugin_is_activated(tmp_path):
 
 def test_config_tab_speaks_plainly():
     html = mod.CONFIG_HTML
-    assert "<port>" not in html and "&lt;port&gt;" not in html and "ORCA_API" not in html
+    prose = html.split("<script>", 1)[0]  # the setup text the user copies lives in the script, not in the prose
+    assert "<port>" not in html and "&lt;port&gt;" not in html and "ORCA_API" not in prose
     assert "AI app" in html and "Copied." in html
     assert html.index("<h2>Token</h2>") < html.index("<h2>Assistant access</h2>")  # the token is seen first
     assert mod.SETTINGS_HINT == "Main menu (beside File) > Plugins > OrcaSlicer MCP > Config"
@@ -650,3 +651,50 @@ def test_multiline_cases_ported_from_the_builds_standalone_test():
     assert t(a5, a) == "Line 5 of 5:\nM84"
     seven = "".join(f"L{i}\n" for i in range(1, 8))
     assert t(seven, None) == "Lines 1 to 5 of 7:\nL1\nL2\nL3\nL4\nL5\n" + E
+
+
+def _setup_text(app, token, port, default=13130):
+    """Run the Config tab's own setup() (node) for one AI app, as the page does."""
+    import re
+    import shutil
+    import subprocess
+    import pytest
+    node = shutil.which("node") or ("/snap/bin/node" if os.path.exists("/snap/bin/node") else None)
+    if not node:
+        pytest.skip("node not installed")
+    js = re.search(r"var TOKEN = __TOKEN__.*?(?=var cfg = )", mod.CONFIG_HTML, re.S).group(0)
+    js = js.replace("__TOKEN__", json.dumps(token)).replace("__PORT__", str(port)).replace("__DEFAULT_PORT__", str(default))
+    out = subprocess.run([node, "-e", js + f"console.log(JSON.stringify(setup({json.dumps(app)}, TOKEN)));"],
+                         capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+def test_config_tab_gives_each_ai_app_its_setup_with_the_token_in_it():
+    tok = "a" * 48
+    code = _setup_text("code", tok, 13130)
+    assert code["text"] == f"claude mcp add --scope user --env ORCA_API_TOKEN={tok} orcaslicer -- uvx orcaslicer-mcp"
+    assert "uv" in code["how"] and "terminal" in code["how"]
+    codex = _setup_text("codex", tok, 13130)
+    assert codex["text"] == f"codex mcp add orcaslicer --env ORCA_API_TOKEN={tok} -- uvx orcaslicer-mcp"
+    other = json.loads(_setup_text("other", tok, 13130)["text"])
+    assert other == {"mcpServers": {"orcaslicer": {"command": "uvx", "args": ["orcaslicer-mcp"],
+                                                   "env": {"ORCA_API_TOKEN": tok}}}}
+    desk = _setup_text("desktop", tok, 13130)
+    assert desk["text"] == "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest" and desk["copy"] == "Copy link"
+    assert ".mcpb" in desk["how"] and "127.0.0.1" not in desk["how"]
+
+
+def test_config_tab_setup_names_a_changed_port():
+    tok = "b" * 48
+    assert _setup_text("code", tok, 13200)["text"].endswith(
+        "--env ORCA_API_URL=http://127.0.0.1:13200 orcaslicer -- uvx orcaslicer-mcp")
+    other = json.loads(_setup_text("other", tok, 13200)["text"])
+    assert other["mcpServers"]["orcaslicer"]["env"]["ORCA_API_URL"] == "http://127.0.0.1:13200"
+    assert "http://127.0.0.1:13200" in _setup_text("desktop", tok, 13200)["how"]
+
+
+def test_config_ui_fills_in_the_default_port(plugin):
+    html = plugin.get_config_ui()
+    assert "__DEFAULT_PORT__" not in html and "DEFPORT = 13130" in html
+    assert html.index("<h2>Token</h2>") < html.index("<h2>Connect your AI app</h2>") < html.index("<h2>Assistant access</h2>")

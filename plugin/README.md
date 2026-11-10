@@ -18,16 +18,20 @@ routes, JSON and `X-Api-Token` header, so orcaslicer-mcp needs no new client cod
 | Save, rename, delete presets | No | Yes |
 | See the objects on the plate (sizes, positions) | Yes, read-only | Yes |
 | Load, move, rotate, arrange, orient models | No | Yes |
-| Slice, read time and filament, get the G-code | No, you press Slice | Yes |
+| Read the slice you made: time, filament, layers, G-code | Yes (0.2.0 and later; you press Slice) | Yes |
+| Start a slice, compare slices, slice warnings, per-feature breakdown | No | Yes |
 | Render the plate as an image | No | Yes |
 | Plates; open and save projects | No | Yes |
 
 Why: OrcaSlicer 2.5's plugin API lets a plugin read the model and edit presets, but has no call to
-load a model, start a slice, read slice results, render, manage plates or open/save a project.
+load a model, start a slice, render, manage plates or open/save a project. It does tell a plugin when
+a slice starts, where its G-code went and how it ended, which is how the plugin reads your slices
+(see [Reading your slice](#reading-your-slice)).
 
-Against the plugin, 18 orcaslicer-mcp tools work (status, config, presets, objects, project,
-settings advice and checks), 44 answer that they need the OrcaSlicer MCP build, and the 4 printer
-tools work as before because they talk to the printer, not OrcaSlicer (`tests/test_tool_matrix.py`).
+Against plugin 0.2.0, 23 orcaslicer-mcp tools work (status, config, presets, objects, project, the
+slice you made and its G-code, settings advice and checks), 39 answer that they need the OrcaSlicer
+MCP build, and the 4 printer tools work as before because they talk to the printer, not OrcaSlicer
+(`tests/test_tool_matrix.py`).
 
 ## Install (stock OrcaSlicer 2.5)
 
@@ -39,7 +43,9 @@ tools work as before because they talk to the printer, not OrcaSlicer (`tests/te
    then click the button (it now reads Install local plugin) and pick `orcaslicer_mcp_plugin.py`. A
    plugin installed from a file never updates itself; orcaslicer-mcp tells you when a newer one is out.
 3. Tick **Activate** next to OrcaSlicer MCP. OrcaSlicer asks once for network access to
-   127.0.0.1 and permission to create a thread; click **Yes** (No stops the plugin loading).
+   127.0.0.1, permission to create a thread, and read access to its own temporary `orcaslicer_model`
+   folder (where it saves the G-code of each slice); click **Yes** (No stops the plugin loading).
+   Updating from 0.1.0 asks once more, for the folder.
 4. Open the plugin's **Config** tab in that dialog: it shows the token (hidden until Show, with Copy
    and New token), the port, and the switch that turns assistant access off and on.
 5. orcaslicer-mcp: set `ORCA_API_TOKEN` to that token. The URL default
@@ -57,6 +63,25 @@ on each change. Restore points need the build. The history is kept per project, 
 it opens as soon as the plugin is activated, keeps working with OrcaSlicer minimised, and the first request opens it again if it was closed.
 Unticking Activate stops the server.
 
+## Reading your slice
+
+The plugin can't start a slice, but when you press **Slice plate**, OrcaSlicer tells every plugin that a
+slice started, where it saved the G-code and whether it worked. The plugin keeps one slice per plate from
+those messages, reads the time, filament, cost and layer count from the comments at the end of the G-code,
+and serves them on `GET /api/v1/slice/status` and the file on `GET /api/v1/gcode`, as the build does. So
+`get_slice_status`, `get_gcode`, `describe_plate` and `save_gcode` work on what you sliced.
+
+- **Out of date:** a slice counts as out of date once settings, presets, objects, their parts and modifiers or
+  their own settings change, and `/gcode` then answers `not_sliced`, as on the build. Putting a setting back
+  makes the slice current again, because the G-code matches it again.
+- **Not seen:** paint added to a part that was already painted (the plugin API only says whether a part is
+  painted), OrcaSlicer's slice warnings, and the time per feature. The G-code has no warnings and no
+  per-feature times in it.
+- **Plates:** a slice belongs to the plate that was selected when it ran. After opening a project, the first
+  plate switch hides earlier slices until you slice again; the plugin can't tell plate numbers before then.
+- **Files:** the plugin only opens files inside that temporary folder. OrcaSlicer writes a new file each time
+  you slice; the plugin reads it in one go and closes it, so it never holds up the next slice.
+
 ## Safety
 
 - Listens on 127.0.0.1 only; every request needs the token (compared in constant time).
@@ -65,6 +90,7 @@ Unticking Activate stops the server.
   passes, so snapshot/restore works.
 - Hides `print_host`/`printhost_*` from `GET /config` and redacts credentials in
   `POST /preset/config`.
+- Reads files only inside OrcaSlicer's temporary slicing folder, and only the G-code of your last slice.
 - Every change shows as an OrcaSlicer notification and in the panel's timeline, with undo.
 
 ## Tests

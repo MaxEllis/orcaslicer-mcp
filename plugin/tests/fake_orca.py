@@ -219,11 +219,69 @@ class Instance:
         return self._bb
 
 
+class Volume:
+    """A part, modifier, negative volume or support enforcer/blocker of an object."""
+    _next = 900
+
+    def __init__(self, kind="ModelPart", offset=(0.0, 0.0, 0.0), config=None):
+        Volume._next += 1
+        self._id, self.kind, self._offset = Volume._next, kind, offset
+        self.config = dict(config or {})
+        self.support_painted = False
+
+    def id(self):
+        _ui_only()
+        return self._id
+
+    def type(self):
+        _ui_only()
+        return "ModelVolumeType." + self.kind
+
+    def offset(self):
+        return self._offset
+
+    def rotation(self):
+        return (0.0, 0.0, 0.0)
+
+    def scaling_factor(self):
+        return (1.0, 1.0, 1.0)
+
+    def mirror(self):
+        return (1.0, 1.0, 1.0)
+
+    def facets_count(self):
+        return 12
+
+    def config_keys(self):
+        return list(self.config)
+
+    def config_value(self, key):
+        return self.config.get(key)
+
+    def is_fdm_support_painted(self):
+        return self.support_painted
+
+    def is_seam_painted(self):
+        return False
+
+    def is_mm_painted(self):
+        return False
+
+    def is_fuzzy_skin_painted(self):
+        return False
+
+
 class ModelObject:
     def __init__(self, oid, name, bbox):
         self._id, self.name, self._bb = oid, name, bbox
         self._insts = [Instance((10.0, 20.0, 5.0), bbox)]
         self.config = {"wall_loops": "3"}  # the object's own settings
+        self._volumes = [Volume()]
+        self.custom_layering = False
+
+    def volumes(self):
+        _ui_only()
+        return list(self._volumes)
 
     def id(self):
         _ui_only()
@@ -249,7 +307,7 @@ class ModelObject:
         return self.config.get(key)
 
     def has_custom_layering(self):
-        return False
+        return self.custom_layering
 
 
 class Model:

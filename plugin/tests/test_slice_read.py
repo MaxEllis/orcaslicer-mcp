@@ -308,3 +308,27 @@ def test_a_failed_slice_reports_the_error(live, folder):
     assert body["state"] == "error" and body["message"] == "Nothing to be sliced"
     assert body["errors"] == ["Nothing to be sliced"]
     assert raw(live, "/api/v1/gcode")[0] == 409
+
+
+@pytest.mark.parametrize("change", ["modifier", "paint", "layering", "volume_setting"])
+def test_part_changes_make_it_out_of_date(live, folder, change):
+    slice_now(live, gcode_file(folder))
+    obj = S.model.objs[0]
+    if change == "modifier":
+        obj._volumes.append(fake_orca.Volume("ParameterModifier", (1.0, 0.0, 0.0), {"sparse_infill_density": "50%"}))
+    elif change == "paint":
+        obj._volumes[0].support_painted = True
+    elif change == "layering":
+        obj.custom_layering = True
+    else:
+        obj._volumes[0].config["wall_loops"] = "5"
+    _, body = call(live, "GET", "/api/v1/slice/status")
+    assert body["valid"] is False, change
+
+
+def test_project_switch_never_serves_the_old_slice(live, folder):
+    slice_now(live, gcode_file(folder))
+    fake_orca.UI.run_blocking(lambda: live.on_lifecycle_event(EV.ProjectOpened, ctx()))
+    _, body = call(live, "GET", "/api/v1/slice/status")
+    assert body["state"] == "idle"
+    assert raw(live, "/api/v1/gcode")[0] == 409

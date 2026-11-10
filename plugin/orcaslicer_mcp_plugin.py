@@ -359,12 +359,45 @@ class SliceWatch:
         return {"state": "done", "path": rec["path"], "valid": valid}
 
 
+_PAINT_CHECKS = ("is_fdm_support_painted", "is_seam_painted", "is_mm_painted", "is_fuzzy_skin_painted")
+
+
+def _volume_signature(mo) -> list:
+    """UI thread: each part, modifier, negative volume and support enforcer/blocker of an object as the plugin API
+    shows it (type, placement, size, own settings, whether it carries paint). Paint added to an already painted
+    part does not show here: the API only says whether a part is painted."""
+    try:
+        volumes = mo.volumes()
+    except AttributeError:  # an OrcaSlicer without volume bindings
+        return []
+    out = []
+    for v in volumes:
+        config = {}
+        for k in v.config_keys():
+            value = v.config_value(k)
+            if value is not None:
+                config[k] = value
+        out.append([int(v.id()), str(v.type()), list(v.offset()), list(v.rotation()), list(v.scaling_factor()),
+                    list(v.mirror()), int(v.facets_count()), config,
+                    [bool(getattr(v, name)()) for name in _PAINT_CHECKS if hasattr(v, name)]])
+    return out
+
+
 def slice_fingerprint() -> str:
-    """UI thread: one hash of everything the journal compares (presets and their edits, filament slots, project
-    settings, objects with their own settings and placements). Equal hashes: nothing a slice depends on changed."""
+    """UI thread: one hash of what a slice depends on and the plugin can read: everything the journal compares
+    (presets and their edits, filament slots, project settings, objects with their own settings and placements),
+    plus each object's parts and modifiers and whether it has a variable layer height. Equal hashes: nothing that
+    can be seen changed."""
     snap = capture_baseline(types.SimpleNamespace(project_gen=0, project_text=""))
     snap.pop("project_gen", None)
     snap.pop("project_text", None)
+    snap["volumes"] = []
+    for mo in orca.host.plater().model().objects():
+        try:
+            layering = bool(mo.has_custom_layering())
+        except AttributeError:
+            layering = False
+        snap["volumes"].append([int(mo.id()), layering, _volume_signature(mo)])
     return hashlib.sha256(json.dumps(snap, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 

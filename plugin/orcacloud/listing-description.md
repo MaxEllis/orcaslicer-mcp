@@ -16,6 +16,7 @@ It raises the wall loops from 4 to 7, because a bracket's strength is in its wal
 - **Changes settings and switches presets.** They show as unsaved edits, like your own. Your saved presets stay as they are until you save them.
 - **Shows every change** in the OrcaSlicer MCP panel, with **Revert** or **Switch back** on each one.
 - **Leaves your own edits alone.** It sees what you changed yourself, so it doesn't undo your work.
+- **Reads your slices.** After you press **Slice plate**, it reads the print time, filament use and G-code, so it can tell you what each change did.
 
 ## Plugin or OrcaSlicer MCP build?
 
@@ -31,7 +32,7 @@ OrcaSlicer's plugin system can't do the rest. You don't need the [OrcaSlicer MCP
 ## Set it up
 
 1. **Install.** Subscribe here, then in OrcaSlicer open the main menu (the icon beside **File**) > **Plugins**, install OrcaSlicer MCP and tick **Activate**.
-2. **Allow it.** OrcaSlicer asks for network access to `127.0.0.1` (this computer only) and for a thread that keeps the connection open. Choose **Yes**. **No** stops the plugin.
+2. **Allow it.** OrcaSlicer asks for network access to `127.0.0.1` (this computer only), for a thread that keeps the connection open, and to read its own temporary `orcaslicer_model` folder, where each slice's G-code goes. Choose **Yes**. **No** stops the plugin.
 3. **Copy the token** from the plugin's **Config** tab.
 4. **Connect your AI app.** Add the connector with that token, as its [setup steps](https://github.com/MaxEllis/orcaslicer-mcp#get-started) show. Then ask *"Which printer and filament is OrcaSlicer set up for?"* to check it works.
 
@@ -42,6 +43,7 @@ OrcaSlicer's plugin system can't do the rest. You don't need the [OrcaSlicer MCP
 - It listens on this computer only, and every request needs the token.
 - It never changes post-processing scripts, custom G-code, printer connections or plugin settings.
 - It hides printer passwords and API keys from the assistant.
+- The only file it reads is the G-code of your last slice, in OrcaSlicer's temporary folder.
 - You can pause the assistant at any time in the plugin's **Config** tab.
 
 Source and issues: [github.com/MaxEllis/orcaslicer-mcp](https://github.com/MaxEllis/orcaslicer-mcp)

@@ -6,7 +6,10 @@
 phase "read" (default): read-only checks plus a 404 check. phase "write": settings writes
 (restored afterwards) and the sensitive-key refusal. phase "select": switch the print preset to
 another one and back; run it while the edited presets are clean, or OrcaSlicer will (rightly)
-ask on screen about unsaved edits. Never prints the token or credential values.
+ask on screen about unsaved edits. phase "slice": the slice the user makes (plugin 0.2.0). With
+ORCA_FORK_URL and ORCA_FORK_TOKEN set (an OrcaSlicer MCP build running the plugin too) the script slices
+through the build's own API and compares; otherwise it asks you to press Slice plate. Never prints the token or
+credential values.
 """
 import json
 import os
@@ -33,6 +36,16 @@ def call(method, path, body=None, token=TOKEN, timeout=60):
     except urllib.error.HTTPError as e:
         out = e.code, json.loads(e.read() or b"{}")
     return out + (time.monotonic() - t0,)
+
+
+def get_raw(path, base=URL, token=TOKEN, timeout=60):
+    req = urllib.request.Request(base + path)
+    req.add_header("X-Api-Token", token)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.headers.get("Content-Type", ""), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Content-Type", ""), e.read()
 
 
 def check(name, ok, info=""):
@@ -130,7 +143,88 @@ def phase_select():
               body.get("detail", "")[:90])
 
 
+FORK = os.environ.get("ORCA_FORK_URL", "").rstrip("/")
+FORK_TOKEN = os.environ.get("ORCA_FORK_TOKEN", "")
+
+
+def fork(method, path, body=None):
+    global URL, TOKEN
+    saved = URL, TOKEN
+    URL, TOKEN = FORK, FORK_TOKEN
+    try:
+        return call(method, path, body)
+    finally:
+        URL, TOKEN = saved
+
+
+def wait_state(want, seconds=240):
+    end = time.monotonic() + seconds
+    body = {}
+    while time.monotonic() < end:
+        _, body, _ = call("GET", "/api/v1/slice/status")
+        if body.get("state") in want:
+            return body
+        time.sleep(1)
+    return body
+
+
+def user_slices(prompt="press Slice plate in OrcaSlicer now"):
+    if FORK:
+        s, body, _ = fork("POST", "/api/v1/slice", {})
+        if s not in (200, 202):
+            print("   build would not slice:", s, body)
+    else:
+        print(f"   >>> {prompt}")
+    return wait_state({"done", "error"})
+
+
+def phase_slice():
+    _, st, _ = call("GET", "/api/v1/status")
+    check("plugin 0.2.0 says slice_read", "slice_read" in st.get("capabilities", []), st.get("plugin_version"))
+    body = user_slices()
+    check("slice done", body.get("state") == "done" and body.get("valid") is True, body.get("message", "")[:80])
+    stats = body.get("stats") or {}
+    check("stats from the G-code", stats.get("estimated_time_seconds", 0) > 0 and stats.get("filament_used_g", 0) > 0
+          and stats.get("layers", 0) > 0, json.dumps(stats))
+    s, ctype, data = get_raw("/api/v1/gcode")
+    check("gcode 200 text/plain", s == 200 and ctype.startswith("text/plain") and data.startswith(b"; HEADER_BLOCK"),
+          f"{len(data)} bytes")
+    if FORK:
+        _, fb, _ = fork("GET", "/api/v1/slice/status")
+        fs = fb.get("stats") or {}
+        check("time matches the build's", abs(fs.get("estimated_time_seconds", -9) - stats.get("estimated_time_seconds", 0)) < 1.5,
+              f"{fs.get('estimated_time_seconds')} vs {stats.get('estimated_time_seconds')}")
+        check("filament matches the build's", abs(fs.get("filament_used_g", -9) - stats.get("filament_used_g", 0)) < 0.02,
+              f"{fs.get('filament_used_g')} vs {stats.get('filament_used_g')}")
+        s, _, fdata = get_raw("/api/v1/gcode", base=FORK, token=FORK_TOKEN)
+        check("same G-code as the build serves", s == 200 and fdata == data, f"{len(fdata)} vs {len(data)} bytes")
+    _, cfg, _ = call("GET", "/api/v1/config?keys=layer_height")
+    lh = cfg["config"]["layer_height"]
+    s, _, _ = call("PUT", "/api/v1/config", {"layer_height": round(float(lh) + 0.04, 2)})
+    _, b2, _ = call("GET", "/api/v1/slice/status")
+    check("a settings change makes it out of date", s == 200 and b2.get("valid") is False and b2.get("stale") is True,
+          b2.get("message", "")[:60])
+    check("gcode 409 when out of date", get_raw("/api/v1/gcode")[0] == 409)
+    call("PUT", "/api/v1/config", {"layer_height": lh})
+    _, b3, _ = call("GET", "/api/v1/slice/status")
+    print("   after putting it back: valid =", b3.get("valid"), "(the G-code matches again)")
+    body = user_slices("press Slice plate again")
+    check("slice again: done and valid", body.get("state") == "done" and body.get("valid") is True)
+    if FORK:
+        fork("POST", "/api/v1/plates", {})
+        _, pl, _ = fork("GET", "/api/v1/plates")
+        last = len(pl.get("plates", [])) - 1
+        s, _, _ = fork("POST", f"/api/v1/plates/{last}/select", {})
+        _, b4, _ = call("GET", "/api/v1/slice/status")
+        check("another plate: nothing sliced there", s == 200 and b4.get("state") == "idle", f"{s} {b4.get('state')}")
+        check("another plate: gcode 409", get_raw("/api/v1/gcode")[0] == 409)
+        fork("POST", "/api/v1/plates/0/select", {})
+        fork("DELETE", f"/api/v1/plates/{last}")
+        body = user_slices("press Slice plate on the first plate")
+        check("first plate sliced again after the plate switch", body.get("state") == "done" and body.get("valid") is True)
+
+
 phase = sys.argv[1] if len(sys.argv) > 1 else "read"
-{"read": phase_read, "write": phase_write, "select": phase_select}[phase]()
+{"read": phase_read, "write": phase_write, "select": phase_select, "slice": phase_slice}[phase]()
 print(f"\n{phase}: {sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

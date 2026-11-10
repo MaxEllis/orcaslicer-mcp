@@ -415,8 +415,10 @@ def test_config_tab_speaks_plainly():
     html = mod.CONFIG_HTML
     prose = html.split("<script>", 1)[0]  # the setup text the user copies lives in the script, not in the prose
     assert "<port>" not in html and "&lt;port&gt;" not in html and "ORCA_API" not in prose
-    assert "AI app" in html and "Copied." in html
-    assert html.index("<h2>Token</h2>") < html.index("<h2>Assistant access</h2>")  # the token is seen first
+    assert "Connect your AI app" in prose and "Token and port" in prose
+    # the order a person needs it: is it working, then connect, then the rarely needed token and port
+    assert html.index('id="status"') < html.index("Connect your AI app") < html.index("Token and port")
+    assert "\\" not in html  # the page sits in a Python string: no escapes that Python would swallow
     assert mod.SETTINGS_HINT == "Main menu (beside File) > Plugins > OrcaSlicer MCP > Config"
 
 
@@ -653,53 +655,102 @@ def test_multiline_cases_ported_from_the_builds_standalone_test():
     assert t(seven, None) == "Lines 1 to 5 of 7:\nL1\nL2\nL3\nL4\nL5\n" + E
 
 
-def _setup_text(app, token, port, default=13130):
-    """Run the Config tab's own setup() (node) for one AI app, as the page does."""
+def _config_js(token="a" * 48, port=13130, default=13130, datadir=None):
+    """The Config tab's own script with its values filled in, cut before it touches the page."""
     import re
+    js = re.search(r"<script>(.*?)var cfg = ", mod.CONFIG_HTML, re.S).group(1)
+    return (js.replace("__TOKEN__", json.dumps(token)).replace("__PORT__", str(port))
+              .replace("__DEFAULT_PORT__", str(default)).replace("__DATADIR__", json.dumps(datadir)))
+
+
+def _routes(**kw):
+    """Every app's routes as the page computes them (node): label, what Copy copies, what Open opens."""
     import shutil
     import subprocess
     import pytest
     node = shutil.which("node") or ("/snap/bin/node" if os.path.exists("/snap/bin/node") else None)
     if not node:
         pytest.skip("node not installed")
-    js = re.search(r"var TOKEN = __TOKEN__.*?(?=var cfg = )", mod.CONFIG_HTML, re.S).group(0)
-    js = js.replace("__TOKEN__", json.dumps(token)).replace("__PORT__", str(port)).replace("__DEFAULT_PORT__", str(default))
-    out = subprocess.run([node, "-e", js + f"console.log(JSON.stringify(setup({json.dumps(app)}, TOKEN)));"],
-                         capture_output=True, text=True, timeout=30)
+    prog = ("var btoa=function(s){return Buffer.from(s,'binary').toString('base64')};" + _config_js(**kw) +
+            "console.log(JSON.stringify(APPS.map(function(a){return {id:a.id, ask:a.ask, routes:a.routes.map(function(r){"
+            "return {label:r.label, off:!!r.off, copy:r.copy?r.copy():null, open:r.open?r.open():null, also:r.also?r.also():''}})}})))")
+    out = subprocess.run([node, "-e", prog], capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
-    return json.loads(out.stdout)
+    return {a["id"]: a for a in json.loads(out.stdout)}
 
 
-def test_config_tab_gives_each_ai_app_its_setup_with_the_token_in_it():
+def test_config_tab_offers_five_companies_and_no_token_anywhere():
     tok = "a" * 48
-    code = _setup_text("code", tok, 13130)
-    # the name before --env: the CLI reads every word after --env as another KEY=value (checked with claude 2.1.322)
-    assert code["text"] == f"claude mcp add --scope user orcaslicer --env ORCA_API_TOKEN={tok} -- uvx orcaslicer-mcp"
-    assert "uv" in code["how"] and "terminal" in code["how"]
-    codex = _setup_text("codex", tok, 13130)
-    assert codex["text"] == f"codex mcp add orcaslicer --env ORCA_API_TOKEN={tok} -- uvx orcaslicer-mcp"
-    other = json.loads(_setup_text("other", tok, 13130)["text"])
-    assert other == {"mcpServers": {"orcaslicer": {"command": "uvx", "args": ["orcaslicer-mcp"],
-                                                   "env": {"ORCA_API_TOKEN": tok}}}}
-    vscode = json.loads(_setup_text("vscode", tok, 13130)["text"])  # VS Code's mcp.json uses "servers"
-    assert vscode == {"servers": {"orcaslicer": {"type": "stdio", "command": "uvx", "args": ["orcaslicer-mcp"],
-                                                 "env": {"ORCA_API_TOKEN": tok}}}}
-    desk = _setup_text("desktop", tok, 13130)
-    assert desk["text"] == "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest" and desk["copy"] == "Copy link"
-    assert ".mcpb" in desk["how"] and "127.0.0.1" not in desk["how"]
+    apps = _routes(token=tok)
+    assert list(apps) == ["claude", "openai", "cursor", "vscode", "other"]
+    claude = {r["label"]: r for r in apps["claude"]["routes"]}
+    assert claude["Claude app"]["open"] == "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"
+    assert claude["Claude Code"]["copy"] == "claude mcp add --scope user orcaslicer -- uvx orcaslicer-mcp"
+    openai = {r["label"]: r for r in apps["openai"]["routes"]}
+    assert openai["ChatGPT desktop app"]["copy"] == "uvx orcaslicer-mcp" and openai["ChatGPT desktop app"]["also"] == ""
+    assert openai["Codex in a terminal or editor"]["copy"] == "codex mcp add orcaslicer -- uvx orcaslicer-mcp"
+    assert openai["ChatGPT on the web or phone"]["off"] is True
+    assert apps["openai"]["ask"] == "In a Codex chat, ask"
+    other = json.loads(apps["other"]["routes"][0]["copy"])
+    assert other == {"mcpServers": {"orcaslicer": {"command": "uvx", "args": ["orcaslicer-mcp"]}}}
+    vs = json.loads(apps["vscode"]["routes"][0]["copy"])
+    assert vs == {"servers": {"orcaslicer": {"type": "stdio", "command": "uvx", "args": ["orcaslicer-mcp"]}}}
+    blob = json.dumps(apps)
+    assert tok not in blob and "ORCA_API_TOKEN" not in blob  # the connector finds the token by itself
 
 
-def test_config_tab_setup_names_a_changed_port():
-    tok = "b" * 48
-    assert _setup_text("code", tok, 13200)["text"] == (
-        f"claude mcp add --scope user orcaslicer --env ORCA_API_TOKEN={tok} "
-        "--env ORCA_API_URL=http://127.0.0.1:13200 -- uvx orcaslicer-mcp")
-    other = json.loads(_setup_text("other", tok, 13200)["text"])
-    assert other["mcpServers"]["orcaslicer"]["env"]["ORCA_API_URL"] == "http://127.0.0.1:13200"
-    assert "http://127.0.0.1:13200" in _setup_text("desktop", tok, 13200)["how"]
+def test_config_tab_one_click_links_carry_the_server_and_no_secret():
+    import base64
+    import urllib.parse
+    apps = _routes()
+    cur = apps["cursor"]["routes"][0]["open"]
+    assert cur.startswith("cursor://anysphere.cursor-deeplink/mcp/install?name=orcaslicer&config=")
+    conf = json.loads(base64.b64decode(urllib.parse.unquote(cur.split("config=", 1)[1])))
+    assert conf == {"command": "uvx", "args": ["orcaslicer-mcp"]}
+    vs = apps["vscode"]["routes"][0]["open"]
+    assert vs.startswith("https://vscode.dev/redirect/mcp/install?name=orcaslicer&config=")
+    assert json.loads(urllib.parse.unquote(vs.split("config=", 1)[1])) == {"type": "stdio", "command": "uvx",
+                                                                          "args": ["orcaslicer-mcp"]}
+    assert mod.openable(cur) and mod.openable(vs) and mod.openable(apps["claude"]["routes"][0]["open"])
+    assert not mod.openable("https://example.com/") and not mod.openable("file:///etc/passwd")
 
 
-def test_config_ui_fills_in_the_default_port(plugin):
+def test_config_tab_names_only_what_the_connector_cant_find_by_itself():
+    apps = _routes(port=13200, datadir="D:/Orca Data/profile")
+    code = apps["claude"]["routes"][1]["copy"]
+    assert code == ('claude mcp add --scope user orcaslicer --env ORCA_DATADIR="D:/Orca Data/profile" '
+                    "--env ORCA_API_URL=http://127.0.0.1:13200 -- uvx orcaslicer-mcp")
+    other = json.loads(apps["other"]["routes"][0]["copy"])
+    assert other["mcpServers"]["orcaslicer"]["env"] == {"ORCA_DATADIR": "D:/Orca Data/profile",
+                                                        "ORCA_API_URL": "http://127.0.0.1:13200"}
+    assert "ORCA_DATADIR = D:/Orca Data/profile" in apps["openai"]["routes"][0]["also"]
+
+
+def test_custom_datadir_is_named_only_when_orcaslicer_uses_its_own(monkeypatch, tmp_path):
+    std = tmp_path / "std" / "OrcaSlicer"
+    monkeypatch.setattr(mod, "standard_datadir", lambda: str(std))
+    assert mod.custom_datadir(str(std / "orca_plugins" / "plugin_data" / "orcaslicer_mcp_plugin")) is None
+    own = tmp_path / "own-datadir"
+    assert mod.custom_datadir(str(own / "orca_plugins" / "plugin_data" / "orcaslicer_mcp_plugin")) == str(own)
+    assert mod.custom_datadir("") is None
+
+
+def test_config_ui_fills_in_its_values(plugin):
     html = plugin.get_config_ui()
-    assert "__DEFAULT_PORT__" not in html and "DEFPORT = 13130" in html
-    assert html.index("<h2>Token</h2>") < html.index("<h2>Connect your AI app</h2>") < html.index("<h2>Assistant access</h2>")
+    for marker in ("__TOKEN__", "__PORT__", "__DEFAULT_PORT__", "__DATADIR__"):
+        assert marker not in html
+    assert "DEFPORT = 13130" in html and json.dumps(plugin._token) in html
+
+
+def test_config_tab_asks_the_plugin_to_open_links_and_hears_back(plugin, monkeypatch):
+    opened = []
+    monkeypatch.setattr(mod, "open_url", lambda url: opened.append(url) or True)
+    url = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"
+    S.config = {**S.config, "open": {"n": 1, "url": url}}
+    UI.run_blocking(plugin._poll_config)
+    assert opened == [url] and S.config["opened"] == {"n": 1, "ok": True}
+    UI.run_blocking(plugin._poll_config)  # the same request is not opened twice
+    assert opened == [url]
+    S.config = {**S.config, "open": {"n": 2, "url": "https://example.com/phish"}}
+    UI.run_blocking(plugin._poll_config)  # anything off the list is refused, and the page hears so
+    assert opened == [url] and S.config["opened"] == {"n": 2, "ok": False}

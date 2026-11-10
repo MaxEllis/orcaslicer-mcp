@@ -1456,6 +1456,49 @@ def request_permissions(wanted: dict) -> dict:
     return {}
 
 
+def standard_datadir() -> str:
+    """OrcaSlicer's settings folder when it isn't started with --datadir (orcaslicer-mcp discovery.py looks there)."""
+    home = os.path.expanduser("~")
+    if sys.platform.startswith("win"):
+        return os.path.join(os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming"), "OrcaSlicer")
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Application Support", "OrcaSlicer")
+    return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"), "OrcaSlicer")
+
+
+def custom_datadir(storage: str) -> str | None:
+    """The settings folder OrcaSlicer runs with, when it is not the standard one (then the connector needs
+    ORCA_DATADIR to find it). The plugin's storage is <datadir>/orca_plugins/plugin_data/<plugin>."""
+    if not storage:
+        return None
+    datadir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.normpath(storage))))
+    norm = lambda x: os.path.normcase(os.path.normpath(x))
+    return None if norm(datadir) == norm(standard_datadir()) else datadir
+
+
+# Links the Config tab may ask the plugin to open (it can't open anything itself); nothing else is opened.
+OPENABLE = ("https://github.com/MaxEllis/orcaslicer-mcp/releases/latest", "https://docs.astral.sh/uv/")
+OPENABLE_PREFIXES = ("cursor://anysphere.cursor-deeplink/mcp/install?", "https://vscode.dev/redirect/mcp/install?")
+
+
+def openable(url) -> bool:
+    return isinstance(url, str) and len(url) < 8000 and (url in OPENABLE or url.startswith(OPENABLE_PREFIXES))
+
+
+def open_url(url: str) -> bool:
+    """Through the system, as other OrcaSlicer plugins do (os.startfile on Windows, webbrowser elsewhere);
+    OrcaSlicer asks the person the first time."""
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(url)  # noqa: S606 - only links from OPENABLE reach here
+            return True
+        import webbrowser
+        return bool(webbrowser.open(url))
+    except Exception as e:
+        trace(f"open link failed: {type(e).__name__}: {e}")
+        return False
+
+
 # The connector finds OrcaSlicer by itself through this file (orcaslicer-mcp discovery.py), so the setup a user
 # pastes into their AI app carries no token. Written while the server runs, removed when it stops.
 CONNECTION_FILE = "connection.json"
@@ -2555,123 +2598,194 @@ def panel_page() -> str:
 CONFIG_HTML = """<!doctype html><html><head><meta charset="utf-8"><style>
 :root{--bg:var(--orca-bg,#2b2b2b);--fg:var(--orca-fg,#fafafa);--muted:var(--orca-muted,#b2b3b5);
 --line:var(--orca-border,#36363b);--accent:var(--orca-accent,#00675b);--accent-fg:var(--orca-accent-fg,#fff);
---edge:color-mix(in srgb,var(--fg) 22%,var(--bg))}
+--edge:color-mix(in srgb,var(--fg) 22%,var(--bg));--soft:color-mix(in srgb,var(--fg) 6%,var(--bg));
+--ok:#3fb27f;--wait:#d9a441;--off:#8a8a90;--bad:#e5484d}
 *{box-sizing:border-box}
-body{margin:0;padding:6px 16px;background:var(--bg);color:var(--fg);font:13px/1.45 var(--orca-font,"Segoe UI",system-ui,sans-serif)}
-h2{font-size:13px;font-weight:600;margin:0 0 4px}
-.sec{padding:8px 0;border-bottom:1px solid var(--line)} .sec:last-child{border-bottom:0}
-.muted{color:var(--muted);font-size:12px}
-.row{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
-.tok{flex:1;min-width:0;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;padding:5px 8px;border:1px solid var(--edge);
-border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}
-.tok.shown{white-space:normal;word-break:break-all;user-select:all}
-button{font:inherit;border-radius:4px;padding:4px 12px;cursor:pointer;border:1px solid var(--edge);background:transparent;color:var(--fg)}
-button:hover{border-color:var(--accent)} button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
-button.danger{background:#e5484d;border-color:#e5484d;color:#fff}
-input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:4px;padding:4px 6px}
-.note{color:var(--muted);font-size:12px;margin-top:6px} .note:empty{display:none}
-.switch{display:flex;align-items:center;gap:8px;cursor:pointer}
-select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:4px;padding:4px 6px}
-.snip{flex:1;min-width:0;margin:0;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;padding:6px 8px;border:1px solid var(--edge);border-radius:4px;white-space:pre-wrap;word-break:break-all;user-select:all;max-height:9.5em;overflow:auto}
+body{margin:0;padding:12px 16px 16px;background:var(--bg);color:var(--fg);font:13px/1.45 var(--orca-font,"Segoe UI",system-ui,sans-serif)}
+button{font:inherit;color:inherit;cursor:pointer}
+.status{display:flex;align-items:flex-start;gap:10px;padding:2px 0 12px;border-bottom:1px solid var(--line)}
+.dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:6px}
+.dot.wait{background:var(--wait)} .dot.ok{background:var(--ok)} .dot.off{background:var(--off)}
+.status .what{flex:1;min-width:0} .status .what b{font-weight:600;font-size:14px;display:block}
+.status .what span{color:var(--muted);font-size:12px}
+.switch{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;background:none;border:0;padding:0;margin-top:2px}
+.track{width:32px;height:18px;border-radius:9px;background:var(--edge);position:relative;transition:background .15s}
+.track::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--fg);transition:left .15s}
+.switch[aria-checked=true] .track{background:var(--accent)} .switch[aria-checked=true] .track::after{left:16px}
+h2{font-size:13px;font-weight:600;margin:14px 0 8px}
+.apps{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.apps button{aspect-ratio:1/1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
+border:1px solid var(--line);background:var(--soft);border-radius:8px;padding:6px 4px;font-size:11.5px;line-height:1.2;color:var(--muted)}
+.apps button svg{width:28px;height:28px;flex:none}
+.apps button:hover{border-color:var(--edge);color:var(--fg)}
+.apps button[aria-pressed=true]{border:1.5px solid var(--accent);color:var(--fg);background:color-mix(in srgb,var(--accent) 16%,var(--bg))}
+.steps{list-style:none;margin:12px 0 0;padding:0;counter-reset:s}
+.steps>li{display:grid;grid-template-columns:18px 1fr auto;gap:2px 8px;align-items:center;padding:6px 0}
+.steps>li::before{counter-increment:s;content:counter(s);color:var(--muted);align-self:start;padding-top:1px}
+.routes{grid-column:2 / 4;display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.route{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center;padding:7px 10px;border:1px solid var(--line);border-radius:6px}
+.route b{font-weight:600} .route small,.steps small{display:block;color:var(--muted);font-size:12px}
+.route.off{border-style:dashed} .route.off b{color:var(--muted);font-weight:500}
+.act{border-radius:4px;padding:4px 12px;border:1px solid var(--edge);background:transparent;white-space:nowrap}
+.act:hover{border-color:var(--accent)} .act.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.done{color:var(--ok);font-size:12px;white-space:nowrap} .warn{color:var(--bad);font-size:12px}
+.peek{grid-column:1 / 3;margin-top:2px} .peek summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none;width:max-content}
+.peek summary::-webkit-details-marker{display:none} .peek summary::before{content:"▸ ";font-size:10px} .peek[open] summary::before{content:"▾ "}
+.peek pre{margin:6px 0 0;padding:7px 9px;border:1px solid var(--line);border-radius:4px;background:var(--soft);
+font:12px/1.4 Consolas,"Cascadia Mono",monospace;white-space:pre-wrap;word-break:break-all;max-height:8em;overflow:auto;color:var(--muted)}
+.lnk{background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;text-underline-offset:2px;font-size:12px}
+.lnk.warn{color:var(--bad)}
+.again{margin-top:12px}
+details.adv{margin-top:16px;border-top:1px solid var(--line);padding-top:10px}
+details.adv>summary{cursor:pointer;color:var(--muted);list-style:none} details.adv>summary::-webkit-details-marker{display:none}
+details.adv>summary::before{content:"▸ ";font-size:10px} details.adv[open]>summary::before{content:"▾ "}
+.form{display:grid;grid-template-columns:70px 1fr;column-gap:10px;row-gap:4px;align-items:center;margin-top:10px}
+.form label{color:var(--muted)} .form .hint{color:var(--muted);font-size:12px} .form .gap{margin-top:10px}
+.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tok{font:12px Consolas,"Cascadia Mono",monospace;padding:4px 8px;border:1px solid var(--line);border-radius:4px;min-width:0;flex:1;
+overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none} .tok.shown{white-space:normal;word-break:break-all;user-select:all}
+input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:4px;padding:3px 6px}
+.muted{color:var(--muted)} .small{font-size:12px} .note:empty{display:none}
 </style></head><body>
-<div class="sec">
-  <h2>Token</h2>
-  <div class="muted">Paste this token into your AI app's OrcaSlicer MCP connector.</div>
-  <div class="row"><div id="tok" class="tok"></div><button id="copy" class="primary">Copy</button><button id="show">Show</button><button id="renew">New token</button></div>
-  <div id="tnote" class="note"></div>
-</div>
-<div class="sec">
+<div class="status" id="status"></div>
+<section id="connect">
   <h2>Connect your AI app</h2>
-  <div class="muted">Pick the app you use: copy what it needs, with your token already in it.</div>
-  <div class="row"><select id="app">
-    <option value="desktop">Claude Desktop</option>
-    <option value="code">Claude Code</option>
-    <option value="codex">Codex</option>
-    <option value="vscode">VS Code</option>
-    <option value="other">Other apps (Cursor, LM Studio...)</option>
-  </select></div>
-  <div id="how" class="note"></div>
-  <div class="row"><pre id="snip" class="snip"></pre><button id="copysnip">Copy</button></div>
-  <div id="snote" class="note"></div>
-</div>
-<div class="sec">
-  <h2>Assistant access</h2>
-  <div class="muted">While it is off, OrcaSlicer refuses everything the assistant asks.</div>
-  <div class="row"><button id="pause"></button><span id="pstate" class="muted"></span></div>
-</div>
-<div class="sec">
-  <h2>Port</h2>
-  <div class="muted">The connector reaches OrcaSlicer at <span id="addr"></span>. Only this computer can connect.
-  Change the port only if another program already uses it.</div>
-  <div class="row"><input id="port" type="number" min="1024" max="65535"><button id="saveport">Save</button></div>
-  <div id="pnote" class="note"></div>
-</div>
+  <div class="apps" id="apps" role="group" aria-label="Your AI app"></div>
+  <ol class="steps" id="steps"></ol>
+</section>
+<button class="lnk again" id="again" hidden>Connect another app</button>
+<details class="adv" id="adv">
+  <summary>Token and port</summary>
+  <p class="muted small" style="margin:8px 0 0">AI apps on this computer find OrcaSlicer by themselves. The token is only for an AI app on another computer.</p>
+  <div class="form">
+    <label>Token</label>
+    <div class="inline"><span class="tok" id="tok"></span><button class="lnk" id="show">Show</button><button class="lnk" id="copytok">Copy</button></div>
+    <span></span>
+    <div class="hint"><button class="lnk warn" id="renew">Make a new token</button> <span id="tnote">Apps set up with the old one stop connecting.</span></div>
+    <label class="gap">Port</label>
+    <div class="inline gap"><input type="number" id="port" min="1024" max="65535"><button class="lnk" id="saveport">Save</button></div>
+    <span></span>
+    <div class="hint" id="pnote">Change it only if another program uses it. Only this computer can connect.</div>
+  </div>
+</details>
 <script>
-var TOKEN = __TOKEN__, LISTENING = __PORT__, DEFPORT = __DEFAULT_PORT__, shown = false, armed = null, noteTimer = {};
-var RELEASES = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest", UV = "https://docs.astral.sh/uv/";
-// What each AI app needs. tok is the token as shown (dots until Show) or as copied (always the real one).
-function setup(app, tok){
-  var url = "http://127.0.0.1:" + LISTENING, moved = LISTENING !== DEFPORT;
-  var env = " --env ORCA_API_TOKEN=" + tok + (moved ? " --env ORCA_API_URL=" + url : "");
-  if (app === "desktop") return { how: "Download the orcaslicer-mcp .mcpb file from this page, open it, and paste the token above into its settings" +
-      (moved ? "; set its OrcaSlicer address to " + url : "") + ". Nothing else to install.", text: RELEASES, copy: "Copy link" };
-  if (app === "code") return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Run this once in a terminal, then start a new Claude Code session.",
-      text: "claude mcp add --scope user orcaslicer" + env + " -- uvx orcaslicer-mcp", copy: "Copy" };
-  if (app === "codex") return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Run this once in a terminal, then start a new Codex session.",
-      text: "codex mcp add orcaslicer" + env + " -- uvx orcaslicer-mcp", copy: "Copy" };
-  var e = { ORCA_API_TOKEN: tok }; if (moved) e.ORCA_API_URL = url;
-  if (app === "vscode") return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Add this to .vscode/mcp.json, or to your user MCP settings (MCP: Open User Configuration).",
-      text: JSON.stringify({ servers: { orcaslicer: { type: "stdio", command: "uvx", args: ["orcaslicer-mcp"], env: e } } }, null, 2), copy: "Copy" };
-  return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Add this to the app's MCP settings.",
-      text: JSON.stringify({ mcpServers: { orcaslicer: { command: "uvx", args: ["orcaslicer-mcp"], env: e } } }, null, 2), copy: "Copy" };
-}
-var cfg = window.orca.getConfig() || {};
+var TOKEN = __TOKEN__, LISTENING = __PORT__, DEFPORT = __DEFAULT_PORT__, DATADIR = __DATADIR__;
+var RELEASES = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest";
+var ASK = "Which printer is OrcaSlicer set up for?";
+var A = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
+var ICON = {
+  claude: '<svg ' + A + '><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4.5 3.5V17H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>',
+  openai: '<svg ' + A + '><path d="M8.5 4.5c-2 0-2.5 1-2.5 2.5v2.5c0 1.2-.8 2.5-2.5 2.5 1.7 0 2.5 1.3 2.5 2.5V17c0 1.5.5 2.5 2.5 2.5M15.5 4.5c2 0 2.5 1 2.5 2.5v2.5c0 1.2.8 2.5 2.5 2.5-1.7 0-2.5 1.3-2.5 2.5V17c0 1.5-.5 2.5-2.5 2.5"/></svg>',
+  cursor: '<svg ' + A + '><path d="M5 3.5 18.5 10l-6 1.8-2.4 6.2z"/></svg>',
+  vscode: '<svg ' + A + '><path d="M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5M13.5 4.5l-3 15"/></svg>',
+  other: '<svg ' + A + '><path d="M9 3v5M15 3v5M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0zM12 17v4"/></svg>'
+};
+// What the connector needs besides itself: nothing on a standard install. A changed port or OrcaSlicer's own
+// settings folder (--datadir) are the only things it can't find by itself. No token, ever.
+function envs(){ var e = {}; if (DATADIR) e.ORCA_DATADIR = DATADIR; if (LISTENING !== DEFPORT) e.ORCA_API_URL = "http://127.0.0.1:" + LISTENING; return e; }
+function envArgs(){ var e = envs(); return Object.keys(e).map(function(k){ return " --env " + k + "=" + (/ /.test(e[k]) ? '"' + e[k] + '"' : e[k]); }).join(""); }
+function server(extra){ var o = Object.assign({}, extra || {}, { command: "uvx", args: ["orcaslicer-mcp"] }); var e = envs(); if (Object.keys(e).length) o.env = e; return o; }
+function b64(s){ return btoa(unescape(encodeURIComponent(s))); }
+var APPS = [
+  { id: "claude", name: "Claude", ask: "Ask Claude", routes: [
+      { label: "Claude app", hint: "For chats. Download the extension, then open the file.", act: "Download", primary: true, open: function(){ return RELEASES; } },
+      { label: "Claude Code", hint: "In a terminal, an editor or the app's Code tab. Needs uv.", act: "Copy command",
+        copy: function(){ return "claude mcp add --scope user orcaslicer" + envArgs() + " -- uvx orcaslicer-mcp"; } } ] },
+  { id: "openai", name: "OpenAI", ask: "In a Codex chat, ask", routes: [
+      { label: "ChatGPT desktop app", hint: "Settings › Plugins › MCPs › Add, choose STDIO and paste this. Works in Codex chats; ordinary ChatGPT chats can't use it yet.",
+        act: "Copy", primary: true, copy: function(){ return "uvx orcaslicer-mcp"; }, also: function(){ var e = envs(); return Object.keys(e).length ? "Also add " + Object.keys(e).map(function(k){ return k + " = " + e[k]; }).join(", ") + " as an environment variable." : ""; } },
+      { label: "Codex in a terminal or editor", hint: "Run this once. The desktop app shares the setting.", act: "Copy command",
+        copy: function(){ return "codex mcp add orcaslicer" + envArgs() + " -- uvx orcaslicer-mcp"; } },
+      { label: "ChatGPT on the web or phone", hint: "Can't connect: it only reaches servers on the internet, not programs on your computer.", off: true } ] },
+  { id: "cursor", name: "Cursor", ask: "Ask Cursor", routes: [
+      { label: "Add to Cursor", hint: "Cursor opens and asks you to confirm. Needs uv.", act: "Add to Cursor", primary: true,
+        open: function(){ return "cursor://anysphere.cursor-deeplink/mcp/install?name=orcaslicer&config=" + encodeURIComponent(b64(JSON.stringify(server()))); },
+        copy: function(){ return JSON.stringify({ mcpServers: { orcaslicer: server() } }, null, 2); }, copyLabel: "Copy settings instead" } ] },
+  { id: "vscode", name: "VS Code", ask: "Ask Copilot", routes: [
+      { label: "Add to VS Code", hint: "VS Code opens and asks you to confirm. Needs uv.", act: "Add to VS Code", primary: true,
+        open: function(){ return "https://vscode.dev/redirect/mcp/install?name=orcaslicer&config=" + encodeURIComponent(JSON.stringify(server({ type: "stdio" }))); },
+        copy: function(){ return JSON.stringify({ servers: { orcaslicer: server({ type: "stdio" }) } }, null, 2); }, copyLabel: "Copy .vscode/mcp.json settings instead" } ] },
+  { id: "other", name: "Other app", ask: "Ask your app", routes: [
+      { label: "Your app's MCP settings", hint: "LM Studio, Windsurf and most others take this form. Needs uv.", act: "Copy settings", primary: true,
+        copy: function(){ return JSON.stringify({ mcpServers: { orcaslicer: server() } }, null, 2); } } ] }
+];
+var cfg = window.orca.getConfig() || {}, S = { app: "claude", done: null, open: false, shown: false, opening: null }, armed = null;
 function $(i){ return document.getElementById(i); }
-function save(patch){ var c = Object.assign({}, cfg, patch); window.orca.saveConfig(c); cfg = c; draw(); }
-function draw(){
-  var off = cfg.paused === true;
-  $("pause").textContent = off ? "Turn on" : "Turn off"; $("pause").className = off ? "primary" : "";
-  $("pstate").textContent = off ? "Off: requests are refused" : "On";
-  $("tok").textContent = shown ? TOKEN : "•".repeat(16); $("tok").className = "tok" + (shown ? " shown" : "");
-  $("show").textContent = shown ? "Hide" : "Show";
+function esc(t){ return String(t).replace(/[&<>"]/g, function(c){ return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+function save(patch){ cfg = Object.assign({}, cfg, patch); window.orca.saveConfig(cfg); draw(); }
+function ago(t){ var s = Math.max(0, Math.round(Date.now() / 1000 - t)); if (s < 90) return "just now";
+  var m = Math.round(s / 60); if (m < 60) return m + " minutes ago"; var h = Math.round(m / 60); if (h < 36) return h + (h === 1 ? " hour ago" : " hours ago");
+  var d = Math.round(h / 24); return d + " days ago"; }
+function copyText(text, done){
+  function fallback(){ var a = document.createElement("textarea"); a.value = text; document.body.appendChild(a); a.select();
+    var ok = false; try { ok = document.execCommand("copy"); } catch (e) {} document.body.removeChild(a); done(ok); }
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function(){ done(true); }, fallback); else fallback();
+}
+function drawStatus(){
+  var off = cfg.paused === true, st = cfg.status || {}, h;
+  if (off) h = '<span class="dot off"></span><div class="what"><b>Paused</b><span>OrcaSlicer refuses your AI app’s requests.</span></div>';
+  else if (st.seen) h = '<span class="dot ok"></span><div class="what"><b>' + esc(st.app ? "Connected to " + st.app : "Connected") + '</b><span>Last request ' + ago(st.seen) + '</span></div>';
+  else h = '<span class="dot wait"></span><div class="what"><b>Waiting for your AI app</b><span>Turns green when it connects.</span></div>';
+  h += '<button class="switch" role="switch" id="sw" aria-checked="' + !off + '" aria-label="Assistant access"><span>Assistant access</span><span class="track"></span></button>';
+  $("status").innerHTML = h;
+  $("sw").onclick = function(){ save({ paused: !(cfg.paused === true) }); };
+}
+function drawConnect(){
+  var connected = !!(cfg.status && cfg.status.seen) && !S.open;
+  $("connect").hidden = connected; $("again").hidden = !connected;
+  if (connected) return;
+  $("apps").innerHTML = APPS.map(function(a){ return '<button data-app="' + a.id + '" aria-pressed="' + (a.id === S.app) + '">' + ICON[a.id] + '<span>' + esc(a.name) + '</span></button>'; }).join("");
+  [].forEach.call($("apps").children, function(b){ b.onclick = function(){ S.app = b.getAttribute("data-app"); S.done = null; draw(); }; });
+  var app = APPS.filter(function(a){ return a.id === S.app; })[0];
+  var routes = app.routes.map(function(r, j){
+    var right = r.off ? "<span></span>" : (S.done === j ? '<span class="done">' + (r.open ? "Opening…" : "Copied") + "</span>" :
+      '<button class="act' + (r.primary ? " primary" : "") + '" data-r="' + j + '">' + esc(r.act) + "</button>");
+    var also = r.also && r.also() ? "<small>" + esc(r.also()) + "</small>" : "";
+    var peek = r.copy && !r.off ? '<details class="peek"><summary>' + esc(r.open ? r.copyLabel : "Show what it copies") + '</summary><pre>' + esc(r.copy()) + "</pre>" +
+      (r.open ? '<button class="lnk" data-c="' + j + '">Copy</button>' : "") + "</details>" : "";
+    var failed = S.opening && S.opening.r === j && S.opening.failed ? '<span class="warn" style="grid-column:1 / 3">Couldn’t open it from OrcaSlicer: the link is copied, paste it in your browser.</span>' : "";
+    return '<div class="route' + (r.off ? " off" : "") + '"><div><b>' + esc(r.label) + "</b><small>" + esc(r.hint) + "</small>" + also + "</div>" + right + peek + failed + "</div>";
+  }).join("");
+  $("steps").innerHTML = '<li><span>Set it up where you use ' + esc(app.name === "Other app" ? "your app" : app.name) + '</span><span></span><div class="routes">' + routes + "</div></li>" +
+    '<li><span>' + esc(app.ask) + ": “" + esc(ASK) + '”</span><button class="act" id="askcopy">Copy</button></li>';
+  [].forEach.call($("steps").querySelectorAll("[data-r]"), function(b){ b.onclick = function(){
+    var j = Number(b.getAttribute("data-r")), r = app.routes[j];
+    if (r.open) { var n = (cfg.open && cfg.open.n || 0) + 1; S.opening = { n: n, r: j, url: r.open(), failed: false }; S.done = j; save({ open: { n: n, url: S.opening.url } }); }
+    else copyText(r.copy(), function(ok){ S.done = ok ? j : null; draw(); });
+  }; });
+  [].forEach.call($("steps").querySelectorAll("[data-c]"), function(b){ b.onclick = function(){ var r = app.routes[Number(b.getAttribute("data-c"))]; copyText(r.copy(), function(){ b.textContent = "Copied"; }); }; });
+  $("askcopy").onclick = function(){ copyText(ASK, function(ok){ if (ok) $("askcopy").textContent = "Copied"; }); };
+}
+function drawAdv(){
+  $("tok").textContent = S.shown ? TOKEN : "•".repeat(16); $("tok").className = "tok" + (S.shown ? " shown" : "");
+  $("show").textContent = S.shown ? "Hide" : "Show";
   if (document.activeElement !== $("port")) $("port").value = cfg.port || LISTENING;
-  $("addr").textContent = "http://127.0.0.1:" + LISTENING;
-  var d = setup($("app").value, shown ? TOKEN : "•".repeat(16));
-  // A link wraps at its slashes, not mid-word (Copy takes setup()'s text, without the break hints).
-  $("how").textContent = d.how; $("copysnip").textContent = d.copy;
-  $("snip").textContent = d.copy === "Copy link" ? d.text.split("/").join("/\\u200b") : d.text;
-  $("snip").style.wordBreak = d.copy === "Copy link" ? "normal" : "";
 }
-// A short confirmation ("Copied.") clears itself; a note that asks for something stays until replaced.
-function note(id, t, fade){ clearTimeout(noteTimer[id]); $(id).textContent = t;
-  if (fade) noteTimer[id] = setTimeout(function(){ $(id).textContent = ""; }, 3000); }
-$("pause").onclick = function(){ save({ paused: !(cfg.paused === true) }); };
-$("show").onclick = function(){ shown = !shown; draw(); };
-function copyText(text, id, failed){
-  function fallback(){ var a=document.createElement("textarea"); a.value=text; document.body.appendChild(a); a.select();
-    var ok=false; try{ ok=document.execCommand("copy"); }catch(e){} document.body.removeChild(a);
-    note(id, ok ? "Copied." : failed, ok); }
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function(){ note(id,"Copied.",true); }, fallback);
-  else fallback();
-}
-$("copy").onclick = function(){ copyText(TOKEN, "tnote", "Copy failed: press Show and select the token."); };
-$("copysnip").onclick = function(){ copyText(setup($("app").value, TOKEN).text, "snote", "Copy failed: press Show above, then select the text."); };
-$("app").onchange = function(){ note("snote", ""); draw(); };
+function draw(){ drawStatus(); drawConnect(); drawAdv(); }
+$("again").onclick = function(){ S.open = true; draw(); };
+$("show").onclick = function(){ S.shown = !S.shown; drawAdv(); };
+$("copytok").onclick = function(){ copyText(TOKEN, function(ok){ $("copytok").textContent = ok ? "Copied" : "Copy failed: press Show"; }); };
 $("renew").onclick = function(){
-  if (armed) { clearTimeout(armed); armed = null; $("renew").textContent = "New token"; $("renew").className = "";
-    save({ renew: (cfg.renew || 0) + 1 });
-    note("tnote", "A new token is being made. Reopen this tab to see it, then paste it into your AI app's connector."); return; }
-  $("renew").textContent = "Confirm"; $("renew").className = "danger";
-  note("tnote", "Your AI app stops reaching OrcaSlicer until you paste the new token. Click Confirm to continue.");
-  armed = setTimeout(function(){ armed = null; $("renew").textContent = "New token"; $("renew").className = ""; note("tnote",""); }, 4000);
+  if (armed) { clearTimeout(armed); armed = null; $("renew").textContent = "Make a new token";
+    save({ renew: (cfg.renew || 0) + 1 }); $("tnote").textContent = "A new token is being made. Reopen this tab to see it."; return; }
+  $("renew").textContent = "Click again to confirm"; $("tnote").textContent = "Apps set up with the old token stop connecting.";
+  armed = setTimeout(function(){ armed = null; $("renew").textContent = "Make a new token"; }, 4000);
 };
 $("saveport").onclick = function(){
   var p = parseInt($("port").value, 10);
-  if (!(p >= 1024 && p <= 65535)) { note("pnote", "Use a number from 1024 to 65535."); return; }
+  if (!(p >= 1024 && p <= 65535)) { $("pnote").textContent = "Use a number from 1024 to 65535."; return; }
   save({ port: p });
-  note("pnote", p === LISTENING ? "Saved." : "Saved. It takes effect after OrcaSlicer restarts (or the plugin is deactivated and activated), and the connector must use the new port too.", p === LISTENING);
+  $("pnote").textContent = p === LISTENING ? "Saved." : "Saved. It takes effect after OrcaSlicer restarts (or the plugin is deactivated and activated).";
 };
-window.orca.onConfig(function(c){ cfg = c || {}; draw(); });
+// The plugin saves the connection status and the result of opening a link in these same settings.
+function refresh(){
+  var c = window.orca.getConfig() || {};
+  var failedNow = S.opening && c.opened && c.opened.n === S.opening.n && !c.opened.ok && !S.opening.failed;
+  if (failedNow) { S.opening.failed = true; copyText(S.opening.url, function(){}); }
+  if (failedNow || JSON.stringify(c) !== JSON.stringify(cfg)) { cfg = c; draw(); }
+}
+if (window.orca.onConfig) window.orca.onConfig(function(c){ cfg = c || {}; draw(); });
+setInterval(refresh, 2000);
 draw();
 </script></body></html>"""
 
@@ -2699,6 +2813,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         self._error = ""
         self._paused = False
         self._renew_seen = 0
+        self._open_seen = 0
         self._last_tick = 0.0
         self._seen = None          # (time, app) of the last accepted request, from the server thread
         self._seen_written = None  # the (time, app) last saved for the Config tab
@@ -2714,7 +2829,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
 
     def get_config_ui(self):
         return CONFIG_HTML.replace("__TOKEN__", _inline(self._token)).replace("__PORT__", _inline(self._port)) \
-            .replace("__DEFAULT_PORT__", _inline(DEFAULT_PORT))
+            .replace("__DEFAULT_PORT__", _inline(DEFAULT_PORT)).replace("__DATADIR__", _inline(custom_datadir(self._folder)))
 
     def get_default_config(self):
         return {"port": DEFAULT_PORT, "paused": False, "renew": 0}
@@ -2760,6 +2875,16 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         if isinstance(renew, int) and not isinstance(renew, bool) and renew > self._renew_seen:
             self._renew_seen = renew
             self._renew_token()
+        req = cfg.get("open")
+        n = req.get("n") if isinstance(req, dict) else None
+        if isinstance(n, int) and not isinstance(n, bool) and n > self._open_seen:
+            self._open_seen = n
+            url = req.get("url")
+            ok = openable(url) and open_url(url)
+            try:
+                self.save_config(json.dumps({**self._read_config(), "opened": {"n": n, "ok": bool(ok)}}))
+            except Exception as e:
+                trace(f"open result not saved: {type(e).__name__}: {e}")
 
     def _renew_token(self) -> None:
         try:
@@ -2792,6 +2917,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             self._paused = cfg.get("paused") is True
             renew = cfg.get("renew", 0)
             self._renew_seen = renew if isinstance(renew, int) and not isinstance(renew, bool) else 0
+            opened = (cfg.get("open") or {}).get("n", 0) if isinstance(cfg.get("open"), dict) else 0
+            self._open_seen = opened if isinstance(opened, int) and not isinstance(opened, bool) else 0
             self._token = load_or_create_token(self._folder)
             port = settings.get("port") if "port" in settings else cfg.get("port", DEFAULT_PORT)
             self._port = port if isinstance(port, int) and not isinstance(port, bool) and \

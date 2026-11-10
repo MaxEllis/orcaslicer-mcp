@@ -67,9 +67,9 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
 
   Tick **Activate**. OrcaSlicer then shows **Plugin permissions**: network access to `127.0.0.1`, which means this computer only; permission to create a thread, which keeps the connection running; and read access to OrcaSlicer's own temporary `orcaslicer_model` folder, where it saves the G-code of each slice. Choose **Yes**; **No** stops the plugin. The plugin's panel then opens beside the 3D view and walks you through step 2. Use one install or the other: in the build, the plugin stays off.
 
-**2. Add the connector to your AI app.**
-- **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest), and open it. Nothing else to install, and its token field stays empty.
-- **Other apps (Cursor, LM Studio and the like):** install [uv](https://docs.astral.sh/uv/getting-started/installation/) once, a small tool that runs the connector: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS and Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows. Then add this to the app's MCP settings:
+**2. Add the connector to your AI app.** Every app runs the connector with [uv](https://docs.astral.sh/uv/getting-started/installation/), a small free tool, so install it once: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS and Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows. Then:
+- **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest), and open it. Its token field stays empty.
+- **Other apps (Cursor, LM Studio and the like):** add this to the app's MCP settings:
 
   ```json
   {

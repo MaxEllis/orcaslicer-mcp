@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- The README and the OrcaSlicer MCP plugin's setup (0.2.2) say that every AI app needs uv installed once, the Claude Desktop extension included: it runs the connector with uv too. The extension's description now also lists the plugin on stock OrcaSlicer 2.5, not only the OrcaSlicer MCP build.
+- orcaslicer-mcp now tells you when your plugin is older than 0.2.2.
+
 ## [0.1.23] - 2026-11-11
 The OrcaSlicer MCP plugin 0.2.1 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.
 

@@ -5,7 +5,7 @@
 # name = "OrcaSlicer MCP"
 # description = "Lets an AI assistant read your OrcaSlicer setup, change settings and read the slices you make, through the orcaslicer-mcp server. Loading models, starting a slice, plates, renders and projects need the OrcaSlicer MCP build."
 # author = "Max Ellis"
-# version = "0.2.1"
+# version = "0.2.2"
 # ///
 """OrcaSlicer MCP: part of the OrcaSlicer MCP Remote API, served by a plugin on stock OrcaSlicer 2.5.
 
@@ -58,7 +58,7 @@ import urllib.parse
 
 import orca
 
-PLUGIN_VERSION = "0.2.1"
+PLUGIN_VERSION = "0.2.2"
 DEFAULT_PORT = 13130
 BIND_HOST = "127.0.0.1"
 MAX_BODY = 4 * 1024 * 1024
@@ -1526,16 +1526,16 @@ def setup_apps(datadir: str | None) -> list[dict]:
     also = ("Also add " + ", ".join(f"{k} = {v}" for k, v in env.items()) + " as an environment variable.") if env else ""
     return [
         {"id": "claude", "name": "Claude", "where": "Claude", "routes": [
-            route("Claude app", "For chats. Download the extension, then open the file.", "Download", primary=True,
+            route("Claude app", "For chats. Download the extension, then open the file. Needs uv.", "Download", primary=True,
                   open=RELEASES_URL, also=("In the extension's settings, set OrcaSlicer settings folder to "
                                            + datadir + ".") if datadir else ""),
             route("Claude Code", "In a terminal, an editor or the app's Code tab. Needs uv.", "Copy command",
                   copy=cmd("claude mcp add --scope user orcaslicer"))]},
         {"id": "openai", "name": "OpenAI", "where": "OpenAI", "routes": [
             route("ChatGPT desktop app", "Settings › Plugins › MCPs › Add, choose STDIO and paste this. Works in Codex "
-                  "chats; ordinary ChatGPT chats can't use it yet.", "Copy", primary=True, copy="uvx orcaslicer-mcp",
+                  "chats; ordinary ChatGPT chats can't use it yet. Needs uv.", "Copy", primary=True, copy="uvx orcaslicer-mcp",
                   also=also),
-            route("Codex in a terminal or editor", "Run this once. The desktop app shares the setting.", "Copy command",
+            route("Codex in a terminal or editor", "Run this once. The desktop app shares the setting. Needs uv.", "Copy command",
                   copy=cmd("codex mcp add orcaslicer")),
             route("ChatGPT on the web or phone", "Can't connect: it only reaches servers on the internet, not programs "
                   "on your computer.", "", off=True)]},

@@ -2553,7 +2553,8 @@ select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--
     <option value="desktop">Claude Desktop</option>
     <option value="code">Claude Code</option>
     <option value="codex">Codex</option>
-    <option value="other">Other apps (Cursor, VS Code, LM Studio...)</option>
+    <option value="vscode">VS Code</option>
+    <option value="other">Other apps (Cursor, LM Studio...)</option>
   </select></div>
   <div id="how" class="note"></div>
   <div class="row"><pre id="snip" class="snip"></pre><button id="copysnip">Copy</button></div>
@@ -2581,10 +2582,12 @@ function setup(app, tok){
   if (app === "desktop") return { how: "Download the orcaslicer-mcp .mcpb file from this page, open it, and paste the token above into its settings" +
       (moved ? "; set its OrcaSlicer address to " + url : "") + ". Nothing else to install.", text: RELEASES, copy: "Copy link" };
   if (app === "code") return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Run this once in a terminal, then start a new Claude Code session.",
-      text: "claude mcp add --scope user" + env + " orcaslicer -- uvx orcaslicer-mcp", copy: "Copy" };
+      text: "claude mcp add --scope user orcaslicer" + env + " -- uvx orcaslicer-mcp", copy: "Copy" };
   if (app === "codex") return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Run this once in a terminal, then start a new Codex session.",
       text: "codex mcp add orcaslicer" + env + " -- uvx orcaslicer-mcp", copy: "Copy" };
   var e = { ORCA_API_TOKEN: tok }; if (moved) e.ORCA_API_URL = url;
+  if (app === "vscode") return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Add this to .vscode/mcp.json, or to your user MCP settings (MCP: Open User Configuration).",
+      text: JSON.stringify({ servers: { orcaslicer: { type: "stdio", command: "uvx", args: ["orcaslicer-mcp"], env: e } } }, null, 2), copy: "Copy" };
   return { how: "Needs uv, a small tool that runs the connector (" + UV + "). Add this to the app's MCP settings.",
       text: JSON.stringify({ mcpServers: { orcaslicer: { command: "uvx", args: ["orcaslicer-mcp"], env: e } } }, null, 2), copy: "Copy" };
 }

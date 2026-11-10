@@ -20,10 +20,11 @@ def store(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _add(est, took, version=None, result="success", n=1):
+def _add(est, took, version=None, result="success", n=1, printer="unknown"):
     for i in range(n):
         settings = {"layer_height": "0.2", **({forecast.VERSION_KEY: version} if version else {})}
-        rid = outcomes.record_slice(f"p{est}-{took}-{version}-{i}.gcode", "m", "h", settings, est_time_s=est)
+        rid = outcomes.record_slice(f"p{est}-{took}-{version}-{printer}-{i}.gcode", "m", "h", settings,
+                                    est_time_s=est, printer_id=printer)
         conn = outcomes.connect()
         conn.execute("UPDATE prints SET result=?, duration_s=?, printed_at=? WHERE id=?",
                      (result, took, 1_000_000 + rid, rid))
@@ -41,13 +42,27 @@ def test_no_store_or_too_few_prints_gives_no_forecast(tmp_path, monkeypatch):
 
 def test_the_median_ratio_corrects_the_estimate(store):
     _add(3600, 3960, n=3)                  # +10 %
-    _add(1800, 1800)                       # on time
+    _add(4000, 4000)                       # on time
     _add(3600, 3600 * 4)                   # a paused job: left out
     _add(3600, 100, result="cancelled")    # not finished: left out
     fc = forecast.time_forecast(6000)
     assert fc["based_on"] == 4 and fc["ratio"] == 1.1 and fc["expected_s"] == 6600
     assert fc["summary"].startswith("Expect about 1 h 50 min from start to finish, heat-up included")
-    assert "10% longer" in fc["summary"] and fc["same_version"] is False
+    assert "10% longer" in fc["summary"] and "similar length" in fc["summary"] and fc["same_version"] is False
+
+
+def test_short_prints_do_not_forecast_a_long_one(store):
+    _add(356, 560, n=5)                    # the cube: +57 %, mostly heat-up
+    assert forecast.time_forecast(4.5 * 3600) is None
+    _add(4 * 3600, 4.2 * 3600, n=3)
+    assert forecast.time_forecast(4.5 * 3600)["ratio"] == 1.05
+
+
+def test_another_printers_prints_are_left_out(store):
+    _add(3600, 3600 * 1.4, printer="other", n=5)
+    _add(3600, 3600 * 1.05, printer="printer-a", n=3)
+    assert forecast.time_forecast(3600, printer_id="printer-a")["ratio"] == 1.05
+    assert forecast.time_forecast(3600, printer_id="nobody") is None
 
 
 def test_prints_from_the_same_orcaslicer_version_are_preferred(store):

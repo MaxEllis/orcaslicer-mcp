@@ -202,3 +202,33 @@ def test_the_server_sends_instructions_that_fit_what_clients_keep():
 def test_everyday_settings_rank_before_advanced_ones_on_a_tie():
     keys = [h["key"] for h in settings_schema.search("infill density", 3)]
     assert keys[0] == "sparse_infill_density"
+
+
+def test_renames_that_would_change_the_meaning_are_not_made():
+    """Reviewer findings: list_objects reports offset/rotation as absolute values while translate/rotate are
+    relative; slice_and_wait(wait=true) must not become timeout=1; an object index is not an object id."""
+    assert normalize_arguments(_schema("transform_object"), {"object_id": 1, "offset": [50, 117, 10]})[0] == {
+        "object_id": 1, "offset": [50, 117, 10]}
+    assert normalize_arguments(_schema("transform_object"), {"object_id": 1, "rotation": [0, 0, 90]})[0] == {
+        "object_id": 1, "rotation": [0, 0, 90]}
+    assert normalize_arguments(_schema("slice_and_wait"), {"wait": True})[0] == {"wait": True}
+    assert normalize_arguments(_schema("delete_object"), {"object_index": 0})[0] == {"object_index": 0}
+
+
+def test_a_rename_needs_a_value_of_the_right_type():
+    # id -> object_id only for a number (or a number as text), never for a dict or a boolean
+    assert normalize_arguments(_schema("delete_object"), {"id": {"x": 1}})[0] == {"id": {"x": 1}}
+    assert normalize_arguments(_schema("delete_object"), {"id": True})[0] == {"id": True}
+    assert normalize_arguments(_schema("delete_object"), {"id": "3"})[0] == {"object_id": "3"}
+    # settings -> changes only for an object
+    assert normalize_arguments(_schema("set_config"), {"settings": "layer_height"})[0] == {"settings": "layer_height"}
+
+
+@respx.mock
+async def test_null_on_a_mistyped_key_is_an_error_not_already_saved():
+    respx.get(f"{BASE}/api/v1/status").mock(return_value=httpx.Response(200, json=_status(
+        {"print": [], "filament": [], "printer": []})))
+    respx.get(f"{BASE}/api/v1/config").mock(return_value=httpx.Response(200, json={"config": {"layer_height": "0.2"}}))
+    put = respx.put(f"{BASE}/api/v1/config")
+    out = await srv.set_config({"layer_height": 0.3, "wal_loops": None})
+    assert not put.called and out["errors"]["wal_loops"].startswith("unknown_setting") and out["applied"] == []

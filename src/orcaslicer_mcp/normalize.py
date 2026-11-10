@@ -16,6 +16,7 @@ Anything that still does not fit is left alone, for the validator to report.
 """
 from __future__ import annotations
 
+import json
 import re
 
 # What agents send -> names our tools take. Several targets per alias: the first one the tool takes wins.
@@ -25,7 +26,6 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "setting": ("key", "keys"), "setting_key": ("key", "keys"), "name": ("key",), "keys": ("key",),
     "setting_keys": ("keys",), "settings_keys": ("keys",),
     "id": ("object_id",), "object": ("object_id",), "obj": ("object_id",), "obj_id": ("object_id",),
-    "object_index": ("object_id",),
     "q": ("query",), "text": ("query",), "search": ("query",), "term": ("query",), "keyword": ("query",),
     "keywords": ("query",), "filter": ("query",),
     "plate": ("index",), "plate_index": ("index", "plate"), "plate_id": ("index", "plate"),
@@ -34,9 +34,10 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "model": ("path", "model_name"),
     "preset": ("name",), "preset_name": ("name",), "preset_type": ("type",), "kind": ("type",),
     "group": ("type",),
-    "translation": ("translate",), "move": ("translate",), "offset": ("translate",),
-    "rotation": ("rotate",), "scaling": ("scale",), "scale_factor": ("scale",),
-    "timeout_seconds": ("timeout", "timeout_s"), "timeout": ("timeout_s",), "wait": ("timeout", "timeout_s"),
+    # Not offset/rotation: list_objects reports those as absolute values, and translate/rotate are relative.
+    "translation": ("translate",), "move": ("translate",),
+    "scaling": ("scale",), "scale_factor": ("scale",),
+    "timeout_seconds": ("timeout", "timeout_s"), "timeout": ("timeout_s",),
     "max_results": ("limit",), "count": ("limit",), "n": ("limit",),
     "destination": ("to",), "dest": ("to",), "target": ("to",), "new_path": ("to",),
     "directory": ("dir",), "folder": ("dir",),
@@ -74,6 +75,40 @@ def _item_types(prop: dict) -> set[str]:
     return set()
 
 
+def _fits(value, prop: dict) -> bool:
+    """Whether a value's JSON type is one the target argument takes, counting the forms the second pass turns
+    into it (a single value or a comma list for a list argument, a one-item list for a single value). A rename
+    that would change the meaning (slice_and_wait(wait=true) read as timeout=1) is refused this way."""
+    types = _types(prop)
+    if not types:
+        return True
+    if value is None:
+        return "null" in types
+    if isinstance(value, bool):
+        kinds = {"boolean"}
+    elif isinstance(value, int):
+        kinds = {"integer", "number"}
+    elif isinstance(value, float):
+        kinds = {"number"}
+    elif isinstance(value, str):
+        kinds = {"string"}
+    elif isinstance(value, list):
+        kinds = {"array"} | ({"string", "integer", "number", "boolean"} if len(value) == 1 else set())
+    elif isinstance(value, dict):
+        kinds = {"object"}
+    else:
+        return False
+    if "array" in types and not isinstance(value, (list, dict)):
+        kinds = kinds | {"array"}
+    if isinstance(value, str) and "string" not in types:
+        try:  # a number, list or object written as JSON text: the SDK parses those
+            parsed = json.loads(value)
+        except (ValueError, RecursionError):
+            return "array" in types  # a word or a comma list still becomes a list
+        return not isinstance(parsed, str) and _fits(parsed, prop)
+    return bool(kinds & types)
+
+
 def _candidates(name: str) -> list[str]:
     snake = _snake(name)
     cands = [snake]
@@ -98,7 +133,7 @@ def normalize_arguments(schema: dict | None, arguments: dict) -> tuple[dict, lis
         if sent in props:
             continue
         for cand in _candidates(sent):
-            if cand in props and cand not in args:
+            if cand in props and cand not in args and _fits(args[sent], props[cand]):
                 args[cand] = args.pop(sent)
                 notes.append(f"read {sent} as {cand}")
                 break

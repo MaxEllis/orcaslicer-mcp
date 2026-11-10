@@ -638,12 +638,19 @@ async def _resolve_reverts(c, changes: dict) -> tuple[dict, list, list, dict]:
     out = {k: v for k, v in changes.items() if v is not None}
     reverted, unchanged, errors = [], [], {}
     saved_cache: dict = {}
+    live_keys: set | None = None
     for key in wanted:
         if is_sensitive(key):
             errors[key] = "not_revertible: script, G-code and printer-connection keys are not put back this way"
             continue
         group = group_of.get(key)
         if group is None:
+            if settings_schema.describe(key) is None:  # not in the schema: maybe a newer key, maybe a typo
+                if live_keys is None:
+                    live_keys = set(await c.get_config(None))
+                if key not in live_keys:
+                    errors[key] = "unknown_setting: OrcaSlicer has no setting by this name"
+                    continue
             unchanged.append(key)  # no unsaved edit: it already has its saved value
             continue
         if group == "filament":
@@ -738,16 +745,16 @@ async def slice() -> dict:
         return _err(e)
 
 
-async def _with_forecast(c, result: dict, version: str | None = None) -> dict:
+async def _with_forecast(c, result: dict) -> dict:
     """A finished slice also says how long it will really take on this printer, when the outcome store has
     enough past prints to judge (forecast.py). Optional: any problem only leaves it out."""
     est = (result.get("stats") or {}).get("estimated_time_seconds")
     if result.get("state") != "done" or not est or not _outcomes.is_available():
         return result
     try:
-        if version is None:
-            version = (await c.get_status()).get("app_version")
-        fc = _forecast.time_forecast(est, version)
+        status = await c.get_status()
+        printer = _ptarget.printer_id((status.get("presets") or {}).get("printer"))
+        fc = _forecast.time_forecast(est, status.get("app_version"), printer)
     except Exception:  # noqa: BLE001
         fc = None
     if fc:

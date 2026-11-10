@@ -69,7 +69,7 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
 
 **2. Add the connector to your AI app.**
 - **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest), open it, and paste the token into its settings. Nothing else to install.
-- **Other apps (Cursor, VS Code, LM Studio and the like):** install [uv](https://docs.astral.sh/uv/getting-started/installation/) once, a small tool that runs the connector: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS and Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows. Then add this to the app's MCP settings:
+- **Other apps (Cursor, LM Studio and the like):** install [uv](https://docs.astral.sh/uv/getting-started/installation/) once, a small tool that runs the connector: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS and Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows. Then add this to the app's MCP settings:
 
   ```json
   {
@@ -82,6 +82,8 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
     }
   }
   ```
+
+  VS Code reads the same entry from `.vscode/mcp.json` under `servers` instead of `mcpServers`, with `"type": "stdio"` added. The plugin's Config tab gives each of these apps its own copy-ready text with your token in it.
 
 **Optional: the agent skill.** It teaches Claude Code, Codex and other agents how to work with these tools (where to start, which settings to check first, the traps). In Claude Code: `/plugin install orcaslicer-mcp --marketplace MaxEllis/orcaslicer-mcp`. For other agents, copy the [`skills/orcaslicer-mcp`](skills/orcaslicer-mcp) folder into `~/.agents/skills`. It is instructions only and runs no code.
 

@@ -673,13 +673,17 @@ def _setup_text(app, token, port, default=13130):
 def test_config_tab_gives_each_ai_app_its_setup_with_the_token_in_it():
     tok = "a" * 48
     code = _setup_text("code", tok, 13130)
-    assert code["text"] == f"claude mcp add --scope user --env ORCA_API_TOKEN={tok} orcaslicer -- uvx orcaslicer-mcp"
+    # the name before --env: the CLI reads every word after --env as another KEY=value (checked with claude 2.1.322)
+    assert code["text"] == f"claude mcp add --scope user orcaslicer --env ORCA_API_TOKEN={tok} -- uvx orcaslicer-mcp"
     assert "uv" in code["how"] and "terminal" in code["how"]
     codex = _setup_text("codex", tok, 13130)
     assert codex["text"] == f"codex mcp add orcaslicer --env ORCA_API_TOKEN={tok} -- uvx orcaslicer-mcp"
     other = json.loads(_setup_text("other", tok, 13130)["text"])
     assert other == {"mcpServers": {"orcaslicer": {"command": "uvx", "args": ["orcaslicer-mcp"],
                                                    "env": {"ORCA_API_TOKEN": tok}}}}
+    vscode = json.loads(_setup_text("vscode", tok, 13130)["text"])  # VS Code's mcp.json uses "servers"
+    assert vscode == {"servers": {"orcaslicer": {"type": "stdio", "command": "uvx", "args": ["orcaslicer-mcp"],
+                                                 "env": {"ORCA_API_TOKEN": tok}}}}
     desk = _setup_text("desktop", tok, 13130)
     assert desk["text"] == "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest" and desk["copy"] == "Copy link"
     assert ".mcpb" in desk["how"] and "127.0.0.1" not in desk["how"]
@@ -687,8 +691,9 @@ def test_config_tab_gives_each_ai_app_its_setup_with_the_token_in_it():
 
 def test_config_tab_setup_names_a_changed_port():
     tok = "b" * 48
-    assert _setup_text("code", tok, 13200)["text"].endswith(
-        "--env ORCA_API_URL=http://127.0.0.1:13200 orcaslicer -- uvx orcaslicer-mcp")
+    assert _setup_text("code", tok, 13200)["text"] == (
+        f"claude mcp add --scope user orcaslicer --env ORCA_API_TOKEN={tok} "
+        "--env ORCA_API_URL=http://127.0.0.1:13200 -- uvx orcaslicer-mcp")
     other = json.loads(_setup_text("other", tok, 13200)["text"])
     assert other["mcpServers"]["orcaslicer"]["env"]["ORCA_API_URL"] == "http://127.0.0.1:13200"
     assert "http://127.0.0.1:13200" in _setup_text("desktop", tok, 13200)["how"]

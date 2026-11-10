@@ -79,9 +79,32 @@ mcp = MCPServer("orcaslicer", instructions=SERVER_INSTRUCTIONS, version=_VERSION
 _orig_call_tool = mcp.call_tool
 
 
+# MCP client names as apps send them -> the name a person knows the app by.
+_CLIENT_LABELS = {"claude-ai": "Claude", "claude-desktop": "Claude", "claude-code": "Claude Code",
+                  "codex-mcp-client": "Codex", "codex": "Codex", "cursor-vscode": "Cursor", "cursor": "Cursor",
+                  "visual studio code": "VS Code", "visual studio code - insiders": "VS Code", "lm studio": "LM Studio",
+                  "windsurf-client": "Windsurf", "zed": "Zed"}
+
+
+def _client_label(context) -> str | None:
+    """The AI app's name from the MCP handshake, made header-safe; None when the client sent none."""
+    try:
+        info = context.session.client_params.client_info
+    except AttributeError:
+        return None
+    raw = (getattr(info, "name", "") or "").strip()
+    label = _CLIENT_LABELS.get(raw.lower()) or (getattr(info, "title", None) or raw)
+    label = "".join(ch for ch in str(label) if 32 <= ord(ch) < 127).strip()[:60]
+    return label or None
+
+
 async def _call_tool_normalized(name, arguments, context=None):
     """Every tools/call passes here: arguments under a name the tool does not take, or a single value where it
-    takes a list, are read in the tool's own form first (normalize.py)."""
+    takes a list, are read in the tool's own form first (normalize.py). It also notes the AI app's name, which
+    the client sends to OrcaSlicer so its Config tab can say which app is connected."""
+    label = _client_label(context)
+    if label:
+        _client_mod.CLIENT_NAME[0] = label
     tool = mcp._tool_manager.get_tool(name)
     if tool is not None:
         arguments, _notes = normalize_arguments(tool.parameters, arguments or {})

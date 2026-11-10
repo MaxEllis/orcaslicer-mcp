@@ -97,12 +97,18 @@ REFUSED_KEYS_DETAIL_PLUGIN = ("The OrcaSlicer MCP plugin never lets the assistan
                               "G-code or printer connection settings. Change it yourself here.")
 
 
+# The AI app this connector serves, from the MCP handshake (server.py sets it): OrcaSlicer's Config tab shows
+# "Connected to <app>". A one-item list so the server can set it after import.
+CLIENT_HEADER = "X-OrcaSlicer-MCP-Client"
+CLIENT_NAME: list = [None]
+
+
 class OrcaClient:
     def __init__(self, cfg: Config):
         self._cfg = cfg
         self._http = httpx.AsyncClient(
             base_url=cfg.base_url,
-            headers={"X-Api-Token": cfg.token},
+            headers={"X-Api-Token": cfg.token, **({CLIENT_HEADER: CLIENT_NAME[0]} if CLIENT_NAME[0] else {})},
             timeout=cfg.timeout,
         )
 

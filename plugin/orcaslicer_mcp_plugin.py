@@ -1319,7 +1319,11 @@ class TokenBox:
         self.value = value
 
 
-def make_handler(api: Api, token: TokenBox):
+CLIENT_HEADER = "X-OrcaSlicer-MCP-Client"
+SEEN_WRITE_EVERY = 60.0  # seconds between saves of the same app's last-request time  # the AI app's name, sent by orcaslicer-mcp (shown in the Config tab)
+
+
+def make_handler(api: Api, token: TokenBox, on_seen=None):
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "OrcaSlicerMCPPlugin/" + PLUGIN_VERSION
@@ -1353,6 +1357,12 @@ def make_handler(api: Api, token: TokenBox):
             current = token.value
             if not current or not hmac.compare_digest(supplied.encode(), current.encode()):
                 return self._reply(401, {"error": "unauthorized"})
+            if on_seen is not None:
+                app = "".join(ch for ch in (self.headers.get(CLIENT_HEADER) or "") if 32 <= ord(ch) < 127)[:60].strip()
+                try:
+                    on_seen(app)
+                except Exception:
+                    pass
             trial = (self.headers.get("X-Orca-Mcp-Trial") or "").strip() == "1"
             status, reply = api.handle(method, self.path, body, trial=trial)
             trace(f"reply {status} {method} {self.path}")
@@ -1376,9 +1386,9 @@ def make_handler(api: Api, token: TokenBox):
 class Service:
     """The server thread and its lifetime. Kept apart from the capability so tests can drive it."""
 
-    def __init__(self, api: Api, token: "TokenBox | str", port: int, host: str = BIND_HOST):
+    def __init__(self, api: Api, token: "TokenBox | str", port: int, host: str = BIND_HOST, on_seen=None):
         self.token = token if isinstance(token, TokenBox) else TokenBox(token)
-        self.server = _Server((host, port), make_handler(api, self.token))
+        self.server = _Server((host, port), make_handler(api, self.token, on_seen))
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.5},
                                        name="orcaslicer-mcp-plugin", daemon=False)
@@ -2690,6 +2700,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         self._paused = False
         self._renew_seen = 0
         self._last_tick = 0.0
+        self._seen = None          # (time, app) of the last accepted request, from the server thread
+        self._seen_written = None  # the (time, app) last saved for the Config tab
         self._unloading = False
         self.host = None
 
@@ -2714,8 +2726,31 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             return {}
         return cfg if isinstance(cfg, dict) else {}
 
+    def _on_seen(self, app: str) -> None:  # server thread: an AI app reached OrcaSlicer
+        with self._lock:
+            prev = self._seen
+            self._seen = (time.time(), app or (prev[1] if prev else ""))
+
+    def _write_seen(self, cfg: dict) -> None:  # UI thread
+        """The Config tab shows "Connected to <app>, last request N minutes ago" from this. Saved when the app
+        changes or first appears, then at most once a minute, so OrcaSlicer is not writing its settings per request."""
+        with self._lock:
+            seen = self._seen
+        if seen is None:
+            return
+        last = self._seen_written
+        if last is not None and last[1] == seen[1] and seen[0] - last[0] < SEEN_WRITE_EVERY:
+            return
+        self._seen_written = seen
+        status = {"seen": int(seen[0]), "app": seen[1]}
+        try:
+            self.save_config(json.dumps({**cfg, "status": status}))
+        except Exception as e:
+            trace(f"status not saved: {type(e).__name__}: {e}")
+
     def _poll_config(self) -> None:  # UI thread
         cfg = self._read_config()
+        self._write_seen(cfg)
         paused = cfg.get("paused") is True
         if paused != self._paused:
             self._paused = paused
@@ -2767,7 +2802,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             self._slice_folders = current_slice_folders()
             api = Api(self._pump, notify=self._notify, record=self.host.record, journal=self.journal,
                       on_switch=self.host.dropped_after_switch, slices=self.slices, slice_folders=self._slice_folders)
-            self._service = Service(api, self._token, self._port)
+            self._service = Service(api, self._token, self._port, on_seen=self._on_seen)
             self._port = self._service.port
             self._service.start()
             try:

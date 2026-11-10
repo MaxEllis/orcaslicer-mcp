@@ -350,3 +350,32 @@ def test_the_connection_file_lets_the_connector_find_the_plugin(tmp_path, monkey
     finally:
         cap.on_unload()
     assert not (storage / "connection.json").exists()  # gone when the plugin stops
+
+
+def test_requests_record_which_app_connected_for_the_config_tab(plugin):
+    """Each accepted request notes the time and the app's name; the UI-thread poll saves it in the plugin's
+    settings (where the Config tab reads it), at most once a minute unless the app changes."""
+    import urllib.request
+    def get(app=None, token=None):
+        req = urllib.request.Request(plugin.base + "/api/v1/status")
+        req.add_header("X-Api-Token", token or plugin._token)
+        if app:
+            req.add_header("X-OrcaSlicer-MCP-Client", app)
+        try:
+            urllib.request.urlopen(req, timeout=10).read()
+        except Exception:
+            pass
+    get(token="wrong")  # a refused request records nothing
+    fake_orca.UI.run_blocking(plugin._poll_config)
+    assert "status" not in S.config
+    get(app="Claude Code")
+    fake_orca.UI.run_blocking(plugin._poll_config)
+    first = S.config["status"]
+    assert first["app"] == "Claude Code" and abs(first["seen"] - time.time()) < 5
+    get()  # no header: keeps the app it knew; same app within a minute: not saved again
+    fake_orca.UI.run_blocking(plugin._poll_config)
+    assert S.config["status"] == first
+    get(app="Codex")  # another app: saved at once
+    fake_orca.UI.run_blocking(plugin._poll_config)
+    assert S.config["status"]["app"] == "Codex"
+    assert S.config.get("paused") is not True  # the rest of the settings are kept

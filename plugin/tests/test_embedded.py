@@ -25,7 +25,7 @@ import embed  # noqa: E402
 
 RELAY = pathlib.Path(os.environ.get("MCP_FORK_REPO") or ROOT.parent.parent / "OrcaSlicer")
 PANEL_PATH = "resources/web/orcaslicer_mcp/panel.html"
-PANEL_COMMIT = "b007932e5f9b3fa33caf473893c8f6bfb77c8002"
+PANEL_COMMIT = "f9747b8cea5623889c10b3fa4db258af6c201d13"  # panel-onboarding (local fork branch until released)
 
 
 def fork_panel():

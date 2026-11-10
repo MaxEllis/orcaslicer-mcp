@@ -162,7 +162,7 @@ def test_restore_is_answered_as_unavailable(plugin):
                                       "reason": "Restore points need the OrcaSlicer MCP build"}
 
 
-def test_ready_answers_state_then_history_and_repeats_are_cheap(plugin):
+def test_ready_answers_state_setup_then_history_and_repeats_are_cheap(plugin):
     call(plugin, "GET", "/api/v1/status")
     time.sleep(0.2)
     S.page_silent = True  # look at what the host sends, without the page answering
@@ -170,7 +170,7 @@ def test_ready_answers_state_then_history_and_repeats_are_cheap(plugin):
     panel.posts.clear()
     page(plugin, {"action": "ready"})
     page(plugin, {"action": "ready"})  # the page repeats it until its first history
-    assert [m.get("type") for m in panel.posts] == ["state", "history", "state", "history"]
+    assert [m.get("type") for m in panel.posts] == ["state", "setup", "history"] * 2
 
 
 def test_every_undo_gets_exactly_one_result(plugin):
@@ -655,33 +655,12 @@ def test_multiline_cases_ported_from_the_builds_standalone_test():
     assert t(seven, None) == "Lines 1 to 5 of 7:\nL1\nL2\nL3\nL4\nL5\n" + E
 
 
-def _config_js(token="a" * 48, port=13130, default=13130, datadir=None):
-    """The Config tab's own script with its values filled in, cut before it touches the page."""
-    import re
-    js = re.search(r"<script>(.*?)var cfg = ", mod.CONFIG_HTML, re.S).group(1)
-    return (js.replace("__TOKEN__", json.dumps(token)).replace("__PORT__", str(port))
-              .replace("__DEFAULT_PORT__", str(default)).replace("__DATADIR__", json.dumps(datadir)))
+def _routes(port=13130, datadir=None):
+    return {a["id"]: a for a in mod.setup_apps(port, datadir)}
 
 
-def _routes(**kw):
-    """Every app's routes as the page computes them (node): label, what Copy copies, what Open opens."""
-    import shutil
-    import subprocess
-    import pytest
-    node = shutil.which("node") or ("/snap/bin/node" if os.path.exists("/snap/bin/node") else None)
-    if not node:
-        pytest.skip("node not installed")
-    prog = ("var btoa=function(s){return Buffer.from(s,'binary').toString('base64')};" + _config_js(**kw) +
-            "console.log(JSON.stringify(APPS.map(function(a){return {id:a.id, ask:a.ask, routes:a.routes.map(function(r){"
-            "return {label:r.label, off:!!r.off, copy:r.copy?r.copy():null, open:r.open?r.open():null, also:r.also?r.also():''}})}})))")
-    out = subprocess.run([node, "-e", prog], capture_output=True, text=True, timeout=30)
-    assert out.returncode == 0, out.stderr
-    return {a["id"]: a for a in json.loads(out.stdout)}
-
-
-def test_config_tab_offers_five_companies_and_no_token_anywhere():
-    tok = "a" * 48
-    apps = _routes(token=tok)
+def test_config_tab_offers_five_companies_and_no_token_anywhere(plugin):
+    apps = _routes()
     assert list(apps) == ["claude", "openai", "cursor", "vscode", "other"]
     claude = {r["label"]: r for r in apps["claude"]["routes"]}
     assert claude["Claude app"]["open"] == "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"
@@ -691,12 +670,12 @@ def test_config_tab_offers_five_companies_and_no_token_anywhere():
     assert openai["Codex in a terminal or editor"]["copy"] == "codex mcp add orcaslicer -- uvx orcaslicer-mcp"
     assert openai["ChatGPT on the web or phone"]["off"] is True
     assert apps["openai"]["ask"] == "In a Codex chat, ask"
-    other = json.loads(apps["other"]["routes"][0]["copy"])
-    assert other == {"mcpServers": {"orcaslicer": {"command": "uvx", "args": ["orcaslicer-mcp"]}}}
-    vs = json.loads(apps["vscode"]["routes"][0]["copy"])
-    assert vs == {"servers": {"orcaslicer": {"type": "stdio", "command": "uvx", "args": ["orcaslicer-mcp"]}}}
-    blob = json.dumps(apps)
-    assert tok not in blob and "ORCA_API_TOKEN" not in blob  # the connector finds the token by itself
+    assert json.loads(apps["other"]["routes"][0]["copy"]) == {
+        "mcpServers": {"orcaslicer": {"command": "uvx", "args": ["orcaslicer-mcp"]}}}
+    assert json.loads(apps["vscode"]["routes"][0]["copy"]) == {
+        "servers": {"orcaslicer": {"type": "stdio", "command": "uvx", "args": ["orcaslicer-mcp"]}}}
+    blob = json.dumps(apps) + plugin.get_config_ui().split("var APPS", 1)[1]
+    assert plugin._token not in blob and "ORCA_API_TOKEN" not in blob  # the connector finds the token by itself
 
 
 def test_config_tab_one_click_links_carry_the_server_and_no_secret():
@@ -705,25 +684,38 @@ def test_config_tab_one_click_links_carry_the_server_and_no_secret():
     apps = _routes()
     cur = apps["cursor"]["routes"][0]["open"]
     assert cur.startswith("cursor://anysphere.cursor-deeplink/mcp/install?name=orcaslicer&config=")
-    conf = json.loads(base64.b64decode(urllib.parse.unquote(cur.split("config=", 1)[1])))
-    assert conf == {"command": "uvx", "args": ["orcaslicer-mcp"]}
+    assert json.loads(base64.b64decode(urllib.parse.unquote(cur.split("config=", 1)[1]))) == {
+        "command": "uvx", "args": ["orcaslicer-mcp"]}
     vs = apps["vscode"]["routes"][0]["open"]
     assert vs.startswith("https://vscode.dev/redirect/mcp/install?name=orcaslicer&config=")
-    assert json.loads(urllib.parse.unquote(vs.split("config=", 1)[1])) == {"type": "stdio", "command": "uvx",
-                                                                          "args": ["orcaslicer-mcp"]}
+    assert json.loads(urllib.parse.unquote(vs.split("config=", 1)[1])) == {
+        "type": "stdio", "command": "uvx", "args": ["orcaslicer-mcp"]}
     assert mod.openable(cur) and mod.openable(vs) and mod.openable(apps["claude"]["routes"][0]["open"])
     assert not mod.openable("https://example.com/") and not mod.openable("file:///etc/passwd")
 
 
 def test_config_tab_names_only_what_the_connector_cant_find_by_itself():
     apps = _routes(port=13200, datadir="D:/Orca Data/profile")
-    code = apps["claude"]["routes"][1]["copy"]
-    assert code == ('claude mcp add --scope user orcaslicer --env ORCA_DATADIR="D:/Orca Data/profile" '
-                    "--env ORCA_API_URL=http://127.0.0.1:13200 -- uvx orcaslicer-mcp")
-    other = json.loads(apps["other"]["routes"][0]["copy"])
-    assert other["mcpServers"]["orcaslicer"]["env"] == {"ORCA_DATADIR": "D:/Orca Data/profile",
-                                                        "ORCA_API_URL": "http://127.0.0.1:13200"}
+    assert apps["claude"]["routes"][1]["copy"] == (
+        'claude mcp add --scope user orcaslicer --env ORCA_DATADIR="D:/Orca Data/profile" '
+        "--env ORCA_API_URL=http://127.0.0.1:13200 -- uvx orcaslicer-mcp")
+    assert json.loads(apps["other"]["routes"][0]["copy"])["mcpServers"]["orcaslicer"]["env"] == {
+        "ORCA_DATADIR": "D:/Orca Data/profile", "ORCA_API_URL": "http://127.0.0.1:13200"}
     assert "ORCA_DATADIR = D:/Orca Data/profile" in apps["openai"]["routes"][0]["also"]
+
+
+def test_config_tab_script_runs_on_the_data(plugin):
+    """The page's script parses with its values filled in (node), so a data shape change can't break it."""
+    import re
+    import shutil
+    import subprocess
+    import pytest
+    node = shutil.which("node") or ("/snap/bin/node" if os.path.exists("/snap/bin/node") else None)
+    if not node:
+        pytest.skip("node not installed")
+    js = re.search(r"<script>(.*?)</script>", plugin.get_config_ui(), re.S).group(1)
+    out = subprocess.run([node, "-e", "new Function(" + json.dumps(js) + ")"], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
 
 
 def test_custom_datadir_is_named_only_when_orcaslicer_uses_its_own(monkeypatch, tmp_path):
@@ -737,9 +729,9 @@ def test_custom_datadir_is_named_only_when_orcaslicer_uses_its_own(monkeypatch, 
 
 def test_config_ui_fills_in_its_values(plugin):
     html = plugin.get_config_ui()
-    for marker in ("__TOKEN__", "__PORT__", "__DEFAULT_PORT__", "__DATADIR__"):
+    for marker in ("__TOKEN__", "__PORT__", "__SETUP__", "__ASK__", "__ICONS__"):
         assert marker not in html
-    assert "DEFPORT = 13130" in html and json.dumps(plugin._token) in html
+    assert "LISTENING = " in html and json.dumps(plugin._token) in html
 
 
 def test_config_tab_asks_the_plugin_to_open_links_and_hears_back(plugin, monkeypatch):
@@ -754,3 +746,31 @@ def test_config_tab_asks_the_plugin_to_open_links_and_hears_back(plugin, monkeyp
     S.config = {**S.config, "open": {"n": 2, "url": "https://example.com/phish"}}
     UI.run_blocking(plugin._poll_config)  # anything off the list is refused, and the page hears so
     assert opened == [url] and S.config["opened"] == {"n": 2, "ok": False}
+
+
+def test_the_panel_gets_the_setup_until_an_app_connects_then_goals(plugin):
+    """First run: with no change yet, the panel shows how to connect (setup message); the first request from an app
+    switches it to 'Connected to <app>' with goals to try."""
+    page(plugin, {"action": "ready"})
+    time.sleep(0.2)
+    first = last(plugin, "setup")
+    assert [a["id"] for a in first["apps"]] == ["claude", "openai", "cursor", "vscode", "other"]
+    assert first["status"] is None and first["ask"] == mod.SETUP_ASK and len(first["goals"]) == 3
+    assert all(a["icon"].startswith("<svg") for a in first["apps"])
+    assert plugin._token not in json.dumps(first)
+    import urllib.request
+    req = urllib.request.Request(plugin.base + "/api/v1/status")
+    req.add_header("X-Api-Token", plugin._token)
+    req.add_header("X-OrcaSlicer-MCP-Client", "Claude Code")
+    urllib.request.urlopen(req, timeout=10).read()
+    UI.run_blocking(plugin._poll_config)
+    after = last(plugin, "setup")
+    assert after["status"]["app"] == "Claude Code" and after["status"]["seen"]
+
+
+def test_the_panel_opens_only_listed_links(plugin, monkeypatch):
+    opened = []
+    monkeypatch.setattr(mod, "open_url", lambda url: opened.append(url) or True)
+    page(plugin, {"action": "open", "url": "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"})
+    page(plugin, {"action": "open", "url": "https://example.com/elsewhere"})
+    assert opened == ["https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"]

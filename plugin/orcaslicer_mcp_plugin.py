@@ -1476,8 +1476,89 @@ def custom_datadir(storage: str) -> str | None:
     return None if norm(datadir) == norm(standard_datadir()) else datadir
 
 
+# ---------------------------------------------------------------------------------------------
+# Connecting an AI app: one description, rendered by the Config tab and by the panel's first run
+# ---------------------------------------------------------------------------------------------
+RELEASES_URL = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"
+SETUP_ASK = "Which printer is OrcaSlicer set up for?"
+SETUP_GOALS = ("Make these brackets as strong as possible.", "Print this faster without losing quality.",
+               "Explain what my infill settings do.")
+_SVG = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"'
+# Plain symbols, all different, none a company's logo (their brand rules need permission first).
+SETUP_ICONS = {
+    "claude": f'<svg {_SVG}><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4.5 3.5V17H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>',
+    "openai": f'<svg {_SVG}><path d="M8.5 4.5c-2 0-2.5 1-2.5 2.5v2.5c0 1.2-.8 2.5-2.5 2.5 1.7 0 2.5 1.3 2.5 2.5V17c0 1.5.5 2.5 2.5 2.5M15.5 4.5c2 0 2.5 1 2.5 2.5v2.5c0 1.2.8 2.5 2.5 2.5-1.7 0-2.5 1.3-2.5 2.5V17c0 1.5-.5 2.5-2.5 2.5"/></svg>',
+    "cursor": f'<svg {_SVG}><path d="M5 3.5 18.5 10l-6 1.8-2.4 6.2z"/></svg>',
+    "vscode": f'<svg {_SVG}><path d="M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5M13.5 4.5l-3 15"/></svg>',
+    "other": f'<svg {_SVG}><path d="M9 3v5M15 3v5M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0zM12 17v4"/></svg>',
+}
+
+
+def setup_apps(port: int, datadir: str | None) -> list[dict]:
+    """Each AI app and the routes to connect it, with the exact text a Copy copies and the link an Open opens.
+    No token anywhere: the connector finds OrcaSlicer by itself (orcaslicer-mcp discovery.py). Only what it
+    can't find is named: a port other than 13130, or OrcaSlicer's own settings folder (--datadir)."""
+    import base64
+    env = {}
+    if datadir:
+        env["ORCA_DATADIR"] = datadir
+    if port != DEFAULT_PORT:
+        env["ORCA_API_URL"] = f"http://{BIND_HOST}:{port}"
+    env_args = "".join(f' --env {k}="{v}"' if " " in v else f" --env {k}={v}" for k, v in env.items())
+
+    def server(extra=None):
+        o = {**(extra or {}), "command": "uvx", "args": ["orcaslicer-mcp"]}
+        if env:
+            o["env"] = dict(env)
+        return o
+
+    def cmd(cli):
+        return f"{cli}{env_args} -- uvx orcaslicer-mcp"
+    pretty = lambda o: json.dumps(o, indent=2)
+    compact = lambda o: json.dumps(o, separators=(",", ":"))
+    quote = lambda t: urllib.parse.quote(t, safe="")
+    route = lambda label, hint, act, **kw: {"label": label, "hint": hint, "act": act, "primary": kw.get("primary", False),
+                                            "copy": kw.get("copy"), "open": kw.get("open"), "off": kw.get("off", False),
+                                            "also": kw.get("also", ""), "copy_label": kw.get("copy_label", "")}
+    also = ("Also add " + ", ".join(f"{k} = {v}" for k, v in env.items()) + " as an environment variable.") if env else ""
+    return [
+        {"id": "claude", "name": "Claude", "where": "Claude", "ask": "Ask Claude", "routes": [
+            route("Claude app", "For chats. Download the extension, then open the file.", "Download", primary=True,
+                  open=RELEASES_URL),
+            route("Claude Code", "In a terminal, an editor or the app's Code tab. Needs uv.", "Copy command",
+                  copy=cmd("claude mcp add --scope user orcaslicer"))]},
+        {"id": "openai", "name": "OpenAI", "where": "OpenAI", "ask": "In a Codex chat, ask", "routes": [
+            route("ChatGPT desktop app", "Settings › Plugins › MCPs › Add, choose STDIO and paste this. Works in Codex "
+                  "chats; ordinary ChatGPT chats can't use it yet.", "Copy", primary=True, copy="uvx orcaslicer-mcp",
+                  also=also),
+            route("Codex in a terminal or editor", "Run this once. The desktop app shares the setting.", "Copy command",
+                  copy=cmd("codex mcp add orcaslicer")),
+            route("ChatGPT on the web or phone", "Can't connect: it only reaches servers on the internet, not programs "
+                  "on your computer.", "", off=True)]},
+        {"id": "cursor", "name": "Cursor", "where": "Cursor", "ask": "Ask Cursor", "routes": [
+            route("Add to Cursor", "Cursor opens and asks you to confirm. Needs uv.", "Add to Cursor", primary=True,
+                  open="cursor://anysphere.cursor-deeplink/mcp/install?name=orcaslicer&config="
+                       + quote(base64.b64encode(compact(server()).encode()).decode()),
+                  copy=pretty({"mcpServers": {"orcaslicer": server()}}), copy_label="Copy settings instead")]},
+        {"id": "vscode", "name": "VS Code", "where": "VS Code", "ask": "Ask Copilot", "routes": [
+            route("Add to VS Code", "VS Code opens and asks you to confirm. Needs uv.", "Add to VS Code", primary=True,
+                  open="https://vscode.dev/redirect/mcp/install?name=orcaslicer&config=" + quote(compact(server({"type": "stdio"}))),
+                  copy=pretty({"servers": {"orcaslicer": server({"type": "stdio"})}}),
+                  copy_label="Copy .vscode/mcp.json settings instead")]},
+        {"id": "other", "name": "Other app", "where": "your app", "ask": "Ask your app", "routes": [
+            route("Your app's MCP settings", "LM Studio, Windsurf and most others take this form. Needs uv.",
+                  "Copy settings", primary=True, copy=pretty({"mcpServers": {"orcaslicer": server()}}))]},
+    ]
+
+
+def setup_message(port: int, datadir: str | None, status: dict | None, paused: bool) -> dict:
+    """What the panel shows before the first change: the setup, or once an app has connected, goals to try."""
+    return {"type": "setup", "apps": [{**a, "icon": SETUP_ICONS[a["id"]]} for a in setup_apps(port, datadir)],
+            "ask": SETUP_ASK, "goals": list(SETUP_GOALS), "status": status or None, "paused": bool(paused)}
+
+
 # Links the Config tab may ask the plugin to open (it can't open anything itself); nothing else is opened.
-OPENABLE = ("https://github.com/MaxEllis/orcaslicer-mcp/releases/latest", "https://docs.astral.sh/uv/")
+OPENABLE = (RELEASES_URL, "https://docs.astral.sh/uv/")
 OPENABLE_PREFIXES = ("cursor://anysphere.cursor-deeplink/mcp/install?", "https://vscode.dev/redirect/mcp/install?")
 
 
@@ -2669,46 +2750,8 @@ input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);
   </div>
 </details>
 <script>
-var TOKEN = __TOKEN__, LISTENING = __PORT__, DEFPORT = __DEFAULT_PORT__, DATADIR = __DATADIR__;
-var RELEASES = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest";
-var ASK = "Which printer is OrcaSlicer set up for?";
-var A = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
-var ICON = {
-  claude: '<svg ' + A + '><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4.5 3.5V17H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>',
-  openai: '<svg ' + A + '><path d="M8.5 4.5c-2 0-2.5 1-2.5 2.5v2.5c0 1.2-.8 2.5-2.5 2.5 1.7 0 2.5 1.3 2.5 2.5V17c0 1.5.5 2.5 2.5 2.5M15.5 4.5c2 0 2.5 1 2.5 2.5v2.5c0 1.2.8 2.5 2.5 2.5-1.7 0-2.5 1.3-2.5 2.5V17c0 1.5-.5 2.5-2.5 2.5"/></svg>',
-  cursor: '<svg ' + A + '><path d="M5 3.5 18.5 10l-6 1.8-2.4 6.2z"/></svg>',
-  vscode: '<svg ' + A + '><path d="M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5M13.5 4.5l-3 15"/></svg>',
-  other: '<svg ' + A + '><path d="M9 3v5M15 3v5M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0zM12 17v4"/></svg>'
-};
-// What the connector needs besides itself: nothing on a standard install. A changed port or OrcaSlicer's own
-// settings folder (--datadir) are the only things it can't find by itself. No token, ever.
-function envs(){ var e = {}; if (DATADIR) e.ORCA_DATADIR = DATADIR; if (LISTENING !== DEFPORT) e.ORCA_API_URL = "http://127.0.0.1:" + LISTENING; return e; }
-function envArgs(){ var e = envs(); return Object.keys(e).map(function(k){ return " --env " + k + "=" + (/ /.test(e[k]) ? '"' + e[k] + '"' : e[k]); }).join(""); }
-function server(extra){ var o = Object.assign({}, extra || {}, { command: "uvx", args: ["orcaslicer-mcp"] }); var e = envs(); if (Object.keys(e).length) o.env = e; return o; }
-function b64(s){ return btoa(unescape(encodeURIComponent(s))); }
-var APPS = [
-  { id: "claude", name: "Claude", ask: "Ask Claude", routes: [
-      { label: "Claude app", hint: "For chats. Download the extension, then open the file.", act: "Download", primary: true, open: function(){ return RELEASES; } },
-      { label: "Claude Code", hint: "In a terminal, an editor or the app's Code tab. Needs uv.", act: "Copy command",
-        copy: function(){ return "claude mcp add --scope user orcaslicer" + envArgs() + " -- uvx orcaslicer-mcp"; } } ] },
-  { id: "openai", name: "OpenAI", ask: "In a Codex chat, ask", routes: [
-      { label: "ChatGPT desktop app", hint: "Settings › Plugins › MCPs › Add, choose STDIO and paste this. Works in Codex chats; ordinary ChatGPT chats can't use it yet.",
-        act: "Copy", primary: true, copy: function(){ return "uvx orcaslicer-mcp"; }, also: function(){ var e = envs(); return Object.keys(e).length ? "Also add " + Object.keys(e).map(function(k){ return k + " = " + e[k]; }).join(", ") + " as an environment variable." : ""; } },
-      { label: "Codex in a terminal or editor", hint: "Run this once. The desktop app shares the setting.", act: "Copy command",
-        copy: function(){ return "codex mcp add orcaslicer" + envArgs() + " -- uvx orcaslicer-mcp"; } },
-      { label: "ChatGPT on the web or phone", hint: "Can't connect: it only reaches servers on the internet, not programs on your computer.", off: true } ] },
-  { id: "cursor", name: "Cursor", ask: "Ask Cursor", routes: [
-      { label: "Add to Cursor", hint: "Cursor opens and asks you to confirm. Needs uv.", act: "Add to Cursor", primary: true,
-        open: function(){ return "cursor://anysphere.cursor-deeplink/mcp/install?name=orcaslicer&config=" + encodeURIComponent(b64(JSON.stringify(server()))); },
-        copy: function(){ return JSON.stringify({ mcpServers: { orcaslicer: server() } }, null, 2); }, copyLabel: "Copy settings instead" } ] },
-  { id: "vscode", name: "VS Code", ask: "Ask Copilot", routes: [
-      { label: "Add to VS Code", hint: "VS Code opens and asks you to confirm. Needs uv.", act: "Add to VS Code", primary: true,
-        open: function(){ return "https://vscode.dev/redirect/mcp/install?name=orcaslicer&config=" + encodeURIComponent(JSON.stringify(server({ type: "stdio" }))); },
-        copy: function(){ return JSON.stringify({ servers: { orcaslicer: server({ type: "stdio" }) } }, null, 2); }, copyLabel: "Copy .vscode/mcp.json settings instead" } ] },
-  { id: "other", name: "Other app", ask: "Ask your app", routes: [
-      { label: "Your app's MCP settings", hint: "LM Studio, Windsurf and most others take this form. Needs uv.", act: "Copy settings", primary: true,
-        copy: function(){ return JSON.stringify({ mcpServers: { orcaslicer: server() } }, null, 2); } } ] }
-];
+var TOKEN = __TOKEN__, LISTENING = __PORT__;
+var APPS = __SETUP__, ASK = __ASK__, ICON = __ICONS__;
 var cfg = window.orca.getConfig() || {}, S = { app: "claude", done: null, open: false, shown: false, opening: null }, armed = null;
 function $(i){ return document.getElementById(i); }
 function esc(t){ return String(t).replace(/[&<>"]/g, function(c){ return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
@@ -2740,20 +2783,20 @@ function drawConnect(){
   var routes = app.routes.map(function(r, j){
     var right = r.off ? "<span></span>" : (S.done === j ? '<span class="done">' + (r.open ? "Opening…" : "Copied") + "</span>" :
       '<button class="act' + (r.primary ? " primary" : "") + '" data-r="' + j + '">' + esc(r.act) + "</button>");
-    var also = r.also && r.also() ? "<small>" + esc(r.also()) + "</small>" : "";
-    var peek = r.copy && !r.off ? '<details class="peek"><summary>' + esc(r.open ? r.copyLabel : "Show what it copies") + '</summary><pre>' + esc(r.copy()) + "</pre>" +
+    var also = r.also ? "<small>" + esc(r.also) + "</small>" : "";
+    var peek = r.copy && !r.off ? '<details class="peek"><summary>' + esc(r.open ? r.copy_label : "Show what it copies") + '</summary><pre>' + esc(r.copy) + "</pre>" +
       (r.open ? '<button class="lnk" data-c="' + j + '">Copy</button>' : "") + "</details>" : "";
     var failed = S.opening && S.opening.r === j && S.opening.failed ? '<span class="warn" style="grid-column:1 / 3">Couldn’t open it from OrcaSlicer: the link is copied, paste it in your browser.</span>' : "";
     return '<div class="route' + (r.off ? " off" : "") + '"><div><b>' + esc(r.label) + "</b><small>" + esc(r.hint) + "</small>" + also + "</div>" + right + peek + failed + "</div>";
   }).join("");
-  $("steps").innerHTML = '<li><span>Set it up where you use ' + esc(app.name === "Other app" ? "your app" : app.name) + '</span><span></span><div class="routes">' + routes + "</div></li>" +
+  $("steps").innerHTML = '<li><span>Set it up where you use ' + esc(app.where) + '</span><span></span><div class="routes">' + routes + "</div></li>" +
     '<li><span>' + esc(app.ask) + ": “" + esc(ASK) + '”</span><button class="act" id="askcopy">Copy</button></li>';
   [].forEach.call($("steps").querySelectorAll("[data-r]"), function(b){ b.onclick = function(){
     var j = Number(b.getAttribute("data-r")), r = app.routes[j];
-    if (r.open) { var n = (cfg.open && cfg.open.n || 0) + 1; S.opening = { n: n, r: j, url: r.open(), failed: false }; S.done = j; save({ open: { n: n, url: S.opening.url } }); }
-    else copyText(r.copy(), function(ok){ S.done = ok ? j : null; draw(); });
+    if (r.open) { var n = (cfg.open && cfg.open.n || 0) + 1; S.opening = { n: n, r: j, url: r.open, failed: false }; S.done = j; save({ open: { n: n, url: r.open } }); }
+    else copyText(r.copy, function(ok){ S.done = ok ? j : null; draw(); });
   }; });
-  [].forEach.call($("steps").querySelectorAll("[data-c]"), function(b){ b.onclick = function(){ var r = app.routes[Number(b.getAttribute("data-c"))]; copyText(r.copy(), function(){ b.textContent = "Copied"; }); }; });
+  [].forEach.call($("steps").querySelectorAll("[data-c]"), function(b){ b.onclick = function(){ var r = app.routes[Number(b.getAttribute("data-c"))]; copyText(r.copy, function(){ b.textContent = "Copied"; }); }; });
   $("askcopy").onclick = function(){ copyText(ASK, function(ok){ if (ok) $("askcopy").textContent = "Copied"; }); };
 }
 function drawAdv(){
@@ -2829,7 +2872,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
 
     def get_config_ui(self):
         return CONFIG_HTML.replace("__TOKEN__", _inline(self._token)).replace("__PORT__", _inline(self._port)) \
-            .replace("__DEFAULT_PORT__", _inline(DEFAULT_PORT)).replace("__DATADIR__", _inline(custom_datadir(self._folder)))
+            .replace("__SETUP__", _inline(setup_apps(self._port, custom_datadir(self._folder)))) \
+            .replace("__ASK__", _inline(SETUP_ASK)).replace("__ICONS__", _inline(SETUP_ICONS))
 
     def get_default_config(self):
         return {"port": DEFAULT_PORT, "paused": False, "renew": 0}
@@ -2856,12 +2900,15 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         last = self._seen_written
         if last is not None and last[1] == seen[1] and seen[0] - last[0] < SEEN_WRITE_EVERY:
             return
+        first = last is None or last[1] != seen[1]
         self._seen_written = seen
         status = {"seen": int(seen[0]), "app": seen[1]}
         try:
             self.save_config(json.dumps({**cfg, "status": status}))
         except Exception as e:
             trace(f"status not saved: {type(e).__name__}: {e}")
+        if first and self.host is not None:
+            self._post(self._setup_msg())
 
     def _poll_config(self) -> None:  # UI thread
         cfg = self._read_config()
@@ -3044,7 +3091,14 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
     def _send_all(self):
         if self.host is not None:
             self._post(self._state())
+            self._post(self._setup_msg())
             self._post(self.host.history_msg())
+
+    def _setup_msg(self) -> dict:
+        """The panel's first run: how to connect an AI app, or goals to try once one has (setup_message)."""
+        status = self._read_config().get("status")
+        return setup_message(self._port, custom_datadir(self._folder), status if isinstance(status, dict) else None,
+                             self._paused)
 
     def _state(self) -> dict:
         return {"type": "state", "api": "off" if (self._paused or self._error) else "on"}
@@ -3094,6 +3148,10 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
                 self.host.undo(message.get("row"))
             elif action == "open_settings":
                 self._notify(SETTINGS_HINT)
+            elif action == "open":  # a setup link in the panel: only the fixed list (openable) is opened
+                url = message.get("url")
+                if openable(url) and not open_url(url):
+                    self._notify("couldn't open the link; the Config tab has it to copy", True)
         self._pump.run_pending()
 
     def _tick(self):  # UI thread, every 500 ms while the page is open
@@ -3217,6 +3275,32 @@ PANEL_HTML = (
     "  .empty { padding: 18px 14px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }\n"
     "  .empty button { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }\n"
     "  .offnote { border-bottom: 1px solid var(--border); }\n"
+    "\n"
+    "  /* First run (a host that sends \"setup\"): how to connect an AI app, then goals to try. */\n"
+    "  .setup { padding: 14px 12px; }\n"
+    "  .setup .sh { font-weight: 600; font-size: 13.5px; margin-bottom: 3px; }\n"
+    "  .setup .slead { color: var(--muted); font-size: 12px; line-height: 1.45; margin-bottom: 10px; }\n"
+    "  .ssqs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }\n"
+    "  .ssq { aspect-ratio: 1 / 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;\n"
+    "         border: 1px solid var(--border); border-radius: 8px; background: var(--hover-soft); color: var(--muted); font-size: 11.5px; line-height: 1.2; text-align: center; padding: 4px; }\n"
+    "  .ssq svg { width: 26px; height: 26px; flex: none; }\n"
+    "  .ssq:hover { color: var(--fg); }\n"
+    "  .ssq[aria-pressed=\"true\"] { border: 1.5px solid var(--accent); color: var(--fg); background: color-mix(in srgb, var(--accent) 16%, transparent); }\n"
+    "  .ssteps { list-style: none; margin: 12px 0 0; padding: 0; counter-reset: s; }\n"
+    "  .ssteps > li { display: grid; grid-template-columns: 14px 1fr; column-gap: 6px; padding: 5px 0; font-size: 12.5px; }\n"
+    "  .ssteps > li::before { counter-increment: s; content: counter(s); color: var(--muted); }\n"
+    "  .sroutes { grid-column: 2; display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }\n"
+    "  .sroute { border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; }\n"
+    "  .sroute b { font-weight: 600; display: block; } .sroute small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.4; margin: 1px 0 6px; }\n"
+    "  .sroute.off { border-style: dashed; } .sroute.off b { color: var(--muted); font-weight: 500; } .sroute.off small { margin-bottom: 0; }\n"
+    "  .sact { border-radius: 4px; padding: 3px 10px; border: 1px solid var(--accent); background: var(--accent); color: #fff; }\n"
+    "  .sact.second { background: transparent; color: var(--fg); border-color: var(--border); }\n"
+    "  .sdone { color: var(--link); font-size: 12px; }\n"
+    "  .sstat { display: flex; align-items: center; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }\n"
+    "  .sstat.top { margin: 0 0 12px; padding: 0; border: 0; color: var(--fg); }\n"
+    "  .sdot { width: 8px; height: 8px; border-radius: 50%; background: #d9a441; flex: none; } .sdot.ok { background: #3fb27f; }\n"
+    "  .sgoals { list-style: none; margin: 4px 0 10px; padding: 0; }\n"
+    "  .sgoals li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; }\n"
     "\n"
     "  /* Links that act: underlined in the link colour. Unavailable ones: faint, no underline, no pointer. */\n"
     "  .lnk { color: var(--link); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; border-radius: 2px; }\n"
@@ -3729,6 +3813,9 @@ PANEL_HTML = (
     "  var restoredTo = null, canUndoRestore = false, restoreFailed = false;\n"
     "  var live = {};\n"
     "  var api = 'on';\n"
+    "  var setup = null;            // the host's \"setup\" message: how to connect an AI app (first run), or null\n"
+    "  var setupApp = null;         // the app square picked in it\n"
+    "  var setupDone = {};          // which of its buttons were pressed (\"Copied\", \"Opening...\")\n"
     "  var openGroups = {};          // group id -> bool\n"
     "  var newestSeen = null;        // newest group id at the last render\n"
     "  var openRows = {};            // row id -> bool\n"
@@ -4063,7 +4150,8 @@ PANEL_HTML = (
     "    }\n"
     "    var shown = shownGroups();\n"
     "    if (!shown.length) {\n"
-    "      if (api !== 'off') html += '<div class=\"empty\">When an assistant changes something, it shows up here.</div>';\n"
+    "      if (api !== 'off') html += setup && setup.apps && setup.apps.length ? setupHtml()\n"
+    "        : '<div class=\"empty\">When an assistant changes something, it shows up here.</div>';\n"
     "    } else {\n"
     "      html += restoredLineHtml();\n"
     "      html += shown.map(groupHtml).join(''); // index 0 is the newest group: the \"Restored to\" line is not one\n"
@@ -4075,6 +4163,48 @@ PANEL_HTML = (
     "    updateFold();\n"
     "    updateGear();\n"
     "    placeFocus(keep, pending);\n"
+    "  }\n"
+    "\n"
+    "  function setupCurrent() {\n"
+    "    var a = null;\n"
+    "    setup.apps.forEach(function (x) { if (x.id === setupApp) a = x; });\n"
+    "    return a || setup.apps[0];\n"
+    "  }\n"
+    "  function setupHtml() {\n"
+    "    var st = setup.status;\n"
+    "    if (st && st.seen) {\n"
+    "      return '<div class=\"setup\"><div class=\"sstat top\"><span class=\"sdot ok\"></span><b>' + esc(st.app ? 'Connected to ' + st.app : 'Connected') + '</b></div>' +\n"
+    "        '<div class=\"sh\">Now tell it what you want</div><div class=\"slead\">A goal works better than a setting. For example:</div>' +\n"
+    "        '<ul class=\"sgoals\">' + (setup.goals || []).map(function (g, i) {\n"
+    "          return '<li><span>' + esc(g) + '</span>' + (setupDone['g' + i] ? '<span class=\"sdone\">Copied</span>'\n"
+    "            : '<button type=\"button\" class=\"lnk\" data-scopy=\"g' + i + '\" data-fk=\"sg' + i + '\">Copy</button>') + '</li>';\n"
+    "        }).join('') + '</ul><div class=\"slead\">Its changes will appear here, each with Revert.</div></div>';\n"
+    "    }\n"
+    "    var app = setupCurrent();\n"
+    "    var squares = setup.apps.map(function (a) {\n"
+    "      return '<button type=\"button\" class=\"ssq\" data-sapp=\"' + esc(a.id) + '\" data-fk=\"sa:' + esc(a.id) + '\" aria-pressed=\"' + (a.id === app.id) + '\">' +\n"
+    "        (a.icon || '') + '<span>' + esc(a.name) + '</span></button>';\n"
+    "    }).join('');\n"
+    "    var routes = app.routes.map(function (r, j) {\n"
+    "      var act = '';\n"
+    "      if (!r.off) act = setupDone['r' + j] ? '<span class=\"sdone\">' + (r.open ? 'Opening\\u2026' : 'Copied') + '</span>'\n"
+    "        : '<button type=\"button\" class=\"sact' + (r.primary ? '' : ' second') + '\" data-' + (r.open ? 'sopen' : 'scopy') + '=\"r' + j + '\" data-fk=\"sr' + j + '\">' + esc(r.act) + '</button>';\n"
+    "      return '<div class=\"sroute' + (r.off ? ' off' : '') + '\"><b>' + esc(r.label) + '</b><small>' + esc(r.hint) + (r.also ? ' ' + esc(r.also) : '') + '</small>' + act + '</div>';\n"
+    "    }).join('');\n"
+    "    return '<div class=\"setup\"><div class=\"sh\">Connect your AI app</div>' +\n"
+    "      '<div class=\"slead\">Then tell it the print you want. Every change it makes shows up here, and you can undo any of it.</div>' +\n"
+    "      '<div class=\"ssqs\">' + squares + '</div><ol class=\"ssteps\"><li><span>Set it up where you use ' + esc(app.where || app.name) + '</span><div class=\"sroutes\">' + routes + '</div></li>' +\n"
+    "      '<li><span>' + esc(app.ask) + ': \\u201c' + esc(setup.ask) + '\\u201d ' + (setupDone.ask ? '<span class=\"sdone\">Copied</span>'\n"
+    "        : '<button type=\"button\" class=\"lnk\" data-scopy=\"ask\" data-fk=\"sk\">Copy</button>') + '</span></li></ol>' +\n"
+    "      '<div class=\"sstat\"><span class=\"sdot\"></span>Waiting for ' + esc(app.where || app.name) + '\\u2026</div></div>';\n"
+    "  }\n"
+    "  function copyToClipboard(text, done) {\n"
+    "    function fallback() {\n"
+    "      var a = document.createElement('textarea'); a.value = text; document.body.appendChild(a); a.select();\n"
+    "      var ok = false; try { ok = document.execCommand('copy'); } catch (e) {} document.body.removeChild(a); done(ok);\n"
+    "    }\n"
+    "    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { done(true); }, fallback);\n"
+    "    else fallback();\n"
     "  }\n"
     "\n"
     "  function applyHistory(m) {\n"
@@ -4151,6 +4281,7 @@ PANEL_HTML = (
     "    }\n"
     "    else if (m.type === 'state') { api = m.api === 'off' ? 'off' : 'on'; render(); }\n"
     "    else if (m.type === 'result') applyResult(m);\n"
+    "    else if (m.type === 'setup') { setup = m; render(); }\n"
     "  }\n"
     "  window.__mcpPanelReceive = receive;\n"
     "  if (window.orca && window.orca.onMessage) window.orca.onMessage(receive);\n"
@@ -4172,6 +4303,18 @@ PANEL_HTML = (
     "    var el;\n"
     "    // An unavailable control (a disabled restore icon or undo link) does nothing, and never toggles its group.\n"
     "    if (ancestor(target, 'aria-disabled')) return true;\n"
+    "    if ((el = ancestor(target, 'data-sapp'))) { setupApp = el.getAttribute('data-sapp'); setupDone = {}; focusNext = 'sa:' + setupApp; render(); return true; }\n"
+    "    if ((el = ancestor(target, 'data-sopen'))) {\n"
+    "      var ok = el.getAttribute('data-sopen'), or = setupCurrent().routes[Number(ok.slice(1))];\n"
+    "      if (or && or.open) { send({ action: 'open', url: or.open }); setupDone[ok] = true; render(); }\n"
+    "      return true;\n"
+    "    }\n"
+    "    if ((el = ancestor(target, 'data-scopy'))) {\n"
+    "      var ck = el.getAttribute('data-scopy'), text = ck === 'ask' ? setup.ask : ck.charAt(0) === 'g' ? (setup.goals || [])[Number(ck.slice(1))]\n"
+    "        : (setupCurrent().routes[Number(ck.slice(1))] || {}).copy;\n"
+    "      if (text) copyToClipboard(text, function (done) { if (done) { setupDone[ck] = true; render(); } });\n"
+    "      return true;\n"
+    "    }\n"
     "    if ((el = ancestor(target, 'data-undo'))) {\n"
     "      var id = Number(el.getAttribute('data-undo'));\n"
     "      pendingUndo[id] = 'busy'; delete undoError[id];\n"

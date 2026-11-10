@@ -182,7 +182,9 @@ def token_problem(e: ApiError) -> bool:
     """True when OrcaSlicer refused the token or this server has none (the fix is the token). A
     ConfigError is a missing token only when it names ORCA_API_TOKEN (load_config says so); any other
     one, an invalid ORCA_API_TIMEOUT for instance, is not the token's fault."""
-    return isinstance(e, Unauthorized) or (isinstance(e, ConfigError) and "ORCA_API_TOKEN" in str(e))
+    # Not a token problem when OrcaSlicer simply wasn't found (config.NOT_FOUND): the fix is starting it.
+    return isinstance(e, Unauthorized) or (isinstance(e, ConfigError) and "ORCA_API_TOKEN" in str(e)
+                                           and "wasn't found" not in str(e))
 
 
 def orca_read_hint(e: ApiError, start_hint: str) -> str:
@@ -190,6 +192,8 @@ def orca_read_hint(e: ApiError, start_hint: str) -> str:
     other configuration error, else `start_hint` (OrcaSlicer is simply not running)."""
     if token_problem(e):
         return TOKEN_HINT
+    if isinstance(e, ConfigError) and "wasn't found" in str(e):
+        return start_hint  # no token and OrcaSlicer not found on this computer: start it
     return SETTINGS_HINT if isinstance(e, ConfigError) else start_hint
 
 

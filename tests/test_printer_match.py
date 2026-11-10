@@ -160,9 +160,9 @@ async def test_check_printer_match_needs_orcaslicer(monkeypatch):
     out = await srv.check_printer_match()
     assert out["error"] == "orca_unreachable"
     assert out["message"] == "check_printer_match couldn't read the active profile from OrcaSlicer."
-    assert out["hint"] == ("Check ORCA_API_TOKEN in this MCP server's settings: it must match the token on the "
-                           "Remote API page of OrcaSlicer's Preferences.")
-    assert "ORCA_API_TOKEN is required" in out["detail"]
+    # no token and nothing found on this computer: the hint is to start OrcaSlicer, not to check a token
+    assert out["hint"] == "Start OrcaSlicer (MCP build) with the Remote API enabled."
+    assert "ORCA_API_TOKEN is not set" in out["detail"]
 
 
 @respx.mock

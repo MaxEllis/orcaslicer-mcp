@@ -317,3 +317,36 @@ def test_a_host_without_a_needed_call_says_which_orcaslicer_is_needed(tmp_path):
     finally:
         mod.orca.host.ui.create_dock_panel = saved
         cap.on_unload()
+
+
+def test_the_connection_file_lets_the_connector_find_the_plugin(tmp_path, monkeypatch):
+    """The plugin writes connection.json in its data folder; orcaslicer-mcp, with no token set, reads it."""
+    storage = tmp_path / "orca_plugins" / "plugin_data" / "orcaslicer_mcp_plugin"
+    storage.mkdir(parents=True)
+    fake_orca.STATE.reset(storage=str(storage))
+    (storage / "settings.json").write_text(json.dumps({"port": 0}))
+    cap = mod.McpCapability()
+    saved, mod.load_port = mod.load_port, (lambda folder: 0)
+    try:
+        cap.on_load()
+    finally:
+        mod.load_port = saved
+    try:
+        data = json.loads((storage / "connection.json").read_text())
+        assert data["product"] == "orcaslicer-mcp-plugin" and data["token"] == cap._token
+        assert data["url"] == f"http://127.0.0.1:{cap._service.port}" and data["version"] == mod.PLUGIN_VERSION
+        import sys as _sys
+        if _sys.platform != "win32":
+            assert (storage / "connection.json").stat().st_mode & 0o077 == 0  # owner only
+        from orcaslicer_mcp.config import load_config
+        monkeypatch.setenv("ORCA_DATADIR", str(tmp_path))
+        monkeypatch.delenv("ORCA_API_TOKEN", raising=False)
+        monkeypatch.delenv("ORCA_API_URL", raising=False)
+        cfg = load_config()
+        assert cfg.token == cap._token and cfg.base_url == data["url"] and cfg.source == "plugin"
+        # a new token rewrites the file
+        fake_orca.UI.run_blocking(cap._renew_token)
+        assert json.loads((storage / "connection.json").read_text())["token"] == cap._token != data["token"]
+    finally:
+        cap.on_unload()
+    assert not (storage / "connection.json").exists()  # gone when the plugin stops

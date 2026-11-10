@@ -1,7 +1,7 @@
 import pytest
 from orcaslicer_mcp.config import load_config
 
-def test_requires_token(monkeypatch):
+def test_requires_token_when_nothing_is_found(monkeypatch):
     monkeypatch.delenv("ORCA_API_TOKEN", raising=False)
     with pytest.raises(RuntimeError):
         load_config()

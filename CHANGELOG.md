@@ -8,6 +8,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [Unreleased]
 
 ### Added
+- No token needed on the same computer: with `ORCA_API_TOKEN` unset, the connector finds OrcaSlicer by itself, through the file the OrcaSlicer MCP plugin writes while it runs, or the OrcaSlicer MCP build's own settings. For OrcaSlicer's own settings folder (`--datadir`) set `ORCA_DATADIR`; for OrcaSlicer on another computer set `ORCA_API_URL` and `ORCA_API_TOKEN` as before. The Claude Desktop extension's token field is now optional.
 - `get_config` with `keys` also says what each setting means, with its unit, range and choices, from OrcaSlicer's own tooltips.
 - `set_config` and `apply_and_slice` take `null` for a key to put it back to the value saved in its preset, one setting at a time. Script, G-code and printer-connection settings are never put back this way.
 - The server now sends instructions with its handshake: where to start, which tools explain a setting, how to check a result.

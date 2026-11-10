@@ -1446,6 +1446,30 @@ def request_permissions(wanted: dict) -> dict:
     return {}
 
 
+# The connector finds OrcaSlicer by itself through this file (orcaslicer-mcp discovery.py), so the setup a user
+# pastes into their AI app carries no token. Written while the server runs, removed when it stops.
+CONNECTION_FILE = "connection.json"
+CONNECTION_PRODUCT = "orcaslicer-mcp-plugin"
+
+
+def write_connection_file(folder: str, port: int, token: str) -> None:
+    data = {"product": CONNECTION_PRODUCT, "version": PLUGIN_VERSION, "url": f"http://{BIND_HOST}:{port}",
+            "token": token, "pid": os.getpid(), "written": int(time.time())}
+    path = os.path.join(folder, CONNECTION_FILE)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # owner-only where the OS has modes
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
+def remove_connection_file(folder: str) -> None:
+    try:
+        os.remove(os.path.join(folder, CONNECTION_FILE))
+    except OSError:
+        pass
+
+
 def load_or_create_token(folder: str, renew: bool = False) -> str:
     path = os.path.join(folder, "token.txt")
     if not renew:
@@ -2711,6 +2735,10 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         self._token = tok
         if self._service is not None:
             self._service.token.value = tok
+            try:
+                write_connection_file(self._folder, self._port, tok)
+            except OSError as e:
+                trace(f"connection file not rewritten: {type(e).__name__}: {e}")
         self._notify("new token made: paste it into your AI app's OrcaSlicer MCP connector")
 
     # -- lifecycle --------------------------------------------------------------------------
@@ -2742,6 +2770,10 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             self._service = Service(api, self._token, self._port)
             self._port = self._service.port
             self._service.start()
+            try:
+                write_connection_file(self._folder, self._port, self._token)
+            except OSError as e:  # the connector then needs the token set by hand, as before
+                trace(f"connection file not written: {type(e).__name__}: {e}")
             print(f"[orcaslicer-mcp-plugin] listening on {BIND_HOST}:{self._port}")
             trace(f"server thread started, alive={self._service.thread.is_alive()}")
             self._open_panel_at_load()
@@ -2770,6 +2802,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             self._service.stop()
             trace(f"server stopped, thread alive={self._service.thread.is_alive()}")
             self._service = None
+            remove_connection_file(self._folder)
         if self.host is not None:
             self.host.save()
         panel, self._panel = self._panel, None

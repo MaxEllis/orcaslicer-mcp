@@ -30,6 +30,12 @@ def _isolate_outcome_store(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_orcaslicer_datadir(monkeypatch, tmp_path_factory):
+    """Discovery (no ORCA_API_TOKEN) must never find a real OrcaSlicer on the machine running the tests."""
+    monkeypatch.setenv("ORCA_DATADIR", str(tmp_path_factory.mktemp("orca-datadir")))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_printer_state(monkeypatch, tmp_path_factory):
     """The printer tools remember the last printer on disk and cache probes in memory.
     No test may read or write the real file or inherit another test's cache or settings."""

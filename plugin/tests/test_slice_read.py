@@ -64,16 +64,18 @@ def test_summary_of_a_file_without_comments_is_empty():
 
 def test_slice_folder_follows_the_temp_variables_off_windows():
     env = {"TMPDIR": "/var/tmp/x/", "TMP": "/ignored"}
-    assert mod.slice_folders(env, windows=False, uid=501) == ["/var/tmp/x/orcaslicer_501/orcaslicer_model"]
-    assert mod.slice_folders({}, windows=False, uid=1000) == ["/tmp/orcaslicer_1000/orcaslicer_model"]
+    yes = lambda d: True  # noqa: E731
+    assert mod.slice_folders(env, windows=False, uid=501, isdir=yes) == ["/var/tmp/x/orcaslicer_501/orcaslicer_model"]
+    assert mod.slice_folders({}, windows=False, uid=1000, isdir=yes) == ["/tmp/orcaslicer_1000/orcaslicer_model"]
 
 
 def test_slice_folder_on_windows_has_no_user_folder():
     env = {"TMP": "C:\\Users\\someone\\AppData\\Local\\Temp\\", "TEMP": "D:\\other"}
-    assert mod.slice_folders(env, windows=True, uid=None) == [
+    yes = lambda d: True  # noqa: E731
+    assert mod.slice_folders(env, windows=True, uid=None, isdir=yes) == [
         "C:\\Users\\someone\\AppData\\Local\\Temp\\orcaslicer_model"]
-    assert mod.slice_folders({"TEMP": "D:\\t"}, windows=True, uid=None) == ["D:\\t\\orcaslicer_model"]
-    assert mod.slice_folders({}, windows=True, uid=None) == []
+    assert mod.slice_folders({"TEMP": "D:\\t"}, windows=True, uid=None, isdir=yes) == ["D:\\t\\orcaslicer_model"]
+    assert mod.slice_folders({}, windows=True, uid=None, isdir=yes) == []
 
 
 def test_in_slice_folder():
@@ -108,119 +110,184 @@ def ctx(code="Ok", msg="", index=-1):
     return types.SimpleNamespace(code=getattr(CODE, code), msg=msg, index=index, name="", id="")
 
 
-class Fp:
-    def __init__(self):
-        self.value = "a"
+class Host:
+    """The two UI-thread reads SliceWatch makes: the current plate and the fingerprint."""
 
-    def __call__(self):
+    def __init__(self):
+        self.plate, self.value, self.fp_calls, self.broken = 0, "a", 0, False
+
+    def plate_index(self):
+        return self.plate
+
+    def fingerprint(self):
+        self.fp_calls += 1
+        if self.broken:
+            raise RuntimeError("host went away")
         return self.value
 
 
-def sliced(w, fp, path="/s/a.gcode", started=True):
+def watch():
+    h = Host()
+    return mod.SliceWatch(h.plate_index, h.fingerprint), h
+
+
+def sliced(w, path="/s/a.gcode", started=True, code="Ok"):
     if started:
-        w.event("SliceStarted", ctx(), fp)
-    w.event("GCodeExportFinished", ctx(msg=path), fp)
-    w.event("SlicingJobComplete", ctx(), fp)
+        w.event("SliceStarted", ctx())
+    w.event("GCodeExportFinished", ctx(msg=path))
+    w.event("SlicingJobComplete", ctx(code))
 
 
 def test_watch_starts_idle():
-    assert mod.SliceWatch().current(Fp()) == {"state": "idle"}
+    w, _ = watch()
+    assert w.current() == {"state": "idle"}
 
 
 def test_watch_follows_a_slice():
-    w, fp = mod.SliceWatch(), Fp()
-    w.event("SliceStarted", ctx(), fp)
-    assert w.current(fp)["state"] == "slicing"
-    w.event("GCodeExportFinished", ctx(msg="/s/a.gcode"), fp)
-    w.event("SlicingJobComplete", ctx(), fp)
-    assert w.current(fp) == {"state": "done", "path": "/s/a.gcode", "valid": True}
+    w, _ = watch()
+    w.event("SliceStarted", ctx())
+    assert w.current()["state"] == "slicing"
+    w.event("GCodeExportFinished", ctx(msg="/s/a.gcode"))
+    w.event("SlicingJobComplete", ctx())
+    assert w.current() == {"state": "done", "path": "/s/a.gcode", "valid": True, "serial": 1}
 
 
 def test_watch_change_makes_it_out_of_date():
-    w, fp = mod.SliceWatch(), Fp()
-    sliced(w, fp)
-    fp.value = "b"
-    assert w.current(fp)["valid"] is False
-    fp.value = "a"
-    assert w.current(fp)["valid"] is True
-    w.event("ObjectChanged", ctx(), fp)
-    assert w.current(fp)["valid"] is False
+    w, h = watch()
+    sliced(w)
+    h.value = "b"
+    assert w.current()["valid"] is False
+    h.value = "a"
+    assert w.current()["valid"] is True
+    w.event("ObjectChanged", ctx())
+    assert w.current()["valid"] is False
 
 
 @pytest.mark.parametrize("name", ["ObjectAdded", "ObjectDeleted", "ObjectTransformed", "ObjectChanged"])
 def test_watch_object_events_make_it_out_of_date(name):
-    w, fp = mod.SliceWatch(), Fp()
-    sliced(w, fp)
-    w.event(name, ctx(), fp)
-    assert w.current(fp)["valid"] is False
+    w, _ = watch()
+    sliced(w)
+    w.event(name, ctx())
+    assert w.current()["valid"] is False
 
 
 def test_watch_cancel_drops_the_previous_slice():
-    w, fp = mod.SliceWatch(), Fp()
-    sliced(w, fp)
-    w.event("SliceStarted", ctx(), fp)
-    w.event("SlicingJobComplete", ctx("Warn", "cancelled"), fp)
-    assert w.current(fp) == {"state": "idle"}
+    w, _ = watch()
+    sliced(w)
+    w.event("SliceStarted", ctx())
+    w.event("SlicingJobComplete", ctx("Warn", "cancelled"))
+    assert w.current() == {"state": "idle"}
+
+
+def test_watch_cancel_with_nothing_running_keeps_the_slice():
+    w, _ = watch()
+    sliced(w)
+    w.event("SlicingJobComplete", ctx("Warn", "cancelled"))
+    assert w.current()["state"] == "done"
 
 
 def test_watch_failed_slice():
-    w, fp = mod.SliceWatch(), Fp()
-    sliced(w, fp)
-    w.event("SliceStarted", ctx(), fp)
-    w.event("SlicingJobComplete", ctx("Error", "Nothing to be sliced"), fp)
-    assert w.current(fp) == {"state": "error", "message": "Nothing to be sliced"}
+    w, _ = watch()
+    sliced(w)
+    w.event("SliceStarted", ctx())
+    w.event("SlicingJobComplete", ctx("Error", "Nothing to be sliced"))
+    assert w.current() == {"state": "error", "message": "Nothing to be sliced"}
 
 
-def test_watch_ignores_a_failed_export():
-    w, fp = mod.SliceWatch(), Fp()
-    w.event("SliceStarted", ctx(), fp)
-    w.event("GCodeExportFinished", ctx("Error", "/s/a.gcode\ndisk full"), fp)
-    w.event("SlicingJobComplete", ctx(), fp)
-    assert w.current(fp) == {"state": "idle"}
+def test_watch_failed_export_keeps_a_finished_slice():
+    """OrcaSlicer keeps a complete slice valid when a later export or upload fails, and sends no SliceStarted."""
+    w, _ = watch()
+    sliced(w)
+    w.event("SlicingJobComplete", ctx("Error", "Failed to copy the G-code"))
+    assert w.current()["state"] == "done" and w.current()["valid"] is True
+
+
+def test_watch_error_after_the_gcode_was_written_keeps_it():
+    w, _ = watch()
+    sliced(w, "/s/b.gcode", code="Error")
+    assert w.current()["path"] == "/s/b.gcode"
+
+
+def test_watch_ignores_a_failed_gcode_write():
+    w, _ = watch()
+    w.event("SliceStarted", ctx())
+    w.event("GCodeExportFinished", ctx("Error", "/s/a.gcode\ndisk full"))
+    w.event("SlicingJobComplete", ctx())
+    assert w.current() == {"state": "idle"}
 
 
 @pytest.mark.parametrize("name", ["NewProject", "ProjectOpened", "ProjectClosed"])
 def test_watch_project_change_forgets_slices(name):
-    w, fp = mod.SliceWatch(), Fp()
-    sliced(w, fp)
-    w.event(name, ctx(), fp)
-    assert w.current(fp) == {"state": "idle"}
+    w, _ = watch()
+    sliced(w)
+    w.event(name, ctx())
+    assert w.current() == {"state": "idle"}
 
 
 def test_watch_export_without_start_still_counts():
-    w, fp = mod.SliceWatch(), Fp()
-    sliced(w, fp, started=False)
-    assert w.current(fp)["state"] == "done"
+    w, _ = watch()
+    sliced(w, started=False)
+    assert w.current()["state"] == "done"
 
 
 def test_watch_keeps_one_slice_per_plate():
-    w, fp = mod.SliceWatch(), Fp()
-    sliced(w, fp, "/s/plate-first.gcode")  # the plate shown when the project opened
-    w.event("PlateSelected", ctx(index=1), fp)
-    assert w.current(fp) == {"state": "idle"}
-    sliced(w, fp, "/s/plate-two.gcode")
-    assert w.current(fp)["path"] == "/s/plate-two.gcode"
-    w.event("PlateSelected", ctx(index=0), fp)
-    assert w.current(fp) == {"state": "idle"}  # index 0 is not known to be the opening plate
-    w.event("PlateSelected", ctx(index=1), fp)
-    assert w.current(fp)["path"] == "/s/plate-two.gcode"
+    w, h = watch()
+    sliced(w, "/s/p0.gcode")
+    h.plate = 1  # a plate switch, or "Move plate to front", which sends no PlateSelected
+    assert w.current() == {"state": "idle"}
+    sliced(w, "/s/p1.gcode")
+    assert w.current()["path"] == "/s/p1.gcode"
+    h.plate = 0
+    assert w.current()["path"] == "/s/p0.gcode"
 
 
-def test_watch_slice_all_files_each_plate():
-    w, fp = mod.SliceWatch(), Fp()
-    for i in (0, 1):
-        w.event("PlateSelected", ctx(index=i), fp)
-        sliced(w, fp, f"/s/p{i}.gcode")
-    w.event("PlateSelected", ctx(index=0), fp)
-    assert w.current(fp)["path"] == "/s/p0.gcode"
+def test_watch_new_slice_gets_a_new_serial():
+    w, _ = watch()
+    sliced(w)
+    first = w.current()["serial"]
+    sliced(w)
+    assert w.current()["serial"] == first + 1 and w.current()["path"] == "/s/a.gcode"
 
 
 def test_watch_fingerprint_only_when_needed():
-    calls = []
-    w = mod.SliceWatch()
-    w.current(lambda: calls.append(1) or "a")
-    w.event("SliceStarted", ctx(), lambda: calls.append(1) or "a")
-    assert calls == []
+    w, h = watch()
+    w.current()
+    w.event("SliceStarted", ctx())
+    w.event("SlicingJobComplete", ctx("Error", "x"))
+    assert h.fp_calls == 0
+
+
+def test_watch_survives_a_failing_fingerprint():
+    w, h = watch()
+    h.broken = True
+    sliced(w)
+    assert w.current()["valid"] is False
+    h.broken = False
+    assert w.current()["valid"] is False  # no fingerprint taken at the slice: stays out of date
+
+
+def test_summary_from_a_bambu_header():
+    head = ("; HEADER_BLOCK_START\n; model printing time: 5m 2s; total estimated time: 5m 56s\n"
+            "; total layer number: 30\n; HEADER_BLOCK_END\n")
+    tail = "; filament used [mm] = 100.5\n; filament used [g] = 1.5, 0.5\n"
+    out = mod.parse_gcode_summary(tail, head)
+    assert out["estimated_time_seconds"] == 356 and out["layers"] == 30 and out["filament_used_g"] == 2.0
+
+
+def test_slice_folder_skips_a_variable_whose_folder_is_missing():
+    env = {"TMPDIR": "/gone", "TMP": "/var/tmp/y"}
+    assert mod.slice_folders(env, windows=False, uid=5, isdir=lambda d: d != "/gone") == [
+        "/var/tmp/y/orcaslicer_5/orcaslicer_model"]
+
+
+def test_in_slice_folder_windows_paths():
+    import ntpath
+    folders = ["G:\\orca-dev\\tmp\\orcaslicer_model"]
+    reported = "G:\\orca-dev\\tmp/orcaslicer_model/Tue_Nov_10/10_51_04#13368#44/Metadata/.13368.0.gcode"
+    assert mod.in_slice_folder(reported, folders, ntpath)
+    assert mod.in_slice_folder(reported.upper(), folders, ntpath)
+    assert not mod.in_slice_folder("H:\\orca-dev\\tmp\\orcaslicer_model\\x.gcode", folders, ntpath)
+    assert not mod.in_slice_folder("G:\\orca-dev\\tmp\\orcaslicer_model\\..\\x.gcode", folders, ntpath)
 
 
 # ------------------------------------------------------------------ over HTTP
@@ -332,3 +399,32 @@ def test_project_switch_never_serves_the_old_slice(live, folder):
     _, body = call(live, "GET", "/api/v1/slice/status")
     assert body["state"] == "idle"
     assert raw(live, "/api/v1/gcode")[0] == 409
+
+
+def test_a_reslice_of_the_same_size_is_read_again(live, folder):
+    path = gcode_file(folder)
+    slice_now(live, path)
+    assert call(live, "GET", "/api/v1/slice/status")[1]["stats"]["total_cost"] == 0.14
+    with open(path, "w") as f:
+        f.write(("G1 X1\n" + TAIL).replace("total filament cost = 0.14", "total filament cost = 0.19"))
+    slice_now(live, path)
+    assert call(live, "GET", "/api/v1/slice/status")[1]["stats"]["total_cost"] == 0.19
+
+
+def test_a_plate_switch_without_an_event(live, folder):
+    slice_now(live, gcode_file(folder))
+    S.model.plate = 1
+    _, body = call(live, "GET", "/api/v1/slice/status")
+    assert body["state"] == "idle"
+    S.model.plate = 0
+    assert call(live, "GET", "/api/v1/slice/status")[1]["state"] == "done"
+
+
+def test_status_survives_a_failing_read(live, folder, monkeypatch):
+    slice_now(live, gcode_file(folder))
+
+    def boom():
+        raise RuntimeError("no model")
+    monkeypatch.setattr(live.slices, "_fingerprint", boom)
+    status, st = call(live, "GET", "/api/v1/status")
+    assert status == 200 and st["slice_result_valid"] is False

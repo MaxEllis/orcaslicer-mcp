@@ -313,6 +313,11 @@ class ModelObject:
 class Model:
     def __init__(self):
         self.objs = [ModelObject(101, "cube", BoundingBox((0, 0, 0), (20, 20, 20)))]
+        self.plate = 0  # the plate OrcaSlicer shows
+
+    def current_plate_index(self):
+        _ui_only()
+        return self.plate
 
     def objects(self):
         _ui_only()

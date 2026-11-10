@@ -58,6 +58,24 @@ async def test_slice_warnings_on_the_plugin_say_they_are_not_visible():
 
 
 @respx.mock
+async def test_slice_warnings_on_the_plugin_out_of_date_still_say_so():
+    respx.get(f"{BASE}/api/v1/status").mock(return_value=httpx.Response(200, json=PLUGIN_STATUS))
+    respx.get(f"{BASE}/api/v1/slice/status").mock(return_value=httpx.Response(200, json={
+        "state": "done", "percent": 100, "message": "", "warnings": [], "valid": False, "stale": True}))
+    out = await srv.get_slice_warnings()
+    assert out["out_of_date"] is True and out["warnings_visible"] is False
+    assert "Slice again" in out["note"] and "OrcaSlicer window" in out["note"]
+
+
+@respx.mock
+async def test_unreadable_gcode_keeps_the_plugins_explanation():
+    respx.get(f"{BASE}/api/v1/gcode").mock(return_value=httpx.Response(500, json={
+        "error": "gcode_not_readable", "detail": "couldn't be read just now: try again"}))
+    out = await srv.get_gcode()
+    assert "gcode_not_readable" in out["error"] and "try again" in out["error"]
+
+
+@respx.mock
 async def test_breakdown_on_the_plugin_names_the_build():
     respx.get(f"{BASE}/api/v1/status").mock(return_value=httpx.Response(200, json=PLUGIN_STATUS))
     respx.get(f"{BASE}/api/v1/slice/status").mock(return_value=httpx.Response(200, json={

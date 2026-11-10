@@ -74,11 +74,12 @@ and serves them on `GET /api/v1/slice/status` and the file on `GET /api/v1/gcode
 - **Out of date:** a slice counts as out of date once settings, presets, objects, their parts and modifiers or
   their own settings change, and `/gcode` then answers `not_sliced`, as on the build. Putting a setting back
   makes the slice current again, because the G-code matches it again.
-- **Not seen:** paint added to a part that was already painted (the plugin API only says whether a part is
-  painted), OrcaSlicer's slice warnings, and the time per feature. The G-code has no warnings and no
-  per-feature times in it.
-- **Plates:** a slice belongs to the plate that was selected when it ran. After opening a project, the first
-  plate switch hides earlier slices until you slice again; the plugin can't tell plate numbers before then.
+- **Not seen:** plate settings (a plate's own bed type, print sequence or spiral vase), paint added to a part
+  that was already painted and changes to an existing variable layer height (the plugin API only says that a
+  part is painted or has one), OrcaSlicer's slice warnings, and the time per feature. The G-code has no
+  warnings and no per-feature times in it.
+- **Plates:** each plate keeps its own slice, under the plate number OrcaSlicer gives it. Moving a plate moves
+  its objects, so the slices read as out of date until you slice again.
 - **Files:** the plugin only opens files inside that temporary folder. OrcaSlicer writes a new file each time
   you slice; the plugin reads it in one go and closes it, so it never holds up the next slice.
 

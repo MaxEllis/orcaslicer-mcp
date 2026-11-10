@@ -177,7 +177,8 @@ def _error_from_status(status: int, body: dict) -> ApiError:
     if status == 504:
         return UiTimeout("ui_timeout: OrcaSlicer's window didn't answer in time; a dialog may be open "
                          "in it, ask the user to look, then try again.")
-    # The plugin answers 503 with a reason the user can act on ("paused": its panel was closed).
-    if status == 503 and body.get("error") and body.get("detail"):
+    # The plugin answers 503 with a reason the user can act on ("paused": its panel was closed), and 500 with
+    # one when it can't read the G-code of a slice.
+    if status in (500, 503) and body.get("error") and body.get("detail"):
         return ServerError(f"{body['error']}: {body['detail']}")
     return ServerError(msg)

@@ -641,10 +641,11 @@ async def get_slice_warnings() -> dict:
                "message": s["message"]}
         if s.get("out_of_date"):
             out["out_of_date"], out["note"] = True, s["note"]
-        elif status.get("backend") == "plugin":
+        if status.get("backend") == "plugin":
             out["warnings_visible"] = False
-            out["note"] = ("The OrcaSlicer MCP plugin can't see OrcaSlicer's slice warnings; an empty list "
-                           "means nothing. Ask the user to check the OrcaSlicer window for any.")
+            out["note"] = (out.get("note", "") + " The OrcaSlicer MCP plugin can't see OrcaSlicer's slice "
+                           "warnings; an empty list means nothing. Ask the user to check the OrcaSlicer window "
+                           "for any.").strip()
         return out
     except ApiError as e:
         return _err(e)

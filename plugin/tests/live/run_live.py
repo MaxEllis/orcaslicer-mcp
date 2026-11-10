@@ -157,30 +157,40 @@ def fork(method, path, body=None):
         URL, TOKEN = saved
 
 
-def wait_state(want, seconds=240):
+def slice_id():
+    _, body, _ = call("GET", "/api/v1/slice/status")
+    return body.get("slice_id")
+
+
+def wait_new(before, seconds=240):
+    """The next finished slice: a new slice_id, or an error."""
     end = time.monotonic() + seconds
     body = {}
     while time.monotonic() < end:
         _, body, _ = call("GET", "/api/v1/slice/status")
-        if body.get("state") in want:
+        if body.get("state") == "error" or (body.get("state") == "done" and body.get("slice_id") != before):
             return body
         time.sleep(1)
     return body
 
 
 def user_slices(prompt="press Slice plate in OrcaSlicer now"):
+    before = slice_id()
     if FORK:
         s, body, _ = fork("POST", "/api/v1/slice", {})
-        if s not in (200, 202):
-            print("   build would not slice:", s, body)
+        if s not in (200, 202) or body.get("already_valid"):
+            print("   build did not start a slice:", s, body)
     else:
         print(f"   >>> {prompt}")
-    return wait_state({"done", "error"})
+    return wait_new(before)
 
 
 def phase_slice():
     _, st, _ = call("GET", "/api/v1/status")
     check("plugin 0.2.0 says slice_read", "slice_read" in st.get("capabilities", []), st.get("plugin_version"))
+    _, cfg, _ = call("GET", "/api/v1/config?keys=layer_height")
+    lh = cfg["config"]["layer_height"]
+    call("PUT", "/api/v1/config", {"layer_height": round(float(lh) + 0.04, 2)})  # so the first slice really slices
     body = user_slices()
     check("slice done", body.get("state") == "done" and body.get("valid") is True, body.get("message", "")[:80])
     stats = body.get("stats") or {}
@@ -198,16 +208,11 @@ def phase_slice():
               f"{fs.get('filament_used_g')} vs {stats.get('filament_used_g')}")
         s, _, fdata = get_raw("/api/v1/gcode", base=FORK, token=FORK_TOKEN)
         check("same G-code as the build serves", s == 200 and fdata == data, f"{len(fdata)} vs {len(data)} bytes")
-    _, cfg, _ = call("GET", "/api/v1/config?keys=layer_height")
-    lh = cfg["config"]["layer_height"]
-    s, _, _ = call("PUT", "/api/v1/config", {"layer_height": round(float(lh) + 0.04, 2)})
+    s, _, _ = call("PUT", "/api/v1/config", {"layer_height": lh})  # put it back: a change since the slice
     _, b2, _ = call("GET", "/api/v1/slice/status")
     check("a settings change makes it out of date", s == 200 and b2.get("valid") is False and b2.get("stale") is True,
           b2.get("message", "")[:60])
     check("gcode 409 when out of date", get_raw("/api/v1/gcode")[0] == 409)
-    call("PUT", "/api/v1/config", {"layer_height": lh})
-    _, b3, _ = call("GET", "/api/v1/slice/status")
-    print("   after putting it back: valid =", b3.get("valid"), "(the G-code matches again)")
     body = user_slices("press Slice plate again")
     check("slice again: done and valid", body.get("state") == "done" and body.get("valid") is True)
     if FORK:

@@ -11,6 +11,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `get_config` with `keys` also says what each setting means, with its unit, range and choices, from OrcaSlicer's own tooltips.
 - `set_config` and `apply_and_slice` take `null` for a key to put it back to the value saved in its preset, one setting at a time. Script, G-code and printer-connection settings are never put back this way.
 - The server now sends instructions with its handshake: where to start, which tools explain a setting, how to check a result.
+- `check_printer_match` returns `fix` when the profile's speeds or accelerations go past the printer's Klipper limits: the `set_config` changes that lower just those settings to the limits, for the assistant to offer and apply if you agree. Nozzle size, bed size, temperatures and retraction stay advice, since which side is wrong is your call.
+- `check_profile_physics` reads the printer's start and end G-code (`gcode_scripts`): a fixed temperature where a placeholder would follow the filament, relative positioning left on, no homing, heaters never turned off, moves outside the printable area. Warnings only; scripts that call a printer macro are trusted to do that work.
+- `describe_plate` says whether the G-code was sliced with the settings that are set now (`settings_check`), naming any setting the slice used instead, such as a plate's own bed type, print sequence or spiral vase.
+- With enough recorded prints, `get_slice_status` and `slice_and_wait` give a `forecast`: how long the slice will really take on your printer from start to finish, from how past prints compared with their estimates, per OrcaSlicer version when there are enough of them. `save_gcode` now records the OrcaSlicer version with each slice for this.
 - The OrcaSlicer MCP plugin's Config tab has a **Connect your AI app** section: pick Claude Desktop, Claude Code, Codex or another app and copy what it needs, with the token already in it.
 
 ### Changed

@@ -136,6 +136,20 @@ def _speed_warning(best: float, key: str, lim: float, unit: str) -> str:
 _LIMIT_WARNINGS = {"acceleration": _accel_warning, "speed": _speed_warning}
 
 
+def _capped(cfg: dict, keys, lim: float) -> dict:
+    """The set_config changes that bring every setting above the printer's limit down to it, each element of a
+    per-extruder list on its own. Lowering a speed or an acceleration to what the printer allows is always safe
+    to offer; the user still decides (it goes through set_config, shows in the panel and can be reverted)."""
+    fix = {}
+    for key in keys:
+        raw = cfg.get(key)
+        vals = floats(raw)
+        if not vals or max(vals) <= lim + 1 or "%" in str(raw):
+            continue
+        fix[key] = ",".join(f"{min(v, lim):g}" for v in vals)
+    return fix
+
+
 def check_limit(name: str, cfg: dict, keys, printer_value, unit: str) -> dict:
     key, best = _highest(cfg, keys)
     lim = floats(printer_value)
@@ -143,7 +157,11 @@ def check_limit(name: str, cfg: dict, keys, printer_value, unit: str) -> dict:
         return _unknown(name)
     profile = {"highest": best, "setting": key}
     if best > lim[0] + 1:
-        return _check(name, "warn", profile, lim[0], _LIMIT_WARNINGS[name](best, key, lim[0], unit))
+        out = _check(name, "warn", profile, lim[0], _LIMIT_WARNINGS[name](best, key, lim[0], unit))
+        fix = _capped(cfg, keys, lim[0])
+        if fix:
+            out["fix"] = fix
+        return out
     return _check(name, "ok", profile, lim[0], f"Every {name} in the profile is within Klipper's {lim[0]:g} {unit}.")
 
 
@@ -211,6 +229,7 @@ def compare(cfg: dict, settings: dict) -> dict:
         check_firmware_retraction(cfg, settings),
     ]
     warns = [c["check"] for c in checks if c["status"] == "warn"]
+    fix = {k: v for c in checks for k, v in (c.get("fix") or {}).items()}
     unknown = sum(1 for c in checks if c["status"] == "unknown")
     ok = sum(1 for c in checks if c["status"] == "ok")
     if warns:
@@ -223,4 +242,9 @@ def compare(cfg: dict, settings: dict) -> dict:
         head = f"No mismatches found: {ok} check{'s' if ok != 1 else ''} passed, {unknown} couldn't be checked."
     else:
         head = f"The profile matches the printer on {len(checks)} of {len(checks)} checks."
-    return {"headline": head, "checks": checks}
+    out = {"headline": head, "checks": checks}
+    if fix:
+        out["fix"] = fix
+        out["fix_note"] = ("To use the printer's limits, pass `fix` to set_config: it lowers only the settings above "
+                           "them, as unsaved edits the user can revert in the panel. Ask the user first.")
+    return out

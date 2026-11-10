@@ -295,3 +295,37 @@ async def test_check_printer_match_on_octoprint_says_only_klipper_reports_its_se
     assert out["printer"]["kind"] == "octoprint" and out["printer"]["source"] == "override"
     assert "checks" not in out and "headline" not in out
     assert fork.call_count == 0
+
+
+# ---- fix: the set_config changes that bring speeds and accelerations within the printer's limits ----
+
+def test_speed_and_acceleration_over_the_limit_come_with_a_fix():
+    r = m.compare({**CFG, "travel_acceleration": "8000", "outer_wall_acceleration": "6000",
+                   "travel_speed": "500"}, SETTINGS)
+    c = by_check(r)
+    assert c["acceleration"]["fix"] == {"travel_acceleration": "5000", "outer_wall_acceleration": "5000"}
+    assert c["speed"]["fix"] == {"travel_speed": "300"}
+    assert r["fix"] == {"travel_acceleration": "5000", "outer_wall_acceleration": "5000", "travel_speed": "300"}
+    assert "set_config" in r["fix_note"] and "Ask the user first" in r["fix_note"]
+
+
+def test_settings_within_the_limit_are_left_out_of_the_fix():
+    r = m.compare({**CFG, "travel_acceleration": "8000"}, SETTINGS)
+    assert r["fix"] == {"travel_acceleration": "5000"}  # default 3000 and outer wall 2000 stay as they are
+
+
+def test_a_per_extruder_list_is_capped_element_by_element():
+    r = m.compare({**CFG, "travel_speed": "250,500"}, SETTINGS)
+    assert r["fix"] == {"travel_speed": "250,300"}
+
+
+def test_no_fix_for_checks_that_need_a_judgement():
+    """Nozzle size, bed size, temperatures and firmware retraction: which side is wrong is the user's call."""
+    for change in ({"nozzle_diameter": "0.8"}, {"printable_height": "400"}, {"nozzle_temperature": "300"},
+                   {"use_firmware_retraction": "1"}):
+        r = m.compare({**CFG, **change}, SETTINGS)
+        assert "fix" not in r and all("fix" not in c for c in r["checks"])
+
+
+def test_a_matching_profile_has_no_fix():
+    assert "fix" not in m.compare(CFG, SETTINGS)

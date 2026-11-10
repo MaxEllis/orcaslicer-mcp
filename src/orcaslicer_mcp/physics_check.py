@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from .gcode_audit import audit as audit_scripts
+
 @dataclass(frozen=True)
 class CheckResult:
     name: str
@@ -95,6 +97,7 @@ CHECK_LAYERS: dict[str, frozenset[str]] = {
     "cooling_sanity":     frozenset({"filament"}),                      # fan_min/max, slow_down_layer_time
     "first_layer_height": frozenset({"print", "printer"}),
     "initial_layer_temp": frozenset({"filament"}),
+    "gcode_scripts":      frozenset({"printer"}),                       # machine start/end G-code text
 }
 
 def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
@@ -206,4 +209,10 @@ def run_checks(cfg: dict[str, str]) -> list[CheckResult]:
                 f"first-layer nozzle {t_init:g}C >= bulk {t_bulk:g}C"))
     else:
         out.append(CheckResult("initial_layer_temp", "warn", "insufficient data (nozzle_temperature/initial_layer)"))
+
+    # gcode_scripts: a static read of the start/end G-code (gcode_audit.py). Heuristic, so it only ever warns.
+    status, findings = audit_scripts(cfg)
+    out.append(CheckResult("gcode_scripts", status, "; ".join(findings) if findings else
+                           "start and end G-code: homing, temperatures from placeholders, positioning mode and "
+                           "heaters off look right (macros on the printer are not checked)"))
     return out

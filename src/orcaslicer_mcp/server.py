@@ -34,6 +34,8 @@ from . import outcomes as _outcomes
 import hashlib
 import time
 from . import plate_describe as _plate
+from . import verify_slice as _verify
+from . import forecast as _forecast
 from .printer import target as _ptarget
 from .printer import wait as _pwait
 from .printer import history as _phistory
@@ -736,6 +738,23 @@ async def slice() -> dict:
         return _err(e)
 
 
+async def _with_forecast(c, result: dict, version: str | None = None) -> dict:
+    """A finished slice also says how long it will really take on this printer, when the outcome store has
+    enough past prints to judge (forecast.py). Optional: any problem only leaves it out."""
+    est = (result.get("stats") or {}).get("estimated_time_seconds")
+    if result.get("state") != "done" or not est or not _outcomes.is_available():
+        return result
+    try:
+        if version is None:
+            version = (await c.get_status()).get("app_version")
+        fc = _forecast.time_forecast(est, version)
+    except Exception:  # noqa: BLE001
+        fc = None
+    if fc:
+        result["forecast"] = fc
+    return result
+
+
 @mcp.tool()
 async def get_slice_status() -> dict:
     """Read the state, time and filament of the current or last slice, and whether it is out of date; for the warnings alone use get_slice_warnings.
@@ -745,7 +764,11 @@ async def get_slice_status() -> dict:
 
     Poll this after slice to follow progress and read the result; 'idle' means no slice has run
     or it was cancelled. For only the pass/fail warnings use get_slice_warnings; for a
-    per-feature time and filament breakdown use get_slice_breakdown."""
+    per-feature time and filament breakdown use get_slice_breakdown.
+
+    When the outcome store holds enough finished prints, `forecast` says how long this slice will
+    really take from start to finish on this printer (OrcaSlicer's estimate corrected by how past
+    prints compared with theirs, per OrcaSlicer version when possible); relay its summary."""
     try:
         async with _client() as c:
             st = await c.slice_status()
@@ -755,7 +778,7 @@ async def get_slice_status() -> dict:
                     valid = (await c.get_status()).get("slice_result_valid")
                 except Exception:  # noqa: BLE001 - only decides the out-of-date note
                     pass
-            return summarize_slice(st, valid)
+            return await _with_forecast(c, summarize_slice(st, valid))
     except ApiError as e:
         return _err(e)
 
@@ -839,7 +862,8 @@ async def slice_and_wait(
     """Slice the current plate and wait for the finished time, filament and warnings; the usual way to slice (slice returns at once instead).
 
     If the plate is already sliced and unchanged, it returns the existing result without
-    re-slicing.
+    re-slicing. With enough recorded prints, `forecast` says how long it will really take on this
+    printer (see get_slice_status).
 
     This is the usual way to slice when you want the outcome immediately. For a non-blocking
     start, use slice then poll get_slice_status; to sweep one setting across values, use
@@ -851,8 +875,8 @@ async def slice_and_wait(
             except Validation as e:
                 return await _slice_err(c, e)
             if started.get("already_valid"):
-                return summarize_slice(await c.slice_status())
-            return summarize_slice(await _wait_for_slice(c, timeout))
+                return await _with_forecast(c, summarize_slice(await c.slice_status()))
+            return await _with_forecast(c, summarize_slice(await _wait_for_slice(c, timeout)))
     except ApiError as e:
         return _err(e)
 
@@ -2276,7 +2300,13 @@ async def describe_plate() -> dict:
     footprint islands still show per-copy contact. The parsed result is cached per slice (the
     G-code itself is still downloaded each call to detect a new slice). All bboxes are [x0, y0,
     x1, y1] in plate millimetres.
+
+    `settings_check` says whether the G-code was sliced with the settings that are set now
+    (layer height, walls, infill, temperatures, speeds, supports, bed type, print sequence, spiral
+    vase and every setting with an unsaved edit); any `differ` entry names what the slice used
+    instead. Tell the user before printing when it lists differences.
     """
+    live = modified = None
     try:
         async with _client() as c:
             data = await c.get_gcode()
@@ -2284,6 +2314,12 @@ async def describe_plate() -> dict:
                 objs = (await c.get_objects()).get("objects", [])
             except ApiError:
                 objs = []
+            try:  # for the settings check; optional, so any failure only leaves it out
+                live = await c.get_config(None)
+                modified = [k for keys in ((await c.get_status()).get("modified") or {}).values()
+                            if isinstance(keys, list) for k in keys if isinstance(k, str)]
+            except Exception:  # noqa: BLE001
+                live = None
     except Conflict:
         return await _not_sliced()
     except ApiError as e:
@@ -2291,7 +2327,7 @@ async def describe_plate() -> dict:
     key = _gcode_cache_key(data)
     hit = _DESCRIBE_CACHE.get(key)
     if hit is not None:
-        return {**hit, "cached": True}
+        return _with_settings_check({**hit, "cached": True}, _SLICED_CONFIG.get(key), live, modified)
     text = data.decode("utf-8", errors="replace")
     try:
         t0 = time.perf_counter()
@@ -2302,7 +2338,20 @@ async def describe_plate() -> dict:
         return {"error": "parse_failed", "detail": str(e)[:200]}
     _DESCRIBE_CACHE.clear()
     _DESCRIBE_CACHE[key] = out
-    return {**out, "cached": False}
+    _SLICED_CONFIG.clear()
+    _SLICED_CONFIG[key] = dict(parsed.config)
+    return _with_settings_check({**out, "cached": False}, parsed.config, live, modified)
+
+
+_SLICED_CONFIG: dict[str, dict] = {}  # the settings each cached slice's G-code says it was sliced with
+
+
+def _with_settings_check(out: dict, sliced: dict | None, live: dict | None, modified) -> dict:
+    """Verified slicing: compare what the G-code was sliced with against what is set now (verify_slice.py).
+    Left out when either side is unavailable; checked again on every call, as the live settings move on."""
+    if sliced and live:
+        out["settings_check"] = _verify.check(sliced, live, modified or ())
+    return out
 
 
 def _safe_gcode_name(name: str) -> str:
@@ -2363,8 +2412,11 @@ async def save_gcode(filename: str | None = None) -> dict:
                 stats = (await c.slice_status()).get("stats") or {}
             except ApiError:
                 pass  # the estimate is nice to have; the file still saves without it
+            app_version = None
             try:
-                printer_name = ((await c.get_status()).get("presets") or {}).get("printer")
+                status = await c.get_status()
+                printer_name = (status.get("presets") or {}).get("printer")
+                app_version = status.get("app_version")
             except ApiError:
                 pass
     except Conflict:
@@ -2383,8 +2435,9 @@ async def save_gcode(filename: str | None = None) -> dict:
     row_id = None
     outcome_error = None
     try:
+        snapshot = {**cfg, _forecast.VERSION_KEY: app_version} if app_version else cfg  # per-version forecasts
         row_id = _outcomes.record_slice(
-            fname, model_name, _outcomes.geometry_hash_for(objs), cfg,
+            fname, model_name, _outcomes.geometry_hash_for(objs), snapshot,
             printer_id=_ptarget.printer_id(printer_name),
             est_time_s=stats.get("estimated_time_seconds"), est_filament_g=stats.get("filament_used_g"))
     except Exception as e:  # noqa: BLE001 - whatever goes wrong while recording, the saved file stays
@@ -2620,9 +2673,11 @@ async def check_printer_match() -> dict:
     Compares nozzle size, bed size and height, the highest speeds and accelerations, nozzle and
     bed temperatures, and firmware retraction against the printer's own Klipper settings. Each
     check comes back ok, warn or unknown with both values and why it matters; relay `headline`
-    and the warnings. Warnings only: it never changes or blocks anything. Run it before printing
-    with a new or edited profile, or when prints take longer than estimated. Klipper printers
-    only; needs OrcaSlicer running.
+    and the warnings. It never changes or blocks anything itself. When speeds or accelerations go
+    past the printer's limits, `fix` holds the set_config changes that lower just those settings to
+    the limits: offer them to the user and pass `fix` to set_config if they agree. Run it before
+    printing with a new or edited profile, or when prints take longer than estimated. Klipper
+    printers only; needs OrcaSlicer running.
     """
     async def run(t, c):
         if t.kind != "klipper":

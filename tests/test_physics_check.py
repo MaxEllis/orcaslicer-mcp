@@ -77,7 +77,7 @@ def test_all_checks_always_present():
     names = {r.name for r in run_checks({})}
     assert names == {"flow_ceiling", "temp_vs_flow", "layer_height_ratio",
                      "line_width_ratio", "retraction_range", "cooling_sanity",
-                     "first_layer_height", "initial_layer_temp"}
+                     "first_layer_height", "initial_layer_temp", "gcode_scripts"}
     assert all(r.status == "warn" for r in run_checks({}))
 
 def test_zero_flow_demand_passes_temp_check():

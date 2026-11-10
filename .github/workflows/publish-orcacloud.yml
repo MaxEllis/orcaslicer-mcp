@@ -4,7 +4,7 @@
 #
 # Only plugin releases run it: a GitHub release tagged plugin-vX.Y.Z, created with --latest=false so
 # /releases/latest keeps pointing at the orcaslicer-mcp release. Its notes become the OrcaCloud
-# changelog (max 4000 characters). OrcaCloud wants the OS suffix "_any" in the file name.
+# changelog (max 4000 characters, shown as plain text: the step below strips the markdown). OrcaCloud wants the OS suffix "_any" in the file name.
 name: Publish plugin to OrcaCloud
 
 on:
@@ -38,7 +38,10 @@ jobs:
           oidc_token="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=orcacloud" | jq -r .value)"
           version="${GITHUB_REF_NAME#plugin-v}"
-          changelog="$(jq -r '.release.body // ""' "$GITHUB_EVENT_PATH" | head -c 4000)"
+          # OrcaCloud shows the changelog as plain text (### and ** appear as typed, plugin-v0.2.0),
+          # so drop heading marks, bold, code ticks, and turn [text](url) into "text (url)".
+          changelog="$(jq -r '.release.body // ""' "$GITHUB_EVENT_PATH" \
+            | sed -E 's/\*\*//g; s/`//g; s/^#{1,6} +//; s/\[([^]]+)\]\(([^)]+)\)/\1 (\2)/g' | head -c 4000)"
           metadata="$(jq -cn --arg version "$version" --arg changelog "$changelog" \
             '{version: $version} + (if $changelog == "" then {} else {changelog: $changelog} end)')"
           status="$(curl -sS -o response.json -w '%{http_code}' \

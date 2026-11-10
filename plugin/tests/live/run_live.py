@@ -148,13 +148,14 @@ FORK_TOKEN = os.environ.get("ORCA_FORK_TOKEN", "")
 
 
 def fork(method, path, body=None):
-    global URL, TOKEN
-    saved = URL, TOKEN
-    URL, TOKEN = FORK, FORK_TOKEN
+    """The same request to the build's API (call() reads URL at call time; its token default was bound at def)."""
+    global URL
+    saved = URL
+    URL = FORK
     try:
-        return call(method, path, body)
+        return call(method, path, body, token=FORK_TOKEN)
     finally:
-        URL, TOKEN = saved
+        URL = saved
 
 
 def slice_id():
@@ -225,9 +226,18 @@ def phase_slice():
         check("another plate: gcode 409", get_raw("/api/v1/gcode")[0] == 409)
         fork("POST", "/api/v1/plates/0/select", {})
         fork("DELETE", f"/api/v1/plates/{last}")
-        body = user_slices("press Slice plate on the first plate")
-        check("first plate sliced again after the plate switch", body.get("state") == "done" and body.get("valid") is True)
-
+        # A second plate widens OrcaSlicer's plate grid, which clears every plate's slice flag although the first
+        # plate's print stays the same: the build's status says idle until asked to slice, then answers
+        # already_valid with the same G-code. The plugin keeps the slice throughout.
+        _, b5, _ = call("GET", "/api/v1/slice/status")
+        check("back on the first plate: its slice is kept", b5.get("state") == "done" and b5.get("valid") is True,
+              f"{b5.get('state')}/{b5.get('valid')}")
+        _, fs5, _ = fork("POST", "/api/v1/slice", {})
+        check("the build has nothing to slice again", fs5.get("already_valid") is True, json.dumps(fs5))
+        _, _, pdata = get_raw("/api/v1/gcode")
+        _, _, fdata = get_raw("/api/v1/gcode", base=FORK, token=FORK_TOKEN)
+        check("and serves the same G-code as the plugin", pdata == fdata and len(pdata) > 0,
+              f"{len(pdata)} vs {len(fdata)} bytes")
 
 phase = sys.argv[1] if len(sys.argv) > 1 else "read"
 {"read": phase_read, "write": phase_write, "select": phase_select, "slice": phase_slice}[phase]()

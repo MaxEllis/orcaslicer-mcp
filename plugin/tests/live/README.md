@@ -17,7 +17,7 @@ through an SSH tunnel. Use a copy of your OrcaSlicer folder so your own setup is
    into a file only you can read, then `python -I run_live.py read|write|select`.
 6. Close OrcaSlicer, delete the test folders and close the tunnel.
 
-Expected: read 16/16, write 9/9, select 5/5. `slice` (plugin 0.2.0) asks you to press Slice plate, or, run
+Expected: read 16/16, write 9/9, select 5/5, slice 15/15 (against the build). `slice` (plugin 0.2.0) asks you to press Slice plate, or, run
 against an OrcaSlicer MCP build with its Remote API on another port (`ORCA_FORK_URL`, `ORCA_FORK_TOKEN`),
 slices through it and compares the plugin's numbers and G-code with the build's. Unsaved edits make OrcaSlicer's own Transfer/Discard dialog
 appear and the request waits for the answer; closing the panel gives 503 paused until play is pressed;

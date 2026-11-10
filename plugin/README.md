@@ -78,8 +78,12 @@ and serves them on `GET /api/v1/slice/status` and the file on `GET /api/v1/gcode
   that was already painted and changes to an existing variable layer height (the plugin API only says that a
   part is painted or has one), OrcaSlicer's slice warnings, and the time per feature. The G-code has no
   warnings and no per-feature times in it.
-- **Plates:** each plate keeps its own slice, under the plate number OrcaSlicer gives it. Moving a plate moves
-  its objects, so the slices read as out of date until you slice again.
+- **Plates:** each plate keeps its own slice, under the plate number OrcaSlicer gives it. Deleting a plate drops
+  the slices of that plate and the plates after it, because they get new numbers. The plugin can't tell which
+  objects sit on which plate. So in a project with several plates, moving an object or a plate makes every
+  plate's slice read as out of date. Adding a 5th, 10th or 17th plate does the same, because OrcaSlicer
+  rearranges the plate grid. OrcaSlicer may still hold those plates' results, and then Slice plate does not
+  slice them again. Change something on that plate and slice it.
 - **Files:** the plugin only opens files inside that temporary folder. OrcaSlicer writes a new file each time
   you slice; the plugin reads it in one go and closes it, so it never holds up the next slice.
 

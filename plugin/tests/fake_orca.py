@@ -511,7 +511,7 @@ def build_module():
     orca.LifecycleEvent = types.SimpleNamespace(**{n: types.SimpleNamespace(name=n) for n in (
         "NewProject", "ProjectOpened", "ProjectAfterSave", "ProjectClosed", "PresetSelected", "SliceStarted",
         "GCodeExportFinished", "SlicingJobComplete", "PlateSelected", "ObjectAdded", "ObjectDeleted",
-        "ObjectTransformed", "ObjectChanged")})
+        "ObjectTransformed", "ObjectChanged", "PlateCreated", "PlateDeleted")})
     orca.LifecycleEvtCode = types.SimpleNamespace(**{n: types.SimpleNamespace(name=n) for n in ("Ok", "Error", "Warn")})
     orca.PluginResult = types.SimpleNamespace(RecoverableError=1)
     orca.registered = []

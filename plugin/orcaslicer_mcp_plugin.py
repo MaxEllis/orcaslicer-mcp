@@ -287,10 +287,13 @@ def _code_name(code) -> str:
     return getattr(code, "name", str(code)).rsplit(".", 1)[-1]
 
 
-SLICE_OBJECT_EVENTS = frozenset({"ObjectAdded", "ObjectDeleted", "ObjectTransformed", "ObjectChanged"})
+# ObjectAdded and ObjectDeleted are left out: an object added or deleted changes the object list, which the
+# fingerprint holds, and OrcaSlicer also sends ObjectAdded for every object each time it rebuilds the sidebar list
+# (Plater::delete_plate > ObjectList::reload_all_plates) with nothing added (live test, 2026-11-10).
+SLICE_OBJECT_EVENTS = frozenset({"ObjectTransformed", "ObjectChanged"})
 SLICE_PROJECT_EVENTS = frozenset({"NewProject", "ProjectOpened", "ProjectClosed"})
 SLICE_EVENTS = SLICE_OBJECT_EVENTS | SLICE_PROJECT_EVENTS | {"SliceStarted", "GCodeExportFinished",
-                                                              "SlicingJobComplete"}
+                                                              "SlicingJobComplete", "PlateDeleted"}
 
 
 class SliceWatch:
@@ -301,7 +304,8 @@ class SliceWatch:
     (settings and objects, see slice_fingerprint), are taken when a slice completes and when it is read. The plate
     comes from OrcaSlicer itself, never from PlateSelected: "Move plate to front" changes the current plate without
     that event, and Slice all selects each plate before slicing it. A slice is out of date once an object event
-    arrives or the fingerprint differs. A failed step after the G-code was written (an export or upload) keeps the
+    arrives or the fingerprint (taken for the slice's own plate) differs. Deleting a plate renumbers the plates
+    after it, so their slices are dropped with the deleted plate's. A failed step after the G-code was written (an export or upload) keeps the
     slice, as OrcaSlicer does; an error or a cancel with no slice running leaves the plate's slice alone."""
 
     def __init__(self, plate_index, fingerprint):
@@ -331,14 +335,21 @@ class SliceWatch:
             plate = self._read(self._plate_index, "plate")
             with self._lock:
                 wanted = self._pending is not None
-            if wanted:
-                fp = self._read(self._fingerprint, "fingerprint")  # None: the slice counts but reads as out of date
+            if wanted and isinstance(plate, int):
+                fp = self._read(lambda: self._fingerprint(plate), "fingerprint")  # None: counts, reads out of date
         with self._lock:
             if name in SLICE_OBJECT_EVENTS:
                 self._changes += 1
             elif name in SLICE_PROJECT_EVENTS:
                 self._records.clear()
                 self._slicing, self._pending = False, None
+            elif name == "PlateDeleted":
+                gone = getattr(ctx, "index", -1)
+                if isinstance(gone, int) and not isinstance(gone, bool) and gone >= 0:
+                    for p in [p for p in self._records if p >= gone]:
+                        del self._records[p]
+                else:
+                    self._records.clear()
             elif name == "SliceStarted":
                 self._slicing, self._pending = True, None
             elif name == "GCodeExportFinished":
@@ -370,8 +381,8 @@ class SliceWatch:
             return {"state": "idle"}
         if rec["state"] == "error":
             return {"state": "error", "message": rec["message"]}
-        valid = rec["fp"] is not None and rec["changes"] == changes and self._read(self._fingerprint,
-                                                                                   "fingerprint") == rec["fp"]
+        valid = rec["fp"] is not None and rec["changes"] == changes and self._read(
+            lambda: self._fingerprint(plate), "fingerprint") == rec["fp"]
         return {"state": "done", "path": rec["path"], "valid": valid, "serial": rec["serial"]}
 
 
@@ -404,14 +415,27 @@ def _volume_signature(mo) -> list:
     return out
 
 
-def slice_fingerprint() -> str:
-    """UI thread: one hash of what a slice depends on and the plugin can read: everything the journal compares
-    (presets and their edits, filament slots, project settings, objects with their own settings and placements),
-    plus each object's parts and modifiers and whether it has a variable layer height. Equal hashes: nothing that
-    can be seen changed."""
+PER_PLATE_PROJECT_KEYS = ("wipe_tower_x", "wipe_tower_y")  # one value per plate, in plate order
+
+
+def _plate_entry(value, plate: int):
+    """The plate's own entry of a per-plate list ("15,165" -> "165" for plate 1); the whole value otherwise."""
+    items = list(value) if isinstance(value, (list, tuple)) else str(value).split(",")
+    return items[plate] if 0 <= plate < len(items) else value
+
+
+def slice_fingerprint(plate: int) -> str:
+    """UI thread: one hash of what the slice of `plate` depends on and the plugin can read: everything the journal
+    compares (presets and their edits, filament slots, project settings, objects with their own settings and
+    placements), plus each object's parts and modifiers and whether it has a variable layer height. Of the
+    per-plate project settings (the wipe tower position) only the plate's own entry counts: adding a plate
+    lengthens those lists. Equal hashes: nothing that can be seen changed."""
     snap = capture_baseline(types.SimpleNamespace(project_gen=0, project_text=""))
     snap.pop("project_gen", None)
     snap.pop("project_text", None)
+    for k in PER_PLATE_PROJECT_KEYS:
+        if k in snap["project"]:
+            snap["project"][k] = _plate_entry(snap["project"][k], plate)
     snap["volumes"] = []
     for mo in orca.host.plater().model().objects():
         try:

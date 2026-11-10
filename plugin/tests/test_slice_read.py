@@ -114,13 +114,14 @@ class Host:
     """The two UI-thread reads SliceWatch makes: the current plate and the fingerprint."""
 
     def __init__(self):
-        self.plate, self.value, self.fp_calls, self.broken = 0, "a", 0, False
+        self.plate, self.value, self.fp_calls, self.broken, self.fp_plates = 0, "a", 0, False, []
 
     def plate_index(self):
         return self.plate
 
-    def fingerprint(self):
+    def fingerprint(self, plate):
         self.fp_calls += 1
+        self.fp_plates.append(plate)
         if self.broken:
             raise RuntimeError("host went away")
         return self.value
@@ -163,12 +164,52 @@ def test_watch_change_makes_it_out_of_date():
     assert w.current()["valid"] is False
 
 
-@pytest.mark.parametrize("name", ["ObjectAdded", "ObjectDeleted", "ObjectTransformed", "ObjectChanged"])
+@pytest.mark.parametrize("name", ["ObjectTransformed", "ObjectChanged"])
 def test_watch_object_events_make_it_out_of_date(name):
     w, _ = watch()
     sliced(w)
     w.event(name, ctx())
     assert w.current()["valid"] is False
+
+
+@pytest.mark.parametrize("name", ["ObjectAdded", "ObjectDeleted"])
+def test_watch_list_rebuild_events_alone_keep_it(name):
+    # OrcaSlicer sends ObjectAdded for every object when it rebuilds the sidebar list (a plate deleted), with
+    # nothing added; a real add or delete changes the object list, which the fingerprint holds.
+    w, h = watch()
+    sliced(w)
+    w.event(name, ctx())
+    assert w.current()["valid"] is True
+    h.value = "b"  # the object list really changed
+    assert w.current()["valid"] is False
+
+
+def test_watch_fingerprint_is_for_the_slices_plate():
+    w, h = watch()
+    h.plate = 2
+    sliced(w)
+    w.current()
+    assert h.fp_plates == [2, 2]
+
+
+def test_watch_deleted_plate_drops_its_slice_and_the_ones_after():
+    w, h = watch()
+    for plate in (0, 1, 2):
+        h.plate = plate
+        sliced(w, path=f"/s/{plate}.gcode")
+    w.event("PlateDeleted", ctx(index=1))
+    h.plate = 0
+    assert w.current()["path"] == "/s/0.gcode"
+    for plate in (1, 2):  # renumbered: plate 2 is now plate 1, so neither old slice belongs to its number
+        h.plate = plate
+        assert w.current() == {"state": "idle"}
+
+
+def test_watch_deleted_plate_without_an_index_drops_every_slice():
+    w, _ = watch()
+    sliced(w)
+    w.event("PlateDeleted", ctx(index=-1))
+    assert w.current() == {"state": "idle"}
 
 
 def test_watch_cancel_drops_the_previous_slice():
@@ -420,10 +461,33 @@ def test_a_plate_switch_without_an_event(live, folder):
     assert call(live, "GET", "/api/v1/slice/status")[1]["state"] == "done"
 
 
+def test_a_new_plate_keeps_the_first_plates_slice(live, folder):
+    # Each plate has its own wipe tower position in one list: adding a plate lengthens it (live test 2026-11-10).
+    slice_now(live, gcode_file(folder))
+    S.bundle.project.update({"wipe_tower_x": "15,165", "wipe_tower_y": "220,250"})
+    S.model.plate = 1
+    assert call(live, "GET", "/api/v1/slice/status")[1]["state"] == "idle"
+    S.model.plate = 0
+    _, body = call(live, "GET", "/api/v1/slice/status")
+    assert body["state"] == "done" and body["valid"] is True
+    S.bundle.project["wipe_tower_x"] = "40,165"  # this plate's own tower moved
+    assert call(live, "GET", "/api/v1/slice/status")[1]["valid"] is False
+
+
+def test_deleting_another_plate_keeps_the_slice(live, folder):
+    # OrcaSlicer deletes the plate, then rebuilds the sidebar list: ObjectAdded for every object, nothing added.
+    slice_now(live, gcode_file(folder))
+    for name, index in (("PlateDeleted", 1), ("ObjectAdded", -1)):
+        fake_orca.UI.run_blocking(lambda: live.on_lifecycle_event(getattr(EV, name), ctx(index=index)))
+    _, body = call(live, "GET", "/api/v1/slice/status")
+    assert body["state"] == "done" and body["valid"] is True
+    assert raw(live, "/api/v1/gcode")[0] == 200
+
+
 def test_status_survives_a_failing_read(live, folder, monkeypatch):
     slice_now(live, gcode_file(folder))
 
-    def boom():
+    def boom(*_):
         raise RuntimeError("no model")
     monkeypatch.setattr(live.slices, "_fingerprint", boom)
     status, st = call(live, "GET", "/api/v1/status")

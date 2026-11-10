@@ -2538,7 +2538,7 @@ input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);
 .note{color:var(--muted);font-size:12px;margin-top:6px} .note:empty{display:none}
 .switch{display:flex;align-items:center;gap:8px;cursor:pointer}
 select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:4px;padding:4px 6px}
-.snip{flex:1;min-width:0;margin:0;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;padding:6px 8px;border:1px solid var(--edge);border-radius:4px;white-space:pre-wrap;word-break:break-all;user-select:all}
+.snip{flex:1;min-width:0;margin:0;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;padding:6px 8px;border:1px solid var(--edge);border-radius:4px;white-space:pre-wrap;word-break:break-all;user-select:all;max-height:9.5em;overflow:auto}
 </style></head><body>
 <div class="sec">
   <h2>Token</h2>
@@ -2603,7 +2603,10 @@ function draw(){
   if (document.activeElement !== $("port")) $("port").value = cfg.port || LISTENING;
   $("addr").textContent = "http://127.0.0.1:" + LISTENING;
   var d = setup($("app").value, shown ? TOKEN : "•".repeat(16));
-  $("how").textContent = d.how; $("snip").textContent = d.text; $("copysnip").textContent = d.copy;
+  // A link wraps at its slashes, not mid-word (Copy takes setup()'s text, without the break hints).
+  $("how").textContent = d.how; $("copysnip").textContent = d.copy;
+  $("snip").textContent = d.copy === "Copy link" ? d.text.split("/").join("/\\u200b") : d.text;
+  $("snip").style.wordBreak = d.copy === "Copy link" ? "normal" : "";
 }
 // A short confirmation ("Copied.") clears itself; a note that asks for something stays until replaced.
 function note(id, t, fade){ clearTimeout(noteTimer[id]); $(id).textContent = t;

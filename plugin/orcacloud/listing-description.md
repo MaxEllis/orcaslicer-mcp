@@ -2,7 +2,7 @@
 
 **Work with an AI assistant to get the print you're after, and learn how OrcaSlicer gets you there. Tell it your goal. It changes the settings that matter, explains each one, and checks your printer can handle them. You talk to it in your usual AI app; the changes appear in OrcaSlicer.**
 
-![story-plugin.png](https://api.orcaslicer.com/api/v1/bundles/media/1df5ecdc-c1aa-463e-8f3d-39b083b6627c/content){width=50% align=left}
+![story-plugin.png](https://api.orcaslicer.com/api/v1/bundles/media/1df5ecdc-c1aa-463e-8f3d-39b083b6627c/content){align=left}
 
 ## Example
 

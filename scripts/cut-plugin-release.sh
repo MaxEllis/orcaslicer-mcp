@@ -80,5 +80,6 @@ if grep -q 'The OrcaSlicer MCP plugin [0-9.]* for stock' "$BODY"; then
   run gh release edit "$LATEST" --repo "$REPO" --notes-file "$BODY"
 fi
 rm -rf "$DIST" "$BODY"
+[ "${DRY_RUN:-}" = 1 ] && { echo "DRY RUN: nothing was changed."; exit 0; }
 echo "DONE: plugin $VER on GitHub (plugin-v$VER) and OrcaCloud; $LATEST carries the file."
 echo "Check the listing shows $VER: https://cloud.orcaslicer.com/p/16d116a6bc41"

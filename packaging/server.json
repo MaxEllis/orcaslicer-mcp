@@ -6,14 +6,14 @@
     "url": "https://github.com/MaxEllis/orcaslicer-mcp",
     "source": "github"
   },
-  "version": "0.1.23",
+  "version": "0.1.24",
   "websiteUrl": "https://github.com/MaxEllis/orcaslicer-mcp",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "orcaslicer-mcp",
-      "version": "0.1.23",
+      "version": "0.1.24",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

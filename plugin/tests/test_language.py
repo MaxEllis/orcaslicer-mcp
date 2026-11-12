@@ -220,6 +220,7 @@ def plugin_phrases() -> dict:
         out.update({a[f]: "setup" for f in ("name", "where")})
         for r in a["routes"]:
             out.update({r[f]: "setup" for f in ("label", "hint", "act", "copy_label") if r[f]})
+            out.update({f["label"]: "setup box" for f in r.get("fields", [])})
     for b in BRANDS:
         out.pop(b, None)
     return out

@@ -69,6 +69,7 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
 
 **2. Add the connector to your AI app.** Every app runs the connector with [uv](https://docs.astral.sh/uv/getting-started/installation/), a small free tool, so install it once: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS and Linux, or `irm https://astral.sh/uv/install.ps1 | iex` in PowerShell on Windows. Then:
 - **Claude Desktop:** download `orcaslicer-mcp-<version>.mcpb` from the [latest release](https://github.com/MaxEllis/orcaslicer-mcp/releases/latest), and open it. Its token field stays empty.
+- **ChatGPT desktop app (Codex chats):** open **Settings → Plugins → Add → Add MCP server** and choose **STDIO**. Put `uvx` in **Command to launch** and `orcaslicer-mcp` in **Arguments**: they are separate boxes. Ordinary ChatGPT chats can't use it yet.
 - **Other apps (Cursor, LM Studio and the like):** add this to the app's MCP settings:
 
   ```json
@@ -82,7 +83,7 @@ The trade-off: the build can do everything but replaces your OrcaSlicer. The plu
   }
   ```
 
-  VS Code reads the same entry from `.vscode/mcp.json` under `servers` instead of `mcpServers`, with `"type": "stdio"` added. No token is needed: the connector finds OrcaSlicer on the same computer by itself. The plugin's panel and Config tab have a one-click install for Cursor and VS Code and a ready command for Claude Code and Codex. If OrcaSlicer was started with its own settings folder (`--datadir`), add `"env": { "ORCA_DATADIR": "<that folder>" }`. For the build on another computer, set `ORCA_API_URL` and `ORCA_API_TOKEN` ([troubleshooting](docs/troubleshooting.md)).
+  VS Code reads the same entry from `.vscode/mcp.json` under `servers` instead of `mcpServers`, with `"type": "stdio"` added. No token is needed: the connector finds OrcaSlicer on the same computer by itself. The plugin's panel and Config tab have a one-click install for Cursor and VS Code, a ready command for Claude Code and Codex, and each ChatGPT box to copy. If OrcaSlicer was started with its own settings folder (`--datadir`), add `"env": { "ORCA_DATADIR": "<that folder>" }`. For the build on another computer, set `ORCA_API_URL` and `ORCA_API_TOKEN` ([troubleshooting](docs/troubleshooting.md)).
 
 **Optional: the agent skill.** It teaches Claude Code, Codex and other agents how to work with these tools (where to start, which settings to check first, the traps). In Claude Code: `/plugin install orcaslicer-mcp --marketplace MaxEllis/orcaslicer-mcp`. For other agents, copy the [`skills/orcaslicer-mcp`](skills/orcaslicer-mcp) folder into `~/.agents/skills`. It is instructions only and runs no code.
 

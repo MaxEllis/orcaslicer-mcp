@@ -17,6 +17,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 - An OrcaSlicer that starts on its Home tab has no OrcaSlicer MCP plugin panel until you click Prepare, so every request timed out and the assistant was told a dialog might be open. The plugin now answers `panel_not_open`, and the assistant asks you to click Prepare.
+- The plugin's setup for the ChatGPT desktop app said to paste `uvx orcaslicer-mcp`, but ChatGPT's form has separate boxes for the command and its arguments, and the menu path had changed. It now names the path (Settings › Plugins › Add › Add MCP server) and shows each box on its own line with its own Copy: `uvx` in Command to launch, `orcaslicer-mcp` in Arguments. In a translated OrcaSlicer, the path and the box names use the ChatGPT app's own words in that language.
+- The plugin's setup has a link to install uv, which every AI app needs.
 
 ## [0.1.23] - 2026-11-11
 The OrcaSlicer MCP plugin 0.2.1 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.

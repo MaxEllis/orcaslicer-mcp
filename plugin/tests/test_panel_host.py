@@ -667,7 +667,13 @@ def test_config_tab_offers_five_companies_and_no_token_anywhere(plugin):
     assert claude["Claude app"]["open"] == "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"
     assert claude["Claude Code"]["copy"] == "claude mcp add --scope user orcaslicer -- uvx orcaslicer-mcp"
     openai = {r["label"]: r for r in apps["openai"]["routes"]}
-    assert openai["ChatGPT desktop app"]["copy"] == "uvx orcaslicer-mcp" and openai["ChatGPT desktop app"]["also"] == ""
+    # ChatGPT's form has a box for the command and one for the arguments: one line each, never one string to paste
+    chatgpt = openai["ChatGPT desktop app"]
+    assert chatgpt["fields"] == [{"label": "Name", "value": "orcaslicer"}, {"label": "Command to launch", "value": "uvx"},
+                                 {"label": "Arguments", "value": "orcaslicer-mcp"}]
+    assert chatgpt["copy"] is None and chatgpt["act"] == "" and chatgpt["also"] == ""
+    assert chatgpt["hint"].startswith("Settings › Plugins › Add › Add MCP server, then choose STDIO")
+    assert all("fields" not in r for a in apps.values() for r in a["routes"] if r is not chatgpt)
     assert openai["Codex in a terminal or editor"]["copy"] == "codex mcp add orcaslicer -- uvx orcaslicer-mcp"
     assert openai["ChatGPT on the web or phone"]["off"] is True
     assert all("ask" not in a for a in apps.values())  # no question to ask: the first request connects it
@@ -697,6 +703,9 @@ def test_config_tab_one_click_links_carry_the_server_and_no_secret():
     # only the links offered now, whole: one that merely starts like them installs something else
     assert not mod.openable("cursor://anysphere.cursor-deeplink/mcp/install?name=x&config=e30=")
     assert not mod.openable(vs + "&x=1") and not mod.openable(None)
+    # the setup's uv line links to uv's install page, which the plugin then opens too
+    assert mod.setup_message(None, None, False)["uv"] == mod.UV_URL and mod.openable(mod.UV_URL)
+    assert not mod.openable(mod.UV_URL + "x")
     own = _routes("D:/portable/data")["cursor"]["routes"][0]["open"]
     assert own != cur and not mod.openable(own) and mod.openable(own, "D:/portable/data")
 

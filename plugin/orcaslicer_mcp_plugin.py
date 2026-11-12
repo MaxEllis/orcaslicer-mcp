@@ -1663,6 +1663,7 @@ class OrcaWords:
                 try:
                     with open(path, "rb") as f:
                         self._tr = gettext.GNUTranslations(f)
+                    trace(f"OrcaSlicer's words for {language}: {path}")
                     return
                 except (OSError, ValueError, UnicodeError) as e:
                     if not isinstance(e, FileNotFoundError):

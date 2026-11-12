@@ -6,7 +6,11 @@
   loaded slot. Writing that list back is refused (`per_filament_length_mismatch`). `set_config` takes one
   value and writes it into the filament preset open in the Filament tab; every slot loaded with that preset
   then has it. `list_presets(type="filament")` marks the open one `selected`.
-- To change another slot's value, `select_preset(type="filament", name=...)` for it first. Selecting any preset
+- On a build with the `filament_slots` capability, `set_config(changes, filament_slot=n)` writes slot n's
+  preset without any of this; `save_preset(..., filament_slot=n)` moves only slot n to the saved name (a
+  plain save moves every slot that used the old preset). Both are refused with `filament_edits_unsaved`
+  when the Filament tab holds unsaved edits to a different preset: save or revert those first.
+- Otherwise, to change another slot's value, `select_preset(type="filament", name=...)` for it first. Selecting any preset
   discards the unsaved edits of the print and printer groups too (the reply lists `discarded_changes`), so do
   filament work first, print edits second, slice last. `save_preset` first if an edit must survive.
 - Setting a per-filament key to `null` with several different filament presets loaded is refused as
@@ -31,6 +35,16 @@
 - It cannot see plate settings (a plate's own bed type, print sequence, spiral vase), OrcaSlicer's slice
   warnings, or time per feature. `describe_plate`'s `settings_check` shows when a plate setting changed what
   was sliced.
+
+## Bambu AMS mapping takes the type word literally
+
+- OrcaSlicer's Send dialog maps a filament to a tray only when the AMS's type word equals the slot preset's
+  `filament_type`. The AMS calls Polymaker LW-ASA `ASA-Aero` and a carbon PLA `PLA-CF`; a slot whose preset says
+  `ASA` or `PLA` is left without a tray, and `get_filament_slot_mapping` reports it as a soft match with the
+  candidate trays. Nothing is wrong with the spool: tell the user both names and let them pick the tray in the
+  Send dialog, or switch the slot to the preset that matches the spool (`set_filament_slot_preset`).
+- The tray tools read the printer selected in OrcaSlicer's Device tab, not the printer profile's address, so
+  `no_printer_selected` and `printer_offline` are fixed there.
 
 ## Checks are heuristics, not measurements
 

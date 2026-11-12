@@ -26,6 +26,7 @@ pytestmark = pytest.mark.skipif(not HAS_PLUGIN_ERRORS, reason="orcaslicer-mcp wi
 ARGS = {
     "set_config": {"changes": {"layer_height": 0.24}},
     "select_preset": {"type": "print", "name": "My Fast"},
+    "set_filament_slot_preset": {"slot": 1, "name": "Generic PLA"},
     "get_preset_config": {"type": "printer", "name": "Fake Printer 0.4"},
     "describe_setting": {"key": "layer_height"},
     "search_settings": {"query": "layer height"},

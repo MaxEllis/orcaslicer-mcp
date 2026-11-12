@@ -441,10 +441,13 @@ class OrcaClient:
             return {k: cfg[k] for k in keys if k in cfg}
         return cfg
 
-    async def put_config(self, changes: dict) -> dict:
+    async def put_config(self, changes: dict, slot: int | None = None) -> dict:
+        # slot (0-based) writes that slot's filament preset: PUT /config?slot=n on a build with the
+        # filament_slots capability (an older build ignores the query, so the caller checks first).
         await self._guard_config(changes)
+        params = {"slot": slot} if slot is not None else None
         try:
-            return await self._request("PUT", "/api/v1/config", json=changes)
+            return await self._request("PUT", "/api/v1/config", json=changes, params=params)
         except Validation as e:
             if (POLICY_TOKEN in (e.errors or {}).values()
                     and _BACKENDS.get(self._cfg.base_url) is None):
@@ -483,9 +486,14 @@ class OrcaClient:
             body["slot"] = slot  # 0-based filament slot (fork build with per-slot select)
         return await self._request("PUT", "/api/v1/preset", json=body)
 
-    async def save_preset(self, ptype: str, name: str, detach: bool = False) -> dict:
-        return await self._request("POST", "/api/v1/preset/save",
-                                   json={"type": ptype, "name": name, "detach": detach})
+    async def save_preset(self, ptype: str, name: str, detach: bool = False, slot: int | None = None) -> dict:
+        body = {"type": ptype, "name": name, "detach": detach}
+        if slot is not None:
+            body["slot"] = slot  # 0-based: save from that slot's preset and move only that slot
+        return await self._request("POST", "/api/v1/preset/save", json=body)
+
+    async def get_filaments(self) -> dict:
+        return await self._request("GET", "/api/v1/filaments")
 
     async def get_presets(self) -> dict:
         return await self._request("GET", "/api/v1/presets")

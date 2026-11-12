@@ -307,7 +307,10 @@ async def _resolve_target(fork_factory, where: dict) -> PrinterTarget:
     host_type = str(cfg.get("host_type") or "").strip().lower() or None
     if not host:
         if (model or "").startswith("Bambu Lab"):
-            raise PrinterError("unsupported_connection", "Bambu printers aren't supported yet (it's planned).",
+            raise PrinterError("unsupported_connection",
+                               "Bambu Lab printers: status, waiting and print history aren't read yet. "
+                               "get_printer_slots, get_filament_slot_mapping and check_printer_match read the "
+                               "AMS through OrcaSlicer (the OrcaSlicer MCP build with bambu_ams).",
                                host_type="bambu")
         raise PrinterError("not_configured", f"The printer profile '{name}' has no connection set up.",
                            hint=_PROFILE_ADDRESS_HINT)

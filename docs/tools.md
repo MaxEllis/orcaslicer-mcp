@@ -1,21 +1,22 @@
 # Tools
 
-66 tools, plus three ready-made prompts (`slice-a-model`, `optimize-print-time`, `edit-preset-safely`) and the settings reference as MCP resources.
+68 tools, plus three ready-made prompts (`slice-a-model`, `optimize-print-time`, `edit-preset-safely`) and the settings reference as MCP resources.
 
 | | | |
 |---|---|---|
 | **Settings** | Read and change any of OrcaSlicer's settings while it runs, for the plate, one object, or a band of layers; reading named settings also says what each one means, and one can be put back to its saved preset value. | `get_config` `set_config` `find_config_keys` `set_layer_height` `set_height_range` `set_object_config` |
 | **Knowing what they mean** | Look settings up in OrcaSlicer's own labels and tooltips, and check a profile against your printer's physical limits before printing. | `describe_setting` `search_settings` `compare_settings` `consult` `check_profile_physics` |
 | **Presets** | Switch, edit, save, rename and delete presets, and choose the filament preset of one slot on a multi-filament printer. | `list_presets` `select_preset` `get_preset_config` `edit_preset` `save_preset` `rename_preset` `delete_preset` |
+| **Filament slots** | See each slot's preset, type, vendor, colour and unsaved edits in one read; point one slot at a preset, keeping its colour; write or save one slot's preset without moving the slots that share it; read per-filament settings one value per slot. | `get_filament_slots` `set_filament_slot_preset` `set_config` (`filament_slot`) `save_preset` (`filament_slot`) `get_config` (`by_slot`) |
 | **Models** | Load STL, OBJ, 3MF and STEP files, then move, rotate, scale, duplicate, arrange and auto-orient them. | `load_model` `list_objects` `transform_object` `duplicate_object` `delete_object` `arrange_plate` `auto_orient` `check_placement` `diagnose_plate` |
 | **Slicing** | Slice, read time, filament and OrcaSlicer's warnings, split the result by feature, and compare several settings in one go. | `slice` `slice_and_wait` `apply_and_slice` `get_slice_status` `cancel_slice` `get_slice_breakdown` `compare_slices` `get_slice_warnings` `get_gcode` `save_gcode` |
 | **Seeing the plate** | Get the plate as a picture, or as a short description of how each part stands, where support goes and where the seams sit. | `render_plate` `describe_plate` |
 | **Plates** | Build a project with several plates, one part per plate, each sliced on its own. | `list_plates` `add_plate` `select_plate` `delete_plate` `move_object_to_plate` |
 | **Projects** | Save, open and start projects as the File menu does, browse and tidy project files, and see whether there is something to save. | `save_project` `open_project` `new_project` `get_project` `list_recent_projects` `open_recent_project` `forget_recent_project` `browse_projects` `move_project_file` `delete_project_file` |
-| **Your printer** | Read what a Klipper or OctoPrint printer is doing, wait for a print to reach a stage, list past jobs, and check the profile matches the printer. Read-only. | `get_printer_status` `wait_for_printer` `list_print_history` `check_printer_match` |
+| **Your printer** | Read what a Klipper or OctoPrint printer is doing, wait for a print to reach a stage, list past jobs, and check the profile matches the printer: its Klipper limits, or on a Bambu Lab printer that each filament's slot preset matches what its AMS tray holds. Read-only. | `get_printer_status` `wait_for_printer` `list_print_history` `check_printer_match` |
 | **Learning from prints** | Record each slice with its settings, match it to how the print turned out, and recall that next time. | `recall_prints` `remember` |
 
-The rest: `get_status`, `get_job_status` and `watch_events` report on OrcaSlicer and what it is doing, and `get_printer_slots`, `get_filament_slot_mapping` and `set_filament_slot_mapping` map filaments to the CANVAS trays of an Elegoo Centauri Carbon 2.
+The rest: `get_status`, `get_job_status` and `watch_events` report on OrcaSlicer and what it is doing; `get_printer_slots` reads the printer's filament trays (a Bambu Lab printer's AMS through OrcaSlicer's own connection, or an Elegoo Centauri Carbon 2's CANVAS) and `get_filament_slot_mapping` says which tray each filament of the plate will print from and whether it holds what the slot's preset says; `set_filament_slot_mapping` sets that mapping on the CANVAS.
 
 ## What the assistant sees
 

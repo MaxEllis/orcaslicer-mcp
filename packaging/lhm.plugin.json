@@ -143,11 +143,11 @@
     },
     {
       "name": "get_printer_slots",
-      "description": "Read the filament trays of an Elegoo Centauri Carbon 2 with a CANVAS unit; only for that printer, and slow (up to about 18 s)."
+      "description": "Read the printer's filament trays: a Bambu Lab printer's AMS and external spool (instant), or an Elegoo Centauri Carbon 2's CANVAS unit (slow, up to about 18 s). Read-only."
     },
     {
       "name": "get_filament_slot_mapping",
-      "description": "Show which CANVAS tray each filament would print from on the next Send (Elegoo Centauri Carbon 2 only); read-only."
+      "description": "Show which printer tray each filament of the plate would print from on the next Send, and whether that tray holds what the slot's preset says (Bambu Lab AMS, or an Elegoo Centauri Carbon 2's CANVAS); read-only. The check to run before telling the user a plate is ready to send."
     },
     {
       "name": "set_filament_slot_mapping",
@@ -262,6 +262,14 @@
       "description": "Save the current settings as a named user preset; edit_preset changes a stored preset in one step instead."
     },
     {
+      "name": "get_filament_slots",
+      "description": "List the project's filament slots as the sidebar shows them: each slot's number, preset, filament type, vendor, colour, whether its preset is open in the Filament tab with unsaved edits, and which slots share a preset. Read-only."
+    },
+    {
+      "name": "set_filament_slot_preset",
+      "description": "Point one filament slot at a named preset, leaving the other slots and every unsaved edit alone; the slot keeps its colour unless keep_colour is false."
+    },
+    {
       "name": "list_presets",
       "description": "List the print, filament and printer presets: the user's own and the selected ones, or all with include_system."
     },
@@ -323,7 +331,7 @@
     },
     {
       "name": "check_printer_match",
-      "description": "Check the active OrcaSlicer profile against the printer's own Klipper settings (nozzle, bed, speeds, temperatures); warnings only."
+      "description": "Check the active OrcaSlicer profile against the printer before printing: on a Bambu Lab printer, that each filament's slot preset matches what its AMS tray holds; on Klipper, the printer's own settings (nozzle, bed, speeds, temperatures). Warnings only."
     }
   ],
   "prompts": [

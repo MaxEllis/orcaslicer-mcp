@@ -130,13 +130,19 @@ async def test_a_profile_address_with_a_loose_at_sign_says_credentials_there_are
 
 @pytest.mark.parametrize("preset,code", [
     (profile(print_host=""), "not_configured"),
-    (profile(print_host="", printer_model="Bambu Lab X1 Carbon"), "unsupported_connection"),
     (profile(host_type="prusalink"), "unsupported_connection"),
 ])
 async def test_profiles_that_cannot_be_used(preset, code):
     with pytest.raises(PrinterError) as e:
         await t.resolve_target(factory(FakeFork(preset=preset)))
     assert e.value.code == code
+
+
+async def test_a_bambu_profile_is_a_target_read_through_orcaslicer():
+    target = await t.resolve_target(factory(FakeFork(preset=profile(print_host="", printer_model="Bambu Lab X1 Carbon"))))
+    assert target.kind == "bambu" and target.host_type == "bambu" and target.url == ""
+    assert target.source == "profile" and target.profile == "Test Printer"
+    assert target.public()["url"] is None and target.public()["kind"] == "bambu"
 
 
 async def test_no_active_printer_profile():
@@ -577,7 +583,6 @@ async def test_a_bad_override_carries_the_override_source(monkeypatch, bad):
 
 @pytest.mark.parametrize("preset", [
     profile(print_host=""),
-    profile(print_host="", printer_model="Bambu Lab X1 Carbon"),
     profile(host_type="duet"),
     profile(print_host="http://192.0.2.10:abc"),
     profile(print_host="http://user:pa/ss-secret@192.0.2.10"),

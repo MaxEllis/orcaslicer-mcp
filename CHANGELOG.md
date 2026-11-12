@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- The OrcaSlicer MCP plugin's panel follows OrcaSlicer's language, in each of OrcaSlicer's 22 languages, like the OrcaSlicer MCP build's panel since v2.5.0-mcp.17. Setting names and their choices come from OrcaSlicer's own translation file, so a row uses the same words as the sidebar. The plugin's own words, its setup view included, were machine-translated. Catalan, Basque, Hungarian and Traditional Chinese are recognised too, although OrcaSlicer 2.5 reports them to plugins as English or Simplified Chinese.
+- The plugin takes `POST /api/v1/activity/note` with `"kind": "note"`, as the build does: the assistant's own words, a plain row in the current group with no undo.
+
 ### Changed
 - The README and the OrcaSlicer MCP plugin's setup (0.2.2) say that every AI app needs uv installed once, the Claude Desktop extension included: it runs the connector with uv too. The extension's description now also lists the plugin on stock OrcaSlicer 2.5, not only the OrcaSlicer MCP build.
 - orcaslicer-mcp now tells you when your plugin is older than 0.2.2.

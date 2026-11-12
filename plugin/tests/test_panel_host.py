@@ -44,11 +44,12 @@ def test_ready_sends_history_state_and_live_with_the_plugins_capabilities(plugin
     time.sleep(0.2)
     h = last(plugin, "history")
     assert h["version"] == 1 and h["rows"] == [] and h["groups"] == []
-    assert h["capabilities"] == {"restore": False, "kinds": ["setting", "preset", "refused", "slice"],
+    assert h["capabilities"] == {"restore": False, "kinds": ["setting", "preset", "refused", "slice", "note"],
                                  "open_settings": False,
                                  "settings_hint": "Main menu (beside File) > Plugins > OrcaSlicer MCP > Config",
                                  "settings_label": "Assistant settings",
-                                 "off_text": "Assistant access is off.", "tracked_live": True}
+                                 "off_text": "Assistant access is off.", "tracked_live": True,
+                                 "language": ""}
     assert h["restored_to"] is None and h["restore_failed"] is False and h["can_undo_restore"] is False
     assert last(plugin, "state") == {"type": "state", "api": "on"}
     assert last(plugin, "live")["values"] == {}

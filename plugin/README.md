@@ -86,8 +86,19 @@ and serves them on `GET /api/v1/slice/status` and the file on `GET /api/v1/gcode
   plate's slice read as out of date. Adding a 5th, 10th or 17th plate does the same, because OrcaSlicer
   rearranges the plate grid. OrcaSlicer may still hold those plates' results, and then Slice plate does not
   slice them again. Change something on that plate and slice it.
-- **Files:** the plugin only opens files inside that temporary folder. OrcaSlicer writes a new file each time
+- **Files:** for your slices, the plugin only opens files inside that temporary folder. OrcaSlicer writes a new file each time
   you slice; the plugin reads it in one go and closes it, so it never holds up the next slice.
+
+## Your language
+
+The panel follows the language OrcaSlicer is set to, in each of the 22 languages OrcaSlicer is translated into,
+like the OrcaSlicer MCP build's panel (v2.5.0-mcp.17 and later). Setting names and their choices come from
+OrcaSlicer's own translation file for that language, so a row uses the same words as the sidebar. The panel's other
+words were machine-translated with OrcaSlicer's translation glossary. The assistant still reads everything in
+English. The Config tab is in English.
+
+OrcaSlicer 2.5 tells plugins that Catalan, Basque and Hungarian are English and that Traditional Chinese is
+Simplified. The plugin tells them apart by the language OrcaSlicer set for the whole program when it started.
 
 ## Safety
 
@@ -97,7 +108,8 @@ and serves them on `GET /api/v1/slice/status` and the file on `GET /api/v1/gcode
   passes, so snapshot/restore works.
 - Hides `print_host`/`printhost_*` from `GET /config` and redacts credentials in
   `POST /preset/config`.
-- Reads files only inside OrcaSlicer's temporary slicing folder, and only the G-code of your last slice.
+- Reads two files at most: the G-code of your last slice, inside OrcaSlicer's temporary slicing folder, and, when
+  OrcaSlicer is set to another language, OrcaSlicer's own translation file for it, inside OrcaSlicer's program folder.
 - Every change shows as an OrcaSlicer notification and in the panel's timeline, with undo.
 
 ## Tests

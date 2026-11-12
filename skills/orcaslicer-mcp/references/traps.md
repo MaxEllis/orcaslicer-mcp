@@ -39,10 +39,12 @@
 ## Bambu AMS mapping takes the type word literally
 
 - OrcaSlicer's Send dialog maps a filament to a tray only when the AMS's type word equals the slot preset's
-  `filament_type`. The AMS calls Polymaker LW-ASA `ASA-Aero` and a carbon PLA `PLA-CF`; a slot whose preset says
-  `ASA` or `PLA` is left without a tray, and `get_filament_slot_mapping` reports it as a soft match with the
-  candidate trays. Nothing is wrong with the spool: tell the user both names and let them pick the tray in the
-  Send dialog, or switch the slot to the preset that matches the spool (`set_filament_slot_preset`).
+  `filament_type`. The AMS calls Polymaker LW-ASA `ASA-Aero`; a slot whose preset says `ASA` is left without a
+  tray, and `get_filament_slot_mapping` reports it as a soft match with the candidate trays. Nothing is wrong with
+  the spool: tell the user both names and let them pick the tray in the Send dialog, or switch the slot to the
+  preset that matches the spool (`set_filament_slot_preset`).
+- A fibre filled spool (`PLA-CF`, `PA6-GF`) is never offered for an unfilled slot, nor the other way round: it
+  wears a standard nozzle. The warning names the tray; the fix is the right spool or the slot's preset.
 - The tray tools read the printer selected in OrcaSlicer's Device tab, not the printer profile's address, so
   `no_printer_selected` and `printer_offline` are fixed there.
 

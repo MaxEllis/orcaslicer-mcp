@@ -2,12 +2,17 @@
 fork's GET /printer/slot_mapping (kind "bambu") and GET /printer/slots replies and adds a `match` per filament,
 warnings and a headline. OrcaSlicer's own mapping takes a tray only when the AMS's type word equals the slot
 preset's type, so the interesting case is the slot it left without a tray: a tray of the same base material
-(LW-ASA / ASA-Aero for an ASA slot, PLA-CF for PLA) is a soft match worth naming, with both names shown."""
+(LW-ASA / ASA-Aero for an ASA slot) is a soft match worth naming, with both names shown. A fibre filled type
+never stands in for an unfilled one (PLA-CF for PLA), nor a support type for anything."""
 from __future__ import annotations
 import re
 
-# Support filaments stand in for nothing and nothing stands in for them.
+# Support filaments stand in for nothing and nothing stands in for them: the AMS words PLA-S, PA-S, ABS-S, any other
+# type ending in an "S" token or naming support, and Bambu's "Sup.PLA" style.
 _SUPPORT = frozenset({"PLA-S", "PA-S", "ABS-S"})
+# A fibre filled type (PLA-CF, PA6-GF, PETG-CF10): abrasive, it needs a hardened nozzle, so it never stands in for an
+# unfilled one or the other way round.
+_FILLED = re.compile(r"(?:^|[^A-Z])(?:CF|GF)\d*(?:$|[^A-Z])")
 # Base materials, longest first so a prefix match takes PETG before PET and PAHT before PA.
 _BASES = sorted(("PLA", "PETG", "PCTG", "PET", "ABS", "ASA", "TPU", "TPE", "PA6", "PA11", "PA12", "PAHT", "PPA",
                  "PA", "PC", "PVA", "BVOH", "HIPS", "PPS", "PP", "PE", "PEEK", "PEKK", "PEI", "PVB", "SBS", "EVA"),
@@ -20,9 +25,9 @@ def base_material(filament_type) -> str:
     s = str(filament_type or "").strip().upper()
     if not s:
         return ""
-    if s in _SUPPORT or s.startswith("SUP"):
-        return s
     tokens = [t for t in re.split(r"[^A-Z0-9]+", s) if t]
+    if s in _SUPPORT or s.startswith("SUP") or "SUPPORT" in tokens or (len(tokens) > 1 and tokens[-1] == "S"):
+        return s
     for tok in tokens:
         if tok in _BASES:
             return tok
@@ -31,6 +36,24 @@ def base_material(filament_type) -> str:
             if tok.startswith(base) and len(base) >= 3:
                 return base
     return s
+
+
+def filled(filament_type) -> bool:
+    """True for a fibre filled type: 'PLA-CF', 'PA6-GF', 'PETG-CF10'."""
+    return bool(_FILLED.search(str(filament_type or "").strip().upper()))
+
+
+def _same_filament(row: dict, tray: dict) -> bool | None:
+    """Whether the tray holds the filament the slot's preset describes: by filament id when both sides carry one,
+    else by name without a system preset's printer suffix ("Bambu PLA Basic @BBL P1S"). None when neither says."""
+    fid, tid = row.get("filament_id"), tray.get("filament_id")
+    if fid and tid:
+        return str(fid) == str(tid)
+    held = str(tray.get("filament_name") or "").strip().lower()
+    name = re.sub(r"\s*@.*$", "", str(row.get("name") or "")).strip().lower()
+    if not held or not name:
+        return None
+    return held in name or name in held
 
 
 def _tray_text(t: dict) -> str:
@@ -62,15 +85,20 @@ def classify(mapping: dict, slots: dict | None) -> dict:
         if isinstance(tray, dict):
             row["match"] = "exact"
             held = tray.get("filament_name") or ""
-            if held and held != row.get("name"):
+            if held and _same_filament(row, tray) is False:
+                ttype = tray.get("filament_type") or ftype
+                types = (f"both {ttype}" if str(ttype).upper() == ftype.upper() or not ftype
+                         else f"{ttype} and {ftype}")
                 row["note"] = (f"{tray.get('label')} holds {held}; the slot's preset is {row.get('name')} "
-                               f"(both {tray.get('filament_type') or ftype}).")
+                               f"({types}).")
         elif not ftype:
             row["match"] = "unknown"
             warnings.append(f"{who} has no filament type in its preset, so no tray can be matched to it.")
         else:
             base = base_material(ftype)
-            cands = [t for t in loaded if base_material(t.get("filament_type")) == base]
+            same_base = [t for t in loaded if base_material(t.get("filament_type")) == base]
+            cands = [t for t in same_base if filled(t.get("filament_type")) == filled(ftype)]
+            other_fill = [t for t in same_base if t not in cands]
             if cands:
                 row["match"] = "soft"
                 row["candidates"] = [{"label": t.get("label"), "ams_id": t.get("ams_id"), "tray_id": t.get("tray_id"),
@@ -80,6 +108,13 @@ def classify(mapping: dict, slots: dict | None) -> dict:
                 warnings.append(f"No tray holds {ftype} for {who}. {held}: the same base material ({base}), "
                                 "close enough that the Send dialog will take it if you choose it, but check it "
                                 "is the filament you meant.")
+            elif other_fill:
+                row["match"] = "none"
+                held = ", ".join(f"{t.get('label')} holds {_tray_text(t)}" for t in other_fill)
+                warnings.append(f"No tray holds {ftype} for {who}. {held}: the same base material, but "
+                                + ("fibre filled, which wears a standard nozzle" if not filled(ftype) else "not fibre filled")
+                                + ", so it is no stand-in: load the right spool, or point the slot at a preset for "
+                                "a filament that is loaded.")
             else:
                 row["match"] = "none"
                 warnings.append(f"No tray holds {ftype}, or any other {base}, for {who}: load one, or point the "

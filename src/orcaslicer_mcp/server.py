@@ -19,7 +19,7 @@ from . import client as _client_mod
 from .client import OrcaClient
 from .plugin_update import plugin_update as _plugin_update
 from .plugin_text import plugin_refusal as _plugin_text, plugin_note as _plugin_note
-from .errors import ApiError, Validation, NotFound, Conflict, ConfigError, OutOfRange, PLUGIN_LIMITS
+from .errors import ApiError, Validation, NotFound, Conflict, ConfigError, OutOfRange, PLUGIN_LIMITS, UiTimeout, NotReachable
 from .models import summarize_slice, is_out_of_date, OUT_OF_DATE_NOTE
 from . import settings_schema
 from . import placement
@@ -644,7 +644,13 @@ async def get_config(
             if by_slot:
                 status = await c.get_status()
                 names = [n for n in (status.get("presets") or {}).get("filament") or [] if n]
-                filament_keys = set((await c.get_preset_config("filament", names[0])).get("config") or {}) if names else set()
+                filament_keys: set = set()
+                if names:
+                    try:
+                        filament_keys = set((await c.get_preset_config("filament", names[0])).get("config") or {})
+                    except ApiError:
+                        pass  # the values are read already: without the key list they stay as merged text
+                filament_keys -= _NOT_PER_SLOT
                 cfg, left = _config_by_slot(cfg, filament_keys, len(names))
                 reply = {"config": cfg, "slots": len(names)}
                 if left:
@@ -661,10 +667,14 @@ async def get_config(
 
 _GROUP_TYPE = {"print": "print", "filament": "filament", "printer": "printer"}
 
+# Filament preset keys whose list is not one value per slot (as the fork's is_merged_per_filament_key).
+_NOT_PER_SLOT = frozenset({"compatible_printers", "compatible_prints", "compatible_printers_condition",
+                           "compatible_prints_condition", "inherits"})
+
 _FILAMENT_SLOTS_NEED = "the filament slot routes"
 
 
-async def _capability_missing(c, cap: str, what: str) -> dict | None:
+async def _capability_missing(c, cap: str, what: str, plugin_action: str | None = None) -> dict | None:
     """The error reply when this OrcaSlicer lacks `cap` (a GET /status capability), else None. An older build
     ignores the argument the capability covers and does something else with the request (a slot write would
     land in the Filament tab's preset), so this runs before the request. The plugin gets its own wording."""
@@ -672,7 +682,7 @@ async def _capability_missing(c, cap: str, what: str) -> dict | None:
     if cap in (status.get("capabilities") or []):
         return None
     if status.get("backend") == "plugin":
-        return _plugin_text(_CURRENT_TOOL.get())
+        return _plugin_text(plugin_action or _CURRENT_TOOL.get())
     return {"error": f"not available on this OrcaSlicer build (needs {what}, capability '{cap}')"}
 
 
@@ -726,9 +736,10 @@ def _slot_err(e: ApiError) -> dict:
         out["error"] = ("filament_edits_unsaved: the Filament tab holds unsaved edits to a different preset, "
                         f"{body.get('preset')!r}, and switching it to this slot's preset would drop them; nothing was changed")
         out["preset"] = body.get("preset")
-        out["modified"] = _visible_keys(body.get("modified"))
-        out["hint"] = ("save them first (save_preset with the filament_slot of a slot using that preset), or put the "
-                       "keys back (set_config with null for each)")
+        out["modified"] = list(dict.fromkeys(k.split("#", 1)[0] for k in _visible_keys(body.get("modified"))))
+        out["hint"] = ("first save them, with save_preset and the filament_slot of a slot that uses that preset (under "
+                       "a new name when it is a built-in preset), or put them back, with set_config, each key set to "
+                       "null and the filament_slot of a slot that uses that preset")
     elif body.get("error") == "slot_out_of_range":
         out["error"] = f"slot_out_of_range: the project has {body.get('filament_count')} filament slot(s)"
     return out
@@ -916,7 +927,8 @@ async def set_config(
         async with _client() as c:
             if filament_slot is None:
                 return await _put_config_with_reverts(c, changes)
-            if (missing := await _capability_missing(c, "filament_slots", _FILAMENT_SLOTS_NEED)) is not None:
+            if (missing := await _capability_missing(c, "filament_slots", _FILAMENT_SLOTS_NEED,
+                                                     "set_config:filament_slot")) is not None:
                 return missing
             return await _put_config_with_reverts(c, changes, filament_slot - 1)
     except ApiError as e:
@@ -1563,7 +1575,7 @@ async def get_filament_slot_mapping() -> dict:
     """Show which printer tray each filament of the plate would print from on the next Send, and whether that tray holds what the slot's preset says (Bambu Lab AMS, or an Elegoo Centauri Carbon 2's CANVAS); read-only. The check to run before telling the user a plate is ready to send.
 
     The filaments listed are the ones on the plate the next Send would use, each with its
-    0-based index (and `slot`, the 1-based number the sidebar shows), type, preset name, colour,
+    0-based index (on a Bambu Lab printer also `slot`, the 1-based number the sidebar shows), type, preset name, colour,
     the tray it maps to (or null), the source of that choice and any warnings. valid is true when
     that Send would go through without a choice from the user; if not, problems says why. Nothing
     is sent to the printer. A supported false reply carries a reason to relay, as
@@ -2335,7 +2347,8 @@ async def save_preset(
         async with _client() as c:
             if filament_slot is None:
                 return await c.save_preset(type, name, detach)
-            if (missing := await _capability_missing(c, "filament_slots", _FILAMENT_SLOTS_NEED)) is not None:
+            if (missing := await _capability_missing(c, "filament_slots", _FILAMENT_SLOTS_NEED,
+                                                     "save_preset:filament_slot")) is not None:
                 return missing
             return _slot_reply(await c.save_preset(type, name, detach, filament_slot - 1))
     except ApiError as e:
@@ -2373,44 +2386,67 @@ async def set_filament_slot_preset(
         "Keep the slot's current colour (the default). False sets the colour the preset carries as its "
         "default (default_filament_colour), when it has one."))] = True,
 ) -> dict:
-    """Point one filament slot at a named preset, leaving the other slots and every unsaved edit alone; the slot keeps its colour unless keep_colour is false.
+    """Point one filament slot at a named preset, leaving the other slots alone and never dropping an unsaved edit; the slot keeps its colour unless keep_colour is false.
 
-    The same as picking the preset in that slot's sidebar combo: no unsaved print, filament or
-    printer edit is discarded (`discarded_changes` in the reply is empty on a multi-filament
-    printer; on a single-filament printer slot 1 is the Filament tab's preset, and the switch
-    behaves like select_preset without a slot, which does discard them). The reply ends with
-    `filaments`, the slots afterwards as get_filament_slots lists them. Needs a build with the
-    preset_slot capability; the colour change needs a writable filament_colour (any build).
-    Unknown names and presets not compatible with the selected printer are refused."""
+    On a multi-filament project it is the same as picking the preset in that slot's sidebar
+    combo: no unsaved print, filament or printer edit is touched. On a one-filament project the
+    slot is the Filament tab's preset, and switching it would drop every unsaved edit, so while
+    there are any the call is refused (`unsaved_edits`, naming them) and nothing changes: save
+    them or put them back first. The reply ends with `filaments`, the slots afterwards as
+    get_filament_slots lists them. Needs a build with the preset_slot capability; the colour
+    change needs a writable filament_colour (any build). Unknown names and presets not
+    compatible with the selected printer are refused."""
     if slot < 1:
         return {"error": "slot is 1-based; use slot=1 for the first filament"}
     try:
         async with _client() as c:
             if (missing := await _capability_missing(c, "preset_slot", "per-slot filament select")) is not None:
                 return missing
+            status = await c.get_status()
+            loaded = [n for n in (status.get("presets") or {}).get("filament") or [] if n]
+            if len(loaded) <= 1:
+                # One filament: OrcaSlicer switches the Filament tab itself, which drops every unsaved edit.
+                dirty = {g: list(dict.fromkeys(k.split("#", 1)[0] for k in _visible_keys(keys)))
+                         for g, keys in (status.get("modified") or {}).items() if _visible_keys(keys)}
+                if dirty:
+                    groups = " and ".join(f"{g} ({', '.join(keys)})" for g, keys in dirty.items())
+                    return {"error": (f"unsaved_edits: this project has one filament, so its slot is the Filament "
+                                      f"tab's preset, and switching it would drop the unsaved edits to {groups}; "
+                                      "nothing was changed"),
+                            "modified": dirty,
+                            "hint": ("save them first (save_preset), or put them back (set_config with each key set "
+                                     "to null), then switch; or ask the user whether to drop them")}
             r = await c.select_preset("filament", name, slot - 1)
             out = {"slot": slot, "selected": r.get("selected", name),
                    "discarded_changes": r.get("discarded_changes") or [], "colour": "kept"}
             if not keep_colour:
-                saved = (await c.get_preset_config("filament", name)).get("config") or {}
-                default = _split_config_strings(saved.get("default_filament_colour") or "")[0].strip()
-                if not default:
-                    out["colour"] = "kept: the preset carries no default colour"
-                else:
-                    colours = _split_config_strings((await c.get_config(["filament_colour"])).get("filament_colour") or "")
-                    if slot - 1 >= len(colours):
-                        out["colour"] = f"kept: the project has {len(colours)} colour(s)"
+                try:
+                    saved = (await c.get_preset_config("filament", name)).get("config") or {}
+                    default = _split_config_strings(saved.get("default_filament_colour") or "")[0].strip()
+                    if not default:
+                        out["colour"] = "kept: the preset carries no default colour"
                     else:
-                        colours[slot - 1] = default
-                        w = await c.put_config({"filament_colour": ";".join(colours)})
-                        out["colour"] = {"set": default, "applied": w.get("applied", []), "errors": w.get("errors", {})}
+                        colours = _split_config_strings((await c.get_config(["filament_colour"])).get("filament_colour") or "")
+                        if slot - 1 >= len(colours):
+                            out["colour"] = f"kept: the project has {len(colours)} colour(s)"
+                        else:
+                            colours[slot - 1] = default
+                            w = await c.put_config({"filament_colour": ";".join(colours)})
+                            out["colour"] = {"set": default, "applied": w.get("applied", []), "errors": w.get("errors", {})}
+                except ApiError as ce:
+                    # The slot has switched already: only the colour step failed.
+                    out["colour"] = {"error": "kept: the colour could not be changed, " + str(_err(ce).get("error", ce))}
             try:
                 out["filaments"] = _filament_slots_view(await c.get_filaments())["slots"]
             except NotFound:
                 pass  # a build with preset_slot but not yet the filament slot routes
             return out
     except ApiError as e:
-        return _m4a_err(e)
+        out = _m4a_err(e)
+        body = getattr(e, "body", None) or {}
+        if body.get("error") == "slot_out_of_range":
+            out["error"] = f"slot_out_of_range: the project has {body.get('filament_count')} filament slot(s)"
+        return out
 
 
 _PRESET_TYPES = ("print", "filament", "printer")
@@ -3029,6 +3065,8 @@ async def _bambu_ams_check() -> dict | None:
                         "message": mapping.get("message"),
                         "hint": "Select the printer in OrcaSlicer's Device tab and wait for it to connect."}
             return await _bambu_mapping(c, mapping)
+    except (UiTimeout, NotReachable) as e:
+        return {"supported": False, "kind": "bambu", "reason": "orcaslicer_not_answering", "message": _err(e).get("error")}
     except ApiError:
         return None
 

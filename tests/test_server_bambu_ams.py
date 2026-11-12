@@ -271,3 +271,34 @@ async def test_get_printer_status_bambu_profile_points_at_the_tray_tools(monkeyp
     out = await srv.get_printer_status()
     assert out["error"] == "unsupported_connection"
     assert "get_filament_slot_mapping" in out["message"] and "check_printer_match" in out["message"]
+
+
+# --- review fixes (2026-11) -----------------------------------------------------------------------------------
+
+def test_classify_exact_system_preset_name_with_printer_suffix_has_no_note():
+    # A system preset carries its printer; the AMS names the spool without it. Same filament: no note.
+    a3 = {**A3, "filament_name": "Bambu PLA Basic"}
+    row = classify(mapping(fil(0, "PLA", "Bambu PLA Basic @BBL P1S", a3)), SLOTS)["filaments"][0]
+    assert row["match"] == "exact" and "note" not in row
+
+
+def test_classify_exact_compares_filament_ids_when_both_carry_one():
+    same = classify(mapping({**fil(0, "PLA", "My PLA", {**A3, "filament_id": "GFA00"}), "filament_id": "GFA00"}),
+                    SLOTS)["filaments"][0]
+    assert "note" not in same
+    other = classify(mapping({**fil(0, "PLA", "Bambu PLA Basic @BBL P1S", {**A3, "filament_id": "GFA01"}),
+                              "filament_id": "GFA00"}), SLOTS)["filaments"][0]
+    assert other["note"] == ("A3 holds Bambu PLA Basic; the slot's preset is Bambu PLA Basic @BBL P1S (both PLA).")
+
+
+@pytest.mark.parametrize("ftype", ["PETG-S", "PLA Support", "PVA-S"])
+def test_support_types_stay_their_own(ftype):
+    assert base_material(ftype) == ftype.upper()
+
+
+def test_classify_fibre_filled_tray_is_no_stand_in_for_an_unfilled_slot():
+    slots = {**SLOTS, "trays": [tray("0", "0", "A1", "PLA-CF", "Bambu PLA-CF")]}
+    out = classify(mapping(fil(0, "PLA", "Generic PLA"), valid=False), slots)
+    row = out["filaments"][0]
+    assert row["match"] == "none" and "candidates" not in row
+    assert "fibre filled, which wears a standard nozzle" in out["warnings"][0]

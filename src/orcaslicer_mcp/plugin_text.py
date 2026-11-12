@@ -82,6 +82,18 @@ _ACTIONS: dict[str, tuple[str, str]] = {
     "delete_preset": ("Deleting a preset",
                       "ask the user to select it in OrcaSlicer and use the delete icon beside its name"),
     "watch_events": ("Watching OrcaSlicer's events", "ask the user what changed in the window"),
+    "get_filament_slots": ("Listing the filament slots one by one",
+                           "get_status lists each slot's preset under presets.filament; for colours and types "
+                           "ask the user to look at the filament list in OrcaSlicer's sidebar"),
+    "set_filament_slot_preset": ("Switching one filament slot's preset",
+                                 "ask the user to pick the preset in that slot's list in OrcaSlicer's sidebar"),
+    "set_config:filament_slot": ("Writing one filament slot's preset",
+                                 "ask the user to click the edit button beside that slot in OrcaSlicer's sidebar "
+                                 "first; set_config without filament_slot then writes that slot's preset, the one "
+                                 "open in the Filament settings"),
+    "save_preset:filament_slot": ("Saving one filament slot's preset",
+                                  "ask the user to click the edit button beside that slot in OrcaSlicer's sidebar, "
+                                  "then the save icon beside the preset name"),
 }
 
 

@@ -267,7 +267,7 @@
     },
     {
       "name": "set_filament_slot_preset",
-      "description": "Point one filament slot at a named preset, leaving the other slots and every unsaved edit alone; the slot keeps its colour unless keep_colour is false."
+      "description": "Point one filament slot at a named preset, leaving the other slots alone and never dropping an unsaved edit; the slot keeps its colour unless keep_colour is false."
     },
     {
       "name": "list_presets",

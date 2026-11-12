@@ -59,8 +59,9 @@ async def test_up_front_refusals_name_the_tool_too():
 
 
 def test_every_listed_tool_exists():
+    # "tool:argument" keys word the refusal of one argument of a tool the plugin otherwise serves
     names = {t.name for t in srv.mcp._tool_manager.list_tools()}
-    assert set(_ACTIONS) <= names
+    assert {k.split(":", 1)[0] for k in _ACTIONS} <= names
 
 
 def test_unknown_tool_still_reads_well():

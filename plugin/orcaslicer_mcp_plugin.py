@@ -5,7 +5,7 @@
 # name = "OrcaSlicer MCP"
 # description = "Lets an AI assistant read your OrcaSlicer setup, change settings and read the slices you make, through the orcaslicer-mcp server. Loading models, starting a slice, plates, renders and projects need the OrcaSlicer MCP build."
 # author = "Max Ellis"
-# version = "0.2.2"
+# version = "0.2.3"
 # ///
 """OrcaSlicer MCP: part of the OrcaSlicer MCP Remote API, served by a plugin on stock OrcaSlicer 2.5.
 
@@ -58,7 +58,7 @@ import urllib.parse
 
 import orca
 
-PLUGIN_VERSION = "0.2.2"
+PLUGIN_VERSION = "0.2.3"
 DEFAULT_PORT = 13130
 BIND_HOST = "127.0.0.1"
 MAX_BODY = 4 * 1024 * 1024

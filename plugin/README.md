@@ -62,7 +62,7 @@ vendored from the fork's `resources/web/orcaslicer_mcp/panel.html` and kept iden
 refusals in it, a live "changed by you" when you edit something afterwards, and Revert / Switch back
 on each change. Restore points need the build. The history is kept per project, in the same
 `history.json` format as the build. The panel is also how the plugin reaches OrcaSlicer's UI thread;
-it opens as soon as the plugin is activated, keeps working with OrcaSlicer minimised, and the first request opens it again if it was closed.
+it opens as soon as the plugin is activated and OrcaSlicer shows its Prepare tab, keeps working with OrcaSlicer minimised, and the first request opens it again if it was closed. An OrcaSlicer that starts on its Home tab has no panel yet: until you click Prepare, requests get `panel_not_open`, and the assistant asks you to click it.
 Unticking Activate stops the server.
 
 ## Reading your slice

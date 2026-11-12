@@ -54,6 +54,18 @@ class _UiThread:
 
 UI = _UiThread()
 
+# Stock 2.5 creates a plugin's dock panel only once its Prepare view (the plater) is on screen: an OrcaSlicer that
+# opens on its Home tab has no page to answer until the user clicks Prepare. False = still on Home.
+PLATER_SHOWN = True
+
+
+def show_plater():
+    """The user clicks Prepare: every panel's page loads and says ready."""
+    global PLATER_SHOWN
+    PLATER_SHOWN = True
+    for panel in STATE.panels:
+        UI.call_after(lambda p=panel: p.on_message({"action": "ready"}))
+
 
 def _ui_only():
     if threading.current_thread() is not UI.thread:
@@ -416,11 +428,12 @@ class Panel:
     def __init__(self, on_message, on_close):
         self.on_message, self.on_close = on_message, on_close
         self.open, self.shown, self.posts = True, True, []
-        UI.call_after(lambda: self.on_message({"action": "ready"}))
+        if PLATER_SHOWN:
+            UI.call_after(lambda: self.on_message({"action": "ready"}))
 
     def post(self, data):
         self.posts.append(data)
-        if STATE.page_silent:
+        if STATE.page_silent or not PLATER_SHOWN:
             return
         if data.get("t") == "run":
             UI.call_after(lambda: self.on_message({"t": "run", "id": data["id"]}))

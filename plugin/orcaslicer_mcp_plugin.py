@@ -63,6 +63,12 @@ DEFAULT_PORT = 13130
 BIND_HOST = "127.0.0.1"
 MAX_BODY = 4 * 1024 * 1024
 UI_TIMEOUT_S = 10.0
+# Stock 2.5 creates a plugin's dock panel only once its Prepare view is on screen, so an OrcaSlicer that opens on its
+# Home tab has no page to carry requests until the user clicks Prepare (seen on a Mac, 2026-11-12). Sent as a 503 with
+# its own error: the connector shows a 503's reason as it is, while a 504 becomes "a dialog may be open".
+PANEL_NOT_OPEN_TEXT = ("the OrcaSlicer MCP panel has not opened yet: OrcaSlicer opens it once its Prepare tab shows. "
+                       "Ask the user to click Prepare at the top of OrcaSlicer's window, and to close any dialog "
+                       "that is open there.")
 CAPABILITIES = ["status", "config", "objects", "preset_select", "preset_read", "project_read",
                 "sensitive_key_policy", "slice_read"]
 FORK_ONLY = "needs the OrcaSlicer MCP build: the stock-OrcaSlicer plugin cannot do this"
@@ -480,8 +486,14 @@ class UiPump:
         self._lock = threading.Lock()
         self._next = 0
         self._closed = False
+        self.page_answered = False  # the current panel's page has run a job or posted anything at all
 
-    def call(self, fn, timeout: float = UI_TIMEOUT_S, gate: bool = True):
+    def panel_created(self):
+        """A new panel: its page has not loaded yet (and won't before OrcaSlicer shows its Prepare tab)."""
+        self.page_answered = False
+
+    def call(self, fn, timeout: float | None = None, gate: bool = True):
+        timeout = UI_TIMEOUT_S if timeout is None else timeout
         if self._closed:
             raise ApiReply(503, {"error": "shutting_down"})
         panel = self._panel_source() if gate else self._any_panel()
@@ -497,6 +509,8 @@ class UiPump:
         if not job.done.wait(timeout):
             with self._lock:
                 still_queued = self._jobs.pop(jid, None) is not None
+            if still_queued and not self.page_answered:
+                raise ApiReply(503, {"error": "panel_not_open", "detail": PANEL_NOT_OPEN_TEXT})
             if still_queued:
                 raise ApiReply(504, {"error": "ui_timeout",
                                      "detail": "the OrcaSlicer MCP panel did not answer; is OrcaSlicer busy, "
@@ -507,6 +521,7 @@ class UiPump:
         return job.result
 
     def run_pending(self):
+        self.page_answered = True
         with self._lock:
             jobs = list(self._jobs.values())
             self._jobs.clear()
@@ -3336,6 +3351,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         if panel is not None and panel.is_open():
             return panel
         trace("create_dock_panel: calling")
+        self._pump.panel_created()
         panel = orca.host.ui.create_dock_panel(html=panel_page(), title="OrcaSlicer MCP", width=300, height=480,
                                                on_message=self._on_message, on_close=self._on_close,
                                                dock="right")

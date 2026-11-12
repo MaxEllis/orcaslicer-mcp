@@ -15,6 +15,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - The README and the OrcaSlicer MCP plugin's setup (0.2.2) say that every AI app needs uv installed once, the Claude Desktop extension included: it runs the connector with uv too. The extension's description now also lists the plugin on stock OrcaSlicer 2.5, not only the OrcaSlicer MCP build.
 - orcaslicer-mcp now tells you when your plugin is older than 0.2.2.
 
+### Fixed
+- An OrcaSlicer that starts on its Home tab has no OrcaSlicer MCP plugin panel until you click Prepare, so every request timed out and the assistant was told a dialog might be open. The plugin now answers `panel_not_open`, and the assistant asks you to click Prepare.
+
 ## [0.1.23] - 2026-11-11
 The OrcaSlicer MCP plugin 0.2.1 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.
 

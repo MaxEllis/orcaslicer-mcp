@@ -262,6 +262,14 @@
       "description": "Save the current settings as a named user preset; edit_preset changes a stored preset in one step instead."
     },
     {
+      "name": "get_filament_slots",
+      "description": "List the project's filament slots as the sidebar shows them: each slot's number, preset, filament type, vendor, colour, whether its preset is open in the Filament tab with unsaved edits, and which slots share a preset. Read-only."
+    },
+    {
+      "name": "set_filament_slot_preset",
+      "description": "Point one filament slot at a named preset, leaving the other slots and every unsaved edit alone; the slot keeps its colour unless keep_colour is false."
+    },
+    {
       "name": "list_presets",
       "description": "List the print, filament and printer presets: the user's own and the selected ones, or all with include_system."
     },

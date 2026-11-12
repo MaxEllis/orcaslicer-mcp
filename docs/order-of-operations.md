@@ -52,7 +52,31 @@ select_preset(type="filament", name="Generic ASA")
 So any print-group edit made before a filament switch is lost. Call `save_preset` first if
 it must survive, or, more simply, do the filament work first.
 
-## Recipe for a multi-material plate
+## The slot tools (OrcaSlicer MCP build with `filament_slots`)
+
+On builds that list `filament_slots` in `get_status` capabilities, neither behaviour above
+has to be worked around:
+
+- `get_filament_slots` shows every slot's preset, type, vendor, colour and unsaved edits, and
+  which slots share a preset.
+- `get_config(keys, by_slot=true)` returns a per-filament key as `{"1": "70", "2": "100"}`
+  instead of `"70,100"` (any build).
+- `set_config(changes, filament_slot=2)` writes slot 2's preset. OrcaSlicer binds the Filament
+  tab to the slot first, as the slot's edit button does, so no print or printer edit is dropped.
+  It is refused with `filament_edits_unsaved` when the tab holds unsaved edits to a *different*
+  preset (save them, or put the keys back, first): only one filament preset can be dirty at a
+  time. A preset shared by two slots is still one preset, so the edit reaches both.
+- `save_preset(type="filament", name, filament_slot=2)` saves from slot 2's preset and points
+  only slot 2 at the saved name. OrcaSlicer's own Save As moves every slot using the old preset;
+  the reply's `slots_kept` lists the ones put back.
+- `set_filament_slot_preset(slot, name)` points one slot at a preset and keeps its colour
+  (`select_preset` with `slot` does the same without the colour option).
+
+So to give slot 2 its own bed temperature when slots 1 and 2 share "Generic ASA":
+`save_preset(type="filament", name="Generic ASA slot 2", filament_slot=2)`, then
+`set_config({"hot_plate_temp": 100}, filament_slot=2)`, then `save_preset` again to keep it.
+
+## Recipe for a multi-material plate (older builds)
 
 1. `get_status`, and check `project` is the file you expect. The API acts on whatever
    OrcaSlicer currently has open.

@@ -38,7 +38,9 @@ OrcaSlicer MCP panel, where the user can revert it.
 - **Per-filament settings** (temperatures, fans, `hot_plate_temp`, ...): `get_config` shows one value per
   loaded slot, `"70,100,70"`; `set_config` writes ONE value into the filament preset open in the Filament tab.
   On a multi-filament plate do filament edits first: `select_preset` for another slot discards unsaved print
-  edits (see references/traps.md).
+  edits (see references/traps.md). On a build with the `filament_slots` capability use the slot tools instead:
+  `get_filament_slots` (every slot's preset, type, colour, unsaved edits, shared presets), `get_config` with
+  `by_slot`, `set_config` and `save_preset` with `filament_slot`, `set_filament_slot_preset`.
 - **Refused keys**: scripts, custom G-code and printer-connection settings are refused. On the build, the user
   can allow them with **Allow script, G-code and connection edits** in Preferences > Remote API; with the
   plugin, never. Tell the user; do not look for a way around it.

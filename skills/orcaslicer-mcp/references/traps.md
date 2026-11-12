@@ -6,7 +6,11 @@
   loaded slot. Writing that list back is refused (`per_filament_length_mismatch`). `set_config` takes one
   value and writes it into the filament preset open in the Filament tab; every slot loaded with that preset
   then has it. `list_presets(type="filament")` marks the open one `selected`.
-- To change another slot's value, `select_preset(type="filament", name=...)` for it first. Selecting any preset
+- On a build with the `filament_slots` capability, `set_config(changes, filament_slot=n)` writes slot n's
+  preset without any of this; `save_preset(..., filament_slot=n)` moves only slot n to the saved name (a
+  plain save moves every slot that used the old preset). Both are refused with `filament_edits_unsaved`
+  when the Filament tab holds unsaved edits to a different preset: save or revert those first.
+- Otherwise, to change another slot's value, `select_preset(type="filament", name=...)` for it first. Selecting any preset
   discards the unsaved edits of the print and printer groups too (the reply lists `discarded_changes`), so do
   filament work first, print edits second, slice last. `save_preset` first if an edit must survive.
 - Setting a per-filament key to `null` with several different filament presets loaded is refused as

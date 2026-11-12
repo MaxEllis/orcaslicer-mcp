@@ -1,12 +1,13 @@
 # Tools
 
-66 tools, plus three ready-made prompts (`slice-a-model`, `optimize-print-time`, `edit-preset-safely`) and the settings reference as MCP resources.
+68 tools, plus three ready-made prompts (`slice-a-model`, `optimize-print-time`, `edit-preset-safely`) and the settings reference as MCP resources.
 
 | | | |
 |---|---|---|
 | **Settings** | Read and change any of OrcaSlicer's settings while it runs, for the plate, one object, or a band of layers; reading named settings also says what each one means, and one can be put back to its saved preset value. | `get_config` `set_config` `find_config_keys` `set_layer_height` `set_height_range` `set_object_config` |
 | **Knowing what they mean** | Look settings up in OrcaSlicer's own labels and tooltips, and check a profile against your printer's physical limits before printing. | `describe_setting` `search_settings` `compare_settings` `consult` `check_profile_physics` |
 | **Presets** | Switch, edit, save, rename and delete presets, and choose the filament preset of one slot on a multi-filament printer. | `list_presets` `select_preset` `get_preset_config` `edit_preset` `save_preset` `rename_preset` `delete_preset` |
+| **Filament slots** | See each slot's preset, type, vendor, colour and unsaved edits in one read; point one slot at a preset, keeping its colour; write or save one slot's preset without moving the slots that share it; read per-filament settings one value per slot. | `get_filament_slots` `set_filament_slot_preset` `set_config` (`filament_slot`) `save_preset` (`filament_slot`) `get_config` (`by_slot`) |
 | **Models** | Load STL, OBJ, 3MF and STEP files, then move, rotate, scale, duplicate, arrange and auto-orient them. | `load_model` `list_objects` `transform_object` `duplicate_object` `delete_object` `arrange_plate` `auto_orient` `check_placement` `diagnose_plate` |
 | **Slicing** | Slice, read time, filament and OrcaSlicer's warnings, split the result by feature, and compare several settings in one go. | `slice` `slice_and_wait` `apply_and_slice` `get_slice_status` `cancel_slice` `get_slice_breakdown` `compare_slices` `get_slice_warnings` `get_gcode` `save_gcode` |
 | **Seeing the plate** | Get the plate as a picture, or as a short description of how each part stands, where support goes and where the seams sit. | `render_plate` `describe_plate` |

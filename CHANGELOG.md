@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- `get_filament_slots`: every filament slot of the project in one read, numbered as the sidebar numbers them: its preset, filament type, vendor, colour, whether that preset is open in the Filament tab with unsaved edits, and which other slots share the preset. Needs the OrcaSlicer MCP build with the `filament_slots` capability.
+- `set_filament_slot_preset(slot, name, keep_colour)`: point one slot at a preset, leaving the other slots and every unsaved edit alone; the slot keeps its colour unless `keep_colour` is false, which sets the preset's own default colour.
+- `set_config` takes `filament_slot`: the per-filament keys go to that slot's preset instead of whichever preset is open in the Filament tab. `save_preset` takes `filament_slot` too: it saves from that slot's preset and points only that slot at the saved name, where OrcaSlicer's own Save As moves every slot that used the old preset (`slots_kept` says which were put back). Both are refused, with nothing changed, when the Filament tab holds unsaved edits to a different preset (`filament_edits_unsaved`, with the keys and what to do).
+- `get_config` takes `by_slot`: a per-filament setting comes back as one value per slot, `{"1": "70", "2": "100"}`, instead of the merged `"70,100"` text. Works on any build.
+
 ### Changed
 - The README and the OrcaSlicer MCP plugin's setup (0.2.2) say that every AI app needs uv installed once, the Claude Desktop extension included: it runs the connector with uv too. The extension's description now also lists the plugin on stock OrcaSlicer 2.5, not only the OrcaSlicer MCP build.
 - orcaslicer-mcp now tells you when your plugin is older than 0.2.2.

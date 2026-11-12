@@ -622,15 +622,33 @@ def _about(keys: list[str]) -> dict:
 
 
 @mcp.tool()
-async def get_config(keys: list[str] | None = None) -> dict:
+async def get_config(
+    keys: list[str] | None = None,
+    by_slot: Annotated[bool, Field(description=(
+        "Return each per-filament setting as one value per filament slot, {'1': '70', '2': '100'}, numbered "
+        "as the sidebar numbers them, instead of the merged '70,100' text. Other settings are unchanged."))] = False,
+) -> dict:
     """Read the current value of settings (all, or only `keys`); with `keys`, `about` also says what each one means, its unit, range and choices.
 
-    Values come back as text, merged across the active print, filament and printer presets. Name the keys you
-    need: the whole config is several hundred settings. describe_setting gives the full record of one key.
+    Values come back as text, merged across the active print, filament and printer presets: a per-filament
+    setting such as hot_plate_temp holds one value per loaded filament slot, '70,100,70'. With by_slot those
+    come back as {slot: value} instead, so slot 2's bed temperature is config['hot_plate_temp']['2'], and
+    `slots` says how many there are. Name the keys you need: the whole config is several hundred settings.
+    describe_setting gives the full record of one key.
     """
     try:
         async with _client() as c:
-            reply = {"config": await c.get_config(keys)}
+            cfg = await c.get_config(keys)
+            reply = {"config": cfg}
+            if by_slot:
+                status = await c.get_status()
+                names = [n for n in (status.get("presets") or {}).get("filament") or [] if n]
+                filament_keys = set((await c.get_preset_config("filament", names[0])).get("config") or {}) if names else set()
+                cfg, left = _config_by_slot(cfg, filament_keys, len(names))
+                reply = {"config": cfg, "slots": len(names)}
+                if left:
+                    reply["not_per_slot"] = left
+                    reply["note"] = "not_per_slot: filament settings whose value does not hold one entry per slot, left as text"
     except ApiError as e:
         return _err(e)
     if keys:
@@ -642,11 +660,138 @@ async def get_config(keys: list[str] | None = None) -> dict:
 
 _GROUP_TYPE = {"print": "print", "filament": "filament", "printer": "printer"}
 
+_FILAMENT_SLOTS_NEED = "the filament slot routes"
 
-async def _resolve_reverts(c, changes: dict) -> tuple[dict, list, list, dict]:
+
+async def _capability_missing(c, cap: str, what: str) -> dict | None:
+    """The error reply when this OrcaSlicer lacks `cap` (a GET /status capability), else None. An older build
+    ignores the argument the capability covers and does something else with the request (a slot write would
+    land in the Filament tab's preset), so this runs before the request. The plugin gets its own wording."""
+    status = await c.get_status()
+    if cap in (status.get("capabilities") or []):
+        return None
+    if status.get("backend") == "plugin":
+        return _plugin_text(_CURRENT_TOOL.get())
+    return {"error": f"not available on this OrcaSlicer build (needs {what}, capability '{cap}')"}
+
+
+def _visible_keys(keys) -> list:
+    return [k for k in (keys or []) if not (isinstance(k, str) and k.split("#", 1)[0] in _INTERNAL_MODIFIED)]
+
+
+def _filament_slots_view(raw: dict) -> dict:
+    """GET /filaments as the tools show it: slots numbered from 1 as the sidebar does, and for each slot which
+    other slots share its preset (an edit or a save of that preset reaches them all)."""
+    rows = raw.get("filaments") or []
+    using: dict = {}
+    for r in rows:
+        using.setdefault(r.get("preset"), []).append(int(r.get("index", 0)) + 1)
+    slots = []
+    for r in rows:
+        slot = int(r.get("index", 0)) + 1
+        row = {"slot": slot, "preset": r.get("preset"), "filament_type": r.get("filament_type"),
+               "vendor": r.get("vendor"), "colour": r.get("colour"), "system_preset": bool(r.get("system")),
+               "open_in_tab": bool(r.get("open_in_tab")), "modified": bool(r.get("modified")),
+               "modified_keys": _visible_keys(r.get("modified_keys"))}
+        shared = [n for n in using.get(r.get("preset"), []) if n != slot]
+        if shared:
+            row["shares_preset_with"] = shared
+        slots.append(row)
+    tab = raw.get("tab") or {}
+    tab_slot = tab.get("slot")
+    return {"count": raw.get("count", len(rows)), "multi_filament": bool(raw.get("multi_filament")), "slots": slots,
+            "filament_tab": {"preset": tab.get("preset"),
+                             "slot": tab_slot + 1 if isinstance(tab_slot, int) else None,
+                             "modified": bool(tab.get("modified"))}}
+
+
+def _slot_reply(result: dict) -> dict:
+    """The API counts slots from 0; the tools, like the sidebar, from 1."""
+    if isinstance(result.get("slot"), int):
+        result["slot"] += 1
+    for key in ("slots_kept", "slots_reassigned"):
+        if isinstance(result.get(key), list):
+            result[key] = [n + 1 for n in result[key] if isinstance(n, int)]
+    if isinstance(result.get("filaments"), list):
+        result["filaments"] = {str(i + 1): name for i, name in enumerate(result["filaments"])}
+    return result
+
+
+def _slot_err(e: ApiError) -> dict:
+    """A slot write or save refused: the reply keeps what the API said about why, and says what to do."""
+    out = _m4_err(e, _FILAMENT_SLOTS_NEED)
+    body = getattr(e, "body", None) or {}
+    if body.get("error") == "filament_edits_unsaved":
+        out["error"] = ("filament_edits_unsaved: the Filament tab holds unsaved edits to a different preset, "
+                        f"{body.get('preset')!r}, and switching it to this slot's preset would drop them; nothing was changed")
+        out["preset"] = body.get("preset")
+        out["modified"] = _visible_keys(body.get("modified"))
+        out["hint"] = ("save them first (save_preset with the filament_slot of a slot using that preset), or put the "
+                       "keys back (set_config with null for each)")
+    elif body.get("error") == "slot_out_of_range":
+        out["error"] = f"slot_out_of_range: the project has {body.get('filament_count')} filament slot(s)"
+    return out
+
+
+# OrcaSlicer serializes a vector setting as one string: numbers, enums and booleans joined with ',', strings with
+# ';' (ConfigOptionStrings::serialize, an item that needs it in C-style quotes). One entry per loaded filament for
+# a filament preset key.
+_STRING_VECTOR = "coStrings"
+_VECTOR_TYPES = frozenset({"coFloats", "coInts", "coStrings", "coBools", "coPercents", "coFloatsOrPercents",
+                           "coPoints", "coEnums"})
+
+
+def _split_config_strings(value: str) -> list[str]:
+    items, buf, i, n = [], [], 0, len(value)
+    while i < n:
+        ch = value[i]
+        if ch == '"':
+            i += 1
+            while i < n and value[i] != '"':
+                if value[i] == "\\" and i + 1 < n:
+                    i += 1
+                    buf.append({"n": "\n", "t": "\t", "r": "\r"}.get(value[i], value[i]))
+                else:
+                    buf.append(value[i])
+                i += 1
+            i += 1  # the closing quote
+        elif ch == ";":
+            items.append("".join(buf))
+            buf = []
+            i += 1
+        else:
+            buf.append(ch)
+            i += 1
+    items.append("".join(buf))
+    return items
+
+
+def _config_by_slot(cfg: dict, filament_keys: set, slots: int) -> tuple[dict, list]:
+    """Per-filament keys as {"1": value, "2": value, ...}; a key whose value does not hold one entry per slot
+    stays as it came and is named in the second result."""
+    out, left = {}, []
+    for key, value in cfg.items():
+        if not isinstance(value, str) or (key not in filament_keys and key != "filament_colour"):
+            out[key] = value
+            continue
+        ctype = (settings_schema.describe(key) or {}).get("type") or (_STRING_VECTOR if ";" in value else "coFloats")
+        if ctype not in _VECTOR_TYPES:
+            out[key] = value
+            continue
+        parts = _split_config_strings(value) if ctype == _STRING_VECTOR else value.split(",")
+        if len(parts) != slots:
+            out[key] = value
+            left.append(key)
+            continue
+        out[key] = {str(i + 1): p for i, p in enumerate(parts)}
+    return out, left
+
+
+async def _resolve_reverts(c, changes: dict, slot: int | None = None) -> tuple[dict, list, list, dict]:
     """Keys set to null go back to the value saved in their active preset (OrcaSlicer's own MCP work takes null the
-    same way). Returns (changes with the saved values filled in, reverted keys, keys already at their saved
-    value, errors). Only reads; nothing changes here."""
+    same way); with `slot` (0-based) a filament key goes back to that slot's preset. Returns (changes with the
+    saved values filled in, reverted keys, keys already at their saved value, errors). Only reads; nothing
+    changes here."""
     wanted = [k for k, v in changes.items() if v is None]
     if not wanted:
         return changes, [], [], {}
@@ -676,7 +821,13 @@ async def _resolve_reverts(c, changes: dict) -> tuple[dict, list, list, dict]:
                     continue
             unchanged.append(key)  # no unsaved edit: it already has its saved value
             continue
-        if group == "filament":
+        if group == "filament" and slot is not None:
+            rows = (await c.get_filaments()).get("filaments") or []
+            name = rows[slot].get("preset") if slot < len(rows) else None
+            if not name:
+                errors[key] = f"slot_out_of_range: the project has {len(rows)} filament slot(s)"
+                continue
+        elif group == "filament":
             names = [n for n in presets.get("filament") or presets.get("filaments") or [] if n]  # the client says filament
             if len(set(names)) != 1:
                 errors[key] = ("several filament presets are loaded, so which saved value to use is ambiguous; "
@@ -699,14 +850,16 @@ async def _resolve_reverts(c, changes: dict) -> tuple[dict, list, list, dict]:
     return out, reverted, unchanged, errors
 
 
-async def _put_config_with_reverts(c, changes: dict) -> dict:
-    resolved, reverted, unchanged, errors = await _resolve_reverts(c, changes)
+async def _put_config_with_reverts(c, changes: dict, slot: int | None = None) -> dict:
+    resolved, reverted, unchanged, errors = await _resolve_reverts(c, changes, slot)
     if errors:
         return {"applied": [], "errors": errors, "detail": "nothing was changed (all or nothing)"}
     if resolved:
-        result = await c.put_config(resolved)
+        result = _slot_reply(await c.put_config(resolved, slot))
     else:
         result = {"applied": [], "errors": {}}
+        if slot is not None:
+            result["slot"] = slot + 1
     if reverted:
         result["reverted"] = reverted
     if unchanged:
@@ -723,9 +876,14 @@ async def set_config(
         "with search_settings, find_config_keys, or describe_setting. Do NOT echo back a "
         "get_config value for a per-filament setting (hot_plate_temp, fan_min_speed, "
         "nozzle_temperature_initial_layer, ...): get_config reports those merged across "
-        "every loaded filament ('70,100,70,70,35'), while this writes the one filament "
-        "preset open in the Filament tab, so pass that preset's single value instead. A key set to "
+        "every loaded filament ('70,100,70,70,35'), while this writes one filament preset "
+        "(the slot's with filament_slot, else the one open in the Filament tab), so pass that "
+        "preset's single value instead. A key set to "
         "null goes back to the value saved in its preset (an unsaved edit undone)."))],
+    filament_slot: Annotated[int | None, Field(description=(
+        "Write the per-filament keys to this slot's filament preset (1-based, as the sidebar numbers "
+        "the slots; get_filament_slots lists them) instead of the preset open in the Filament tab. "
+        "Needs the OrcaSlicer MCP build with the filament_slots capability."))] = None,
 ) -> dict:
     """Change settings on the open project as unsaved edits, all or nothing; a key set to null goes back to its saved preset value; use apply_and_slice to also slice, or edit_preset to change a saved preset.
 
@@ -733,20 +891,35 @@ async def set_config(
     changes. Keys set to null are listed under `reverted` (or `already_saved` when they had no
     unsaved edit).
 
+    With filament_slot the per-filament keys land in that slot's preset: OrcaSlicer binds the
+    Filament tab to the slot first, as the slot's edit button does, and the reply names the
+    `preset` written. A preset shared by several slots is still one preset, so the edit reaches
+    every slot using it (get_filament_slots shows `shares_preset_with`); to change one slot alone,
+    save_preset with filament_slot under a new name first. Only one filament preset can hold
+    unsaved edits at a time: when the Filament tab holds unsaved edits to a different preset the
+    call is refused with filament_edits_unsaved and nothing changes (save them, or put the keys
+    back, first). Unsaved print and printer edits are never touched.
+
     Overrides show as modified in get_status, are not written to any preset file, and revert
     if the preset is reselected; call save_preset to persist them. Each apply invalidates the
     last slice, so re-slice afterwards. It does not run the physics gate, so for temperature,
     speed, acceleration, or flow keys run check_profile_physics before trusting the result. To
     edit a stored preset rather than the live project, use edit_preset.
 
-    On a multi-filament setup do filament edits before print edits: changing another slot's
-    value means select_preset for that slot, which discards unsaved print overrides
-    (docs/order-of-operations.md)."""
+    Without filament_slot on a multi-filament setup, do filament edits before print edits:
+    changing another slot's value means select_preset for that slot, which discards unsaved
+    print overrides (docs/order-of-operations.md)."""
+    if filament_slot is not None and filament_slot < 1:
+        return {"error": "filament_slot is 1-based; use filament_slot=1 for the first filament"}
     try:
         async with _client() as c:
-            return await _put_config_with_reverts(c, changes)
+            if filament_slot is None:
+                return await _put_config_with_reverts(c, changes)
+            if (missing := await _capability_missing(c, "filament_slots", _FILAMENT_SLOTS_NEED)) is not None:
+                return missing
+            return await _put_config_with_reverts(c, changes, filament_slot - 1)
     except ApiError as e:
-        return _err(e)
+        return _slot_err(e) if filament_slot is not None else _err(e)
 
 
 @mcp.tool()
@@ -2051,7 +2224,8 @@ async def select_preset(
     """Switch the active print, filament or printer preset; without a filament slot this drops every unsaved edit.
 
     With `slot` (filament only), only that slot's filament preset changes, like picking it
-    in the sidebar's combo for that slot, and no unsaved edits are discarded. On a
+    in the sidebar's combo for that slot, and no unsaved edits are discarded
+    (set_filament_slot_preset does the same and can also set the slot's colour). On a
     single-filament printer slot 1 is the Filament tab's preset, so it behaves like the call
     without `slot` below. Needs a slicer build that lists 'preset_slot' in get_status
     capabilities; older builds would ignore the slot and switch the Filament tab instead, so
@@ -2086,7 +2260,15 @@ async def select_preset(
 
 
 @mcp.tool()
-async def save_preset(type: str, name: str, detach: bool = False) -> dict:
+async def save_preset(
+    type: str,
+    name: str,
+    detach: bool = False,
+    filament_slot: Annotated[int | None, Field(description=(
+        "Filament only: save from this slot's preset (1-based, as the sidebar numbers the slots) and point "
+        "only this slot at the saved name; other slots that used the same preset keep it. Needs the "
+        "OrcaSlicer MCP build with the filament_slots capability."))] = None,
+) -> dict:
     """Save the current settings as a named user preset; edit_preset changes a stored preset in one step instead.
 
     It creates or updates the preset, visible in the GUI immediately. type =
@@ -2094,10 +2276,97 @@ async def save_preset(type: str, name: str, detach: bool = False) -> dict:
     base preset; use it when creating a filament preset for a DIFFERENT material than the one
     selected, otherwise the new preset inherits the base's filament_type and temperatures.
 
+    Saving a filament preset under a new name normally moves EVERY slot that used the old
+    preset to the new one (OrcaSlicer's own Save As rule). With filament_slot only that slot
+    moves: the reply's `slots_reassigned` is that slot, `slots_kept` the slots OrcaSlicer had
+    moved and the API put back, and `filaments` the preset of each slot afterwards. The same
+    binding as set_config with filament_slot applies, with the same filament_edits_unsaved
+    refusal when the Filament tab holds unsaved edits to a different preset.
+
     Run check_profile_physics first; do not save when verdict=blocked."""
+    if filament_slot is not None:
+        if type != "filament":
+            return {"error": "filament_slot applies to type 'filament' only"}
+        if filament_slot < 1:
+            return {"error": "filament_slot is 1-based; use filament_slot=1 for the first filament"}
     try:
         async with _client() as c:
-            return await c.save_preset(type, name, detach)
+            if filament_slot is None:
+                return await c.save_preset(type, name, detach)
+            if (missing := await _capability_missing(c, "filament_slots", _FILAMENT_SLOTS_NEED)) is not None:
+                return missing
+            return _slot_reply(await c.save_preset(type, name, detach, filament_slot - 1))
+    except ApiError as e:
+        return _slot_err(e) if filament_slot is not None else _m4a_err(e)
+
+
+@mcp.tool()
+async def get_filament_slots() -> dict:
+    """List the project's filament slots as the sidebar shows them: each slot's number, preset, filament type, vendor, colour, whether its preset is open in the Filament tab with unsaved edits, and which slots share a preset. Read-only.
+
+    One row per slot, numbered from 1. `preset` is the slot's filament preset; `filament_type`
+    and `vendor` come from that preset, so a slot whose preset is 'Generic ASA' shows vendor
+    Generic, type ASA; `colour` is the project's colour for the slot. `shares_preset_with`
+    names the other slots loaded with the same preset: a set_config or save_preset on any of
+    them reaches all of them. Only the preset open in the Filament tab can hold unsaved edits,
+    so `modified` and `modified_keys` are set on the slots using it while it is dirty;
+    `filament_tab` says which preset the tab edits and the slot it is bound to.
+
+    Use it before set_config or save_preset with filament_slot, and to see at a glance when a
+    slot's preset is not the material loaded (the printer's own trays are read with
+    get_printer_slots). Needs the OrcaSlicer MCP build with the filament_slots capability;
+    get_status lists the preset names alone on older builds."""
+    try:
+        async with _client() as c:
+            return _filament_slots_view(await c.get_filaments())
+    except ApiError as e:
+        return _m4_err(e, _FILAMENT_SLOTS_NEED)
+
+
+@mcp.tool()
+async def set_filament_slot_preset(
+    slot: Annotated[int, Field(description="The filament slot, 1-based as the sidebar numbers them.")],
+    name: Annotated[str, Field(description="Exact name of a filament preset, as list_presets(type='filament') returns it.")],
+    keep_colour: Annotated[bool, Field(description=(
+        "Keep the slot's current colour (the default). False sets the colour the preset carries as its "
+        "default (default_filament_colour), when it has one."))] = True,
+) -> dict:
+    """Point one filament slot at a named preset, leaving the other slots and every unsaved edit alone; the slot keeps its colour unless keep_colour is false.
+
+    The same as picking the preset in that slot's sidebar combo: no unsaved print, filament or
+    printer edit is discarded (`discarded_changes` in the reply is empty on a multi-filament
+    printer; on a single-filament printer slot 1 is the Filament tab's preset, and the switch
+    behaves like select_preset without a slot, which does discard them). The reply ends with
+    `filaments`, the slots afterwards as get_filament_slots lists them. Needs a build with the
+    preset_slot capability; the colour change needs a writable filament_colour (any build).
+    Unknown names and presets not compatible with the selected printer are refused."""
+    if slot < 1:
+        return {"error": "slot is 1-based; use slot=1 for the first filament"}
+    try:
+        async with _client() as c:
+            if (missing := await _capability_missing(c, "preset_slot", "per-slot filament select")) is not None:
+                return missing
+            r = await c.select_preset("filament", name, slot - 1)
+            out = {"slot": slot, "selected": r.get("selected", name),
+                   "discarded_changes": r.get("discarded_changes") or [], "colour": "kept"}
+            if not keep_colour:
+                saved = (await c.get_preset_config("filament", name)).get("config") or {}
+                default = _split_config_strings(saved.get("default_filament_colour") or "")[0].strip()
+                if not default:
+                    out["colour"] = "kept: the preset carries no default colour"
+                else:
+                    colours = _split_config_strings((await c.get_config(["filament_colour"])).get("filament_colour") or "")
+                    if slot - 1 >= len(colours):
+                        out["colour"] = f"kept: the project has {len(colours)} colour(s)"
+                    else:
+                        colours[slot - 1] = default
+                        w = await c.put_config({"filament_colour": ";".join(colours)})
+                        out["colour"] = {"set": default, "applied": w.get("applied", []), "errors": w.get("errors", {})}
+            try:
+                out["filaments"] = _filament_slots_view(await c.get_filaments())["slots"]
+            except NotFound:
+                pass  # a build with preset_slot but not yet the filament slot routes
+            return out
     except ApiError as e:
         return _m4a_err(e)
 
@@ -2786,6 +3055,8 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "remember": ("Save a note", False, False),
     "load_model": ("Load a model file", False, False),
     "select_preset": ("Select preset", False, False),
+    "get_filament_slots": ("Get filament slots", True, False),
+    "set_filament_slot_preset": ("Set a slot's filament preset", False, False),
     "set_layer_height": ("Set layer height", False, False),
     "set_height_range": ("Set height-range config", False, False),
     "rename_preset": ("Rename preset", False, False),

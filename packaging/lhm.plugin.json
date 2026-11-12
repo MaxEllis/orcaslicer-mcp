@@ -143,11 +143,11 @@
     },
     {
       "name": "get_printer_slots",
-      "description": "Read the filament trays of an Elegoo Centauri Carbon 2 with a CANVAS unit; only for that printer, and slow (up to about 18 s)."
+      "description": "Read the printer's filament trays: a Bambu Lab printer's AMS and external spool (instant), or an Elegoo Centauri Carbon 2's CANVAS unit (slow, up to about 18 s). Read-only."
     },
     {
       "name": "get_filament_slot_mapping",
-      "description": "Show which CANVAS tray each filament would print from on the next Send (Elegoo Centauri Carbon 2 only); read-only."
+      "description": "Show which printer tray each filament of the plate would print from on the next Send, and whether that tray holds what the slot's preset says (Bambu Lab AMS, or an Elegoo Centauri Carbon 2's CANVAS); read-only. The check to run before telling the user a plate is ready to send."
     },
     {
       "name": "set_filament_slot_mapping",
@@ -331,7 +331,7 @@
     },
     {
       "name": "check_printer_match",
-      "description": "Check the active OrcaSlicer profile against the printer's own Klipper settings (nozzle, bed, speeds, temperatures); warnings only."
+      "description": "Check the active OrcaSlicer profile against the printer before printing: on a Bambu Lab printer, that each filament's slot preset matches what its AMS tray holds; on Klipper, the printer's own settings (nozzle, bed, speeds, temperatures). Warnings only."
     }
   ],
   "prompts": [

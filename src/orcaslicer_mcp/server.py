@@ -40,6 +40,7 @@ from .printer import target as _ptarget
 from .printer import wait as _pwait
 from .printer import history as _phistory
 from .printer import match as _pmatch
+from .printer import ams_match as _ams
 from .printer.errors import PrinterError
 from .printer.snapshot import take_snapshot
 from .printer.status import _dur as _duration_text
@@ -1506,48 +1507,87 @@ async def list_plates() -> dict:
         return _plates_err(e)
 
 
+_BAMBU_AMS_HINT = ("If the printer is a Bambu Lab one, reading its AMS needs the OrcaSlicer MCP build with the "
+                   "bambu_ams capability.")
+
+
+def _slots_reply(out: dict) -> dict:
+    """An older build answers not_elegoo_cc2 for every printer that is no CC2, a Bambu one included."""
+    if isinstance(out, dict) and out.get("supported") is False and out.get("reason") == "not_elegoo_cc2":
+        out = {**out, "hint": _BAMBU_AMS_HINT}
+    return out
+
+
 @mcp.tool()
 async def get_printer_slots() -> dict:
-    """Read the filament trays of an Elegoo Centauri Carbon 2 with a CANVAS unit; only for that printer, and slow (up to about 18 s).
+    """Read the printer's filament trays: a Bambu Lab printer's AMS and external spool (instant), or an Elegoo Centauri Carbon 2's CANVAS unit (slow, up to about 18 s). Read-only.
 
-    It reports which tray is active, and for each tray its label (A1, A2, ...), status,
-    material, brand and colour. Read-only; needs fork v2.4.2-mcp.14 or later. OrcaSlicer's API
-    serves one request at a time while the printer is asked, so other tools wait.
+    The reply says which `kind` of printer answered. On a Bambu Lab printer (kind "bambu": the
+    printer selected in OrcaSlicer's Device tab, read from the state OrcaSlicer's own connection
+    keeps, nothing sent to the printer) each tray has its label as the AMS panel shows it (A1,
+    HT-A, Ext), status (loaded, unknown, empty), filament_type as the AMS words it (ASA-Aero,
+    PLA-CF, ...), filament_name, brand, colour, remain_percent, whether it is the tray feeding the
+    nozzle (`active`), and `ams` summarises the units with their humidity. unknown_filament is
+    true when a spool is in but the printer reports no type or colour for it: the user sets it
+    in the AMS panel. Needs the OrcaSlicer MCP build with the bambu_ams capability.
 
-    Per tray: status is loaded, preloaded (filament waiting at the feeder, not yet pulled in),
-    disconnected or error. ready is true when the tray can be printed from now.
-    unknown_filament is true when the tray reports no filament type or name. Use canvas_id and tray_id from here in
-    set_filament_slot_mapping.
+    On an Elegoo CC2 (kind "canvas") each tray has its label, status (loaded, preloaded:
+    filament waiting at the feeder; disconnected; error), material, brand and colour, and
+    canvas_id and tray_id for set_filament_slot_mapping. OrcaSlicer's API serves one request at
+    a time while that printer is asked, so other tools wait. Needs fork v2.4.2-mcp.14 or later.
+    ready is true when the tray can be printed from now.
 
     When the printer is not supported or not reachable the reply is supported false with a
-    reason (not_elegoo_cc2, no_canvas, unreachable, too_many_clients, registration_refused,
-    timeout, printer_error, firmware_too_old) and a message. Relay the message to the user."""
+    reason (not_supported, no_printer_selected, printer_offline; on a CC2 not_elegoo_cc2,
+    no_canvas, unreachable, too_many_clients, registration_refused, timeout, printer_error,
+    firmware_too_old) and a message. Relay the message to the user."""
     try:
         async with _client() as c:
-            return await c.get_printer_slots()
+            return _slots_reply(await c.get_printer_slots())
     except ApiError as e:
         return _slots_err(e)
 
 
+async def _bambu_mapping(c, mapping: dict) -> dict:
+    """A Bambu mapping with each filament's match against the trays (ams_match.classify); the tray
+    list is read for the soft matches, and skipped when it cannot be."""
+    try:
+        slots = await c.get_printer_slots()
+    except ApiError:
+        slots = None
+    return _ams.classify(mapping, slots if isinstance(slots, dict) and slots.get("supported") else None)
+
+
 @mcp.tool()
 async def get_filament_slot_mapping() -> dict:
-    """Show which CANVAS tray each filament would print from on the next Send (Elegoo Centauri Carbon 2 only); read-only.
+    """Show which printer tray each filament of the plate would print from on the next Send, and whether that tray holds what the slot's preset says (Bambu Lab AMS, or an Elegoo Centauri Carbon 2's CANVAS); read-only. The check to run before telling the user a plate is ready to send.
 
-    The filaments listed are the ones on the plate the next Send would use. Needs fork
-    v2.4.2-mcp.14 or later. It reads the printer when no slot list is cached, so it can take up
-    to about 18 seconds, and OrcaSlicer's API serves one request at a time meanwhile, so other
-    tools wait.
+    The filaments listed are the ones on the plate the next Send would use, each with its
+    0-based index (and `slot`, the 1-based number the sidebar shows), type, preset name, colour,
+    the tray it maps to (or null), the source of that choice and any warnings. valid is true when
+    that Send would go through without a choice from the user; if not, problems says why. Nothing
+    is sent to the printer. A supported false reply carries a reason to relay, as
+    get_printer_slots does.
 
-    The reply names the plate (0-based, the current plate) and supported (true, or false with
-    a reason). Each filament has its 0-based index, type, name, colour, the tray it maps to (or null), the
-    source of that choice (saved, matched, user, api or none) and any warnings. valid is true
-    when that Send would go through; if not, problems says why (an unmapped filament, a tray that
-    is not ready). Call it after slicing or changing filaments, before telling the user the
-    plate is ready to send. Nothing is sent to the printer. A supported false reply carries a
-    reason to relay, as get_printer_slots does."""
+    On a Bambu Lab printer (kind "bambu", the OrcaSlicer MCP build with bambu_ams) the mapping is
+    the one OrcaSlicer's Send dialog pre-fills: it takes a tray only when the AMS's filament type
+    equals the slot preset's type, then the nearest colour. Each filament gets `match`: exact
+    (its tray holds its type; `note` names the tray's filament when it is a different one of the
+    same type), soft (no tray holds the type, but `candidates` hold the same base material, say
+    Polymaker LW-ASA / ASA-Aero in A2 for a Generic ASA slot: the Send dialog takes it if the user
+    picks it, so show both names and ask), none (nothing loaded fits: load a spool or change the
+    slot's preset) or unknown. Relay `headline` and `warnings`; they already say what to do.
+
+    On an Elegoo CC2 (kind "canvas", fork v2.4.2-mcp.14 or later) the source is saved, matched,
+    user, api or none, and set_filament_slot_mapping can change it. It reads the printer when no
+    slot list is cached, so it can take up to about 18 seconds, and OrcaSlicer's API serves one
+    request at a time meanwhile, so other tools wait."""
     try:
         async with _client() as c:
-            return await c.get_slot_mapping()
+            mapping = await c.get_slot_mapping()
+            if isinstance(mapping, dict) and mapping.get("kind") == "bambu" and mapping.get("supported"):
+                return await _bambu_mapping(c, mapping)
+            return _slots_reply(mapping)
     except ApiError as e:
         return _slots_err(e)
 
@@ -1562,7 +1602,9 @@ async def set_filament_slot_mapping(
     """Choose which CANVAS tray each filament prints from on the next Send (Elegoo Centauri Carbon 2 only); it starts nothing.
 
     Returns the same reply as get_filament_slot_mapping, so check valid and problems. Needs fork
-    v2.4.2-mcp.14 or later. It reads the printer when no slot list is cached, so it can take up
+    v2.4.2-mcp.14 or later. Not for Bambu Lab printers: there the tray is chosen in OrcaSlicer's
+    Send dialog, which keeps nothing this tool could set; get_filament_slot_mapping shows what it
+    will pre-fill. It reads the printer when no slot list is cached, so it can take up
     to about 18 seconds, and OrcaSlicer's API serves one request at a time meanwhile, so other
     tools wait.
 
@@ -2880,10 +2922,13 @@ def _remembered_lead(target) -> str:
             "(OrcaSlicer can't be read): ")
 
 
-async def _with_printer(fn) -> dict:
+async def _with_printer(fn, bambu=None) -> dict:
     """Find the printer (override > OrcaSlicer profile > remembered), open the protocol that
     answers, and run fn(target, client). Printer problems come back as {error, message, hint, ...};
-    once the printer is known, every reply (error or not) says which one it is in `printer`."""
+    once the printer is known, every reply (error or not) says which one it is in `printer`.
+    `bambu`, when given, answers instead for a Bambu Lab printer profile (which has no address
+    to open) through OrcaSlicer's own connection; its None means it could not, and the usual
+    unsupported_connection reply stands."""
     target = None
     try:
         target = await _ptarget.resolve_target(_client)
@@ -2897,6 +2942,10 @@ async def _with_printer(fn) -> dict:
                 out["headline"] = _remembered_lead(target) + out["headline"]
         return out
     except PrinterError as e:
+        if bambu is not None and e.details.get("host_type") == "bambu":
+            out = await bambu()
+            if out is not None:
+                return out
         out = e.as_dict()
         if target is not None:
             out.setdefault("printer", target.public())
@@ -2965,18 +3014,43 @@ async def list_print_history(limit: int = 10) -> dict:
         lambda t, c: _phistory.print_history(t, c, limit, _ptarget.printer_id_for(t)))
 
 
+async def _bambu_ams_check() -> dict | None:
+    """check_printer_match on a Bambu Lab printer profile: the AMS match of the plate's filaments.
+    None when the build cannot read the printer (then the usual 'not supported' reply stands)."""
+    try:
+        async with _client() as c:
+            mapping = await c.get_slot_mapping()
+            if not isinstance(mapping, dict) or mapping.get("kind") != "bambu":
+                return None
+            if not mapping.get("supported"):
+                if mapping.get("reason") == "not_supported":
+                    return None
+                return {"supported": False, "kind": "bambu", "reason": mapping.get("reason"),
+                        "message": mapping.get("message"),
+                        "hint": "Select the printer in OrcaSlicer's Device tab and wait for it to connect."}
+            return await _bambu_mapping(c, mapping)
+    except ApiError:
+        return None
+
+
 @mcp.tool()
 async def check_printer_match() -> dict:
-    """Check the active OrcaSlicer profile against the printer's own Klipper settings (nozzle, bed, speeds, temperatures); warnings only.
+    """Check the active OrcaSlicer profile against the printer before printing: on a Bambu Lab printer, that each filament's slot preset matches what its AMS tray holds; on Klipper, the printer's own settings (nozzle, bed, speeds, temperatures). Warnings only.
 
-    Compares nozzle size, bed size and height, the highest speeds and accelerations, nozzle and
-    bed temperatures, and firmware retraction against the printer's own Klipper settings. Each
-    check comes back ok, warn or unknown with both values and why it matters; relay `headline`
-    and the warnings. It never changes or blocks anything itself. When speeds or accelerations go
-    past the printer's limits, `fix` holds the set_config changes that lower just those settings to
-    the limits: offer them to the user and pass `fix` to set_config if they agree. Run it before
-    printing with a new or edited profile, or when prints take longer than estimated. Klipper
-    printers only; needs OrcaSlicer running.
+    On a Bambu Lab printer (the OrcaSlicer MCP build with bambu_ams, the printer selected in the
+    Device tab) it returns what get_filament_slot_mapping returns: per filament the tray
+    OrcaSlicer's Send dialog will pre-fill and `match` (exact, soft, none, unknown), with
+    `headline` and `warnings` to relay. A soft match names both filaments, say a Generic ASA
+    slot with Polymaker LW-ASA loaded: same base material, the user's call.
+
+    On Klipper it compares nozzle size, bed size and height, the highest speeds and
+    accelerations, nozzle and bed temperatures, and firmware retraction against the printer's own
+    settings. Each check comes back ok, warn or unknown with both values and why it matters;
+    relay `headline` and the warnings. It never changes or blocks anything itself. When speeds or
+    accelerations go past the printer's limits, `fix` holds the set_config changes that lower
+    just those settings to the limits: offer them to the user and pass `fix` to set_config if
+    they agree. Run it before printing with a new or edited profile, or when prints take longer
+    than estimated. Needs OrcaSlicer running.
     """
     async def run(t, c):
         if t.kind != "klipper":
@@ -2996,7 +3070,7 @@ async def check_printer_match() -> dict:
         out["printer"] = t.public()
         return out
 
-    return await _with_printer(run)
+    return await _with_printer(run, bambu=_bambu_ams_check)
 
 
 # --- Tool annotations (title + read-only/destructive hints) -----------------
@@ -3046,7 +3120,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "arrange_plate": ("Arrange plate", False, False),
     "add_plate": ("Add plate", False, False),
     "select_plate": ("Select plate", False, False),
-    "get_printer_slots": ("Get CANVAS slots", True, False),
+    "get_printer_slots": ("Get printer trays", True, False),
     "get_filament_slot_mapping": ("Get filament slot mapping", True, False),
     "set_filament_slot_mapping": ("Set filament slot mapping", False, False),
     "move_object_to_plate": ("Move object to plate", False, False),

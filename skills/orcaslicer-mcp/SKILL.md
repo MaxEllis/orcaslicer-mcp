@@ -65,8 +65,10 @@ OrcaSlicer MCP panel, where the user can revert it.
 
 - Before slicing a model, `recall_prints`: how earlier prints of it went (result, the user's verdict, the
   settings used). Mention a past warp or failure before proposing the same settings.
-- `check_printer_match` (Klipper) compares the profile with the printer's own limits. When it returns `fix`,
-  offer it; if the user agrees, pass `fix` to `set_config`.
+- `check_printer_match` before a print. On Klipper it compares the profile with the printer's own limits; when
+  it returns `fix`, offer it, and if the user agrees pass `fix` to `set_config`. On a Bambu Lab printer it checks
+  each filament's slot preset against the AMS tray OrcaSlicer's Send dialog will pick (`match` exact, soft, none):
+  relay `headline` and `warnings`, and on a soft match name both filaments and let the user decide.
 - `save_gcode` before printing records the slice so the finished print joins back to its settings.
 - `get_printer_status`, `wait_for_printer` and `list_print_history` read the printer. Starting, stopping or
   heating a printer is never done without the user's explicit yes.

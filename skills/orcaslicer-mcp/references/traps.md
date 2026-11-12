@@ -36,6 +36,16 @@
   warnings, or time per feature. `describe_plate`'s `settings_check` shows when a plate setting changed what
   was sliced.
 
+## Bambu AMS mapping takes the type word literally
+
+- OrcaSlicer's Send dialog maps a filament to a tray only when the AMS's type word equals the slot preset's
+  `filament_type`. The AMS calls Polymaker LW-ASA `ASA-Aero` and a carbon PLA `PLA-CF`; a slot whose preset says
+  `ASA` or `PLA` is left without a tray, and `get_filament_slot_mapping` reports it as a soft match with the
+  candidate trays. Nothing is wrong with the spool: tell the user both names and let them pick the tray in the
+  Send dialog, or switch the slot to the preset that matches the spool (`set_filament_slot_preset`).
+- The tray tools read the printer selected in OrcaSlicer's Device tab, not the printer profile's address, so
+  `no_printer_selected` and `printer_offline` are fixed there.
+
 ## Checks are heuristics, not measurements
 
 - `check_profile_physics`' `gcode_scripts` reads the start and end G-code text. It trusts a printer macro

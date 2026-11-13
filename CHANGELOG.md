@@ -14,6 +14,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `set_config` takes `filament_slot`: the per-filament keys go to that slot's preset instead of whichever preset is open in the Filament tab. `save_preset` takes `filament_slot` too: it saves from that slot's preset and points only that slot at the saved name, where OrcaSlicer's own Save As moves every slot that used the old preset (`slots_kept` says which were put back). Both are refused, with nothing changed, when the Filament tab holds unsaved edits to a different preset (`filament_edits_unsaved`, with the keys and what to do).
 - `get_config` takes `by_slot`: a per-filament setting comes back as one value per slot, `{"1": "70", "2": "100"}`, instead of the merged `"70,100"` text. Works on any build.
 
+### Fixed
+- Saving a filament preset with `save_preset` or `edit_preset` no longer waits behind OrcaSlicer 2.5's "Temperature Safety Check". OrcaSlicer asks before it saves a filament preset whose first-layer temperature is more than 30 °C from the other layers' for the nozzle, or 15 °C for a plate type, and the assistant could not answer that dialog: the save timed out and the dialog stayed open. With the OrcaSlicer MCP build that has the `preset_temperature_check` capability, the save is refused instead, with each pair that is too far apart, and nothing is saved; `allow_temperature_pairs=true` saves it as it is, the dialog's Continue, once the user agrees. On earlier 2.5 builds a filament save that times out now says to look for that dialog.
+
 ## [0.1.24] - 2026-11-13
 The OrcaSlicer MCP plugin 0.2.3 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.
 

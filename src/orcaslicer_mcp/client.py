@@ -486,10 +486,13 @@ class OrcaClient:
             body["slot"] = slot  # 0-based filament slot (fork build with per-slot select)
         return await self._request("PUT", "/api/v1/preset", json=body)
 
-    async def save_preset(self, ptype: str, name: str, detach: bool = False, slot: int | None = None) -> dict:
+    async def save_preset(self, ptype: str, name: str, detach: bool = False, slot: int | None = None,
+                          allow_temperature_pairs: bool = False) -> dict:
         body = {"type": ptype, "name": name, "detach": detach}
         if slot is not None:
             body["slot"] = slot  # 0-based: save from that slot's preset and move only that slot
+        if allow_temperature_pairs:
+            body["allow_temperature_pairs"] = True  # OrcaSlicer 2.5's temperature safety check: "Continue anyway"
         return await self._request("POST", "/api/v1/preset/save", json=body)
 
     async def get_filaments(self) -> dict:

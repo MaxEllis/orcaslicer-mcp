@@ -745,6 +745,38 @@ def _slot_err(e: ApiError) -> dict:
     return out
 
 
+def _pair_text(p: dict) -> str:
+    return (f"{p.get('label')}: first layer {p.get('first_layer')} °C, other layers {p.get('other_layers')} °C "
+            f"({p.get('delta')} °C apart, at most {p.get('max_delta')} °C)")
+
+
+def _save_refusal(e: ApiError, ptype: str, edited: bool = False) -> dict | None:
+    """OrcaSlicer 2.5's temperature safety check on a filament save, said plainly; None for any other error.
+
+    The OrcaSlicer MCP build refuses with the pairs (capability preset_temperature_check). Earlier 2.5 builds open
+    OrcaSlicer's own "Temperature Safety Check" dialog instead, and the save times out behind it."""
+    body = getattr(e, "body", None) or {}
+    if body.get("error") == "temperature_pairs_unsafe":
+        pairs = [p for p in body.get("pairs") or [] if isinstance(p, dict)]
+        hint = ("OrcaSlicer checks that a filament preset's first-layer temperature stays within 30 °C of the other "
+                "layers' for the nozzle and 15 °C for each plate type. Tell the user which pair is past that. Bring "
+                "the values closer with set_config and save again, or, if the user wants the preset as it is, save "
+                "again with allow_temperature_pairs=true.")
+        if edited:
+            hint += " The changes stay in the project as unsaved edits; set_config with null for a key puts it back."
+        return {"error": "temperature_pairs_unsafe: OrcaSlicer's temperature safety check stopped this filament "
+                         "preset save; nothing was saved",
+                "pairs": [{**p, "text": _pair_text(p)} for p in pairs], "hint": hint}
+    if isinstance(e, UiTimeout) and ptype == "filament":
+        out = _err(e)
+        out["hint"] = ("On OrcaSlicer 2.5 builds without the preset_temperature_check capability, a filament save "
+                       "whose first-layer and other-layer temperatures are far apart waits behind OrcaSlicer's "
+                       "'Temperature Safety Check' dialog. Ask the user to look at the OrcaSlicer window and choose "
+                       "Continue or Back.")
+        return out
+    return None
+
+
 # OrcaSlicer serializes a vector setting as one string: numbers, enums and booleans joined with ',', strings with
 # ';' (ConfigOptionStrings::serialize, an item that needs it in C-style quotes). One entry per loaded filament for
 # a filament preset key.
@@ -2322,6 +2354,10 @@ async def save_preset(
         "Filament only: save from this slot's preset (1-based, as the sidebar numbers the slots) and point "
         "only this slot at the saved name; other slots that used the same preset keep it. Needs the "
         "OrcaSlicer MCP build with the filament_slots capability."))] = None,
+    allow_temperature_pairs: Annotated[bool, Field(description=(
+        "Filament only: save even though OrcaSlicer's temperature safety check finds the first-layer temperature "
+        "far from the other layers' (its own 'Continue anyway?'). Only after the user has agreed to those "
+        "temperatures."))] = False,
 ) -> dict:
     """Save the current settings as a named user preset; edit_preset changes a stored preset in one step instead.
 
@@ -2337,6 +2373,12 @@ async def save_preset(
     binding as set_config with filament_slot applies, with the same filament_edits_unsaved
     refusal when the Filament tab holds unsaved edits to a different preset.
 
+    OrcaSlicer 2.5 checks a filament preset's unsaved edits before saving: the first-layer
+    temperature within 30 °C of the other layers' for the nozzle, 15 °C for each plate type.
+    Past that the save is refused with error temperature_pairs_unsafe and the `pairs`; nothing
+    is saved. Tell the user, then change the values or, with their agreement, save again with
+    allow_temperature_pairs=true (the reply then lists them as temperature_pairs_allowed).
+
     Run check_profile_physics first; do not save when verdict=blocked."""
     if filament_slot is not None:
         if type != "filament":
@@ -2346,12 +2388,15 @@ async def save_preset(
     try:
         async with _client() as c:
             if filament_slot is None:
-                return await c.save_preset(type, name, detach)
+                return await c.save_preset(type, name, detach, allow_temperature_pairs=allow_temperature_pairs)
             if (missing := await _capability_missing(c, "filament_slots", _FILAMENT_SLOTS_NEED,
                                                      "save_preset:filament_slot")) is not None:
                 return missing
-            return _slot_reply(await c.save_preset(type, name, detach, filament_slot - 1))
+            return _slot_reply(await c.save_preset(type, name, detach, filament_slot - 1,
+                                                   allow_temperature_pairs=allow_temperature_pairs))
     except ApiError as e:
+        if (refusal := _save_refusal(e, type)) is not None:
+            return refusal
         return _slot_err(e) if filament_slot is not None else _m4a_err(e)
 
 
@@ -2559,7 +2604,15 @@ async def delete_preset(type: str, name: str) -> dict:
 
 
 @mcp.tool()
-async def edit_preset(type: str, name: str, changes: dict) -> dict:
+async def edit_preset(
+    type: str,
+    name: str,
+    changes: dict,
+    allow_temperature_pairs: Annotated[bool, Field(description=(
+        "Filament only: save even though OrcaSlicer's temperature safety check finds the first-layer temperature "
+        "far from the other layers' (its own 'Continue anyway?'). Only after the user has agreed to those "
+        "temperatures."))] = False,
+) -> dict:
     """Change a stored preset and save it under the same name, after the physics check; set_config changes only the open project.
 
     It selects the preset, applies the changes atomically and saves under the same name. Runs
@@ -2568,6 +2621,9 @@ async def edit_preset(type: str, name: str, changes: dict) -> dict:
     unrelated edits). For type='filament', checks that also depend on the currently selected
     PRINT preset (flow_ceiling, temp_vs_flow) do not block; they come back as
     cross_layer_warnings, because a filament preset pairs with many print presets.
+
+    OrcaSlicer 2.5's temperature safety check applies to the save as in save_preset: past it
+    the reply is temperature_pairs_unsafe with the pairs, and the changes stay unsaved.
     """
     try:
         async with _client() as c:
@@ -2600,7 +2656,7 @@ async def edit_preset(type: str, name: str, changes: dict) -> dict:
             applied = await c.put_config(changes)
             if applied.get("errors"):
                 return {"error": "invalid_keys", "errors": applied["errors"]}
-            saved = await c.save_preset(type, name)
+            saved = await c.save_preset(type, name, allow_temperature_pairs=allow_temperature_pairs)
             out = {"preset": name, "applied": applied.get("applied", []), "saved": saved}
             if cross_layer:
                 out["cross_layer_warnings"] = [
@@ -2611,6 +2667,8 @@ async def edit_preset(type: str, name: str, changes: dict) -> dict:
                     for r in cross_layer]
             return out
     except ApiError as e:
+        if (refusal := _save_refusal(e, type, edited=True)) is not None:
+            return refusal
         return _m4a_err(e)
 
 

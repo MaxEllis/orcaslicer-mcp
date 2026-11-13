@@ -27,6 +27,15 @@ git fetch -q origin
 [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || fail "main is not origin/main (pull or push first)"
 gh release view "plugin-v$VER" --repo "$REPO" >/dev/null 2>&1 && fail "plugin-v$VER already exists"
 
+# The embedded-page test skips when it can't find the fork checkout (default ../OrcaSlicer), and a skip let 0.2.3's
+# run pass without comparing the page. Run it on its own, in dry runs too, and refuse a skip.
+out=$(uv run pytest -q -rs plugin/tests/test_embedded.py 2>&1) || { echo "$out" >&2; fail "the embedded panel test failed"; }
+if grep -q SKIPPED <<<"$out"; then
+  grep SKIPPED <<<"$out" >&2
+  fail "the embedded panel test skipped: set MCP_FORK_REPO to the fork checkout (or MCP_PANEL_SRC to its panel.html)"
+fi
+echo "   the embedded panel page matches the fork"
+
 echo "== 1/6 version markers to $VER =="
 if grep -q "^PLUGIN_VERSION = \"$VER\"$" "$F"; then
   echo "   already at $VER"

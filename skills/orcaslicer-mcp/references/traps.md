@@ -36,6 +36,15 @@
   warnings, or time per feature. `describe_plate`'s `settings_check` shows when a plate setting changed what
   was sliced.
 
+## A Bambu Lab printer is read through OrcaSlicer, not over the network
+
+`get_printer_status` and `wait_for_printer` on a Bambu Lab profile read the state OrcaSlicer's own connection keeps,
+so they need OrcaSlicer open with the printer selected in its Device tab and the OrcaSlicer MCP build with
+`bambu_status`. "Offline" there means OrcaSlicer has lost the printer, not that the printer is off: the hint says
+to check the printer and reselect it. A stopped job is `cancelled` when the printer reports no error code and
+`error` when it does; relay the code and the HMS wiki link, never a guessed cause. `list_print_history` is not
+available: Bambu printers keep no history OrcaSlicer can read.
+
 ## Bambu AMS mapping takes the type word literally
 
 - OrcaSlicer's Send dialog maps a filament to a tray only when the AMS's type word equals the slot preset's

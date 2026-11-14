@@ -5,6 +5,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Bambu Lab printers: `get_printer_status` and `wait_for_printer` read the printer selected in OrcaSlicer's Device tab through OrcaSlicer's own connection (the OrcaSlicer MCP build with `bambu_status`): state (with `preparing` for a job being loaded), the printer's stage (bed levelling, changing filament, ...) in the headline, progress, layer, the printer's own time left, nozzle, bed and chamber temperatures, fans, speed level, and problems from the print error code and HMS faults, each with its Bambu wiki link. A job stopped without an error code reads as cancelled. `wait_for_printer` judges 'printing' from the layer counter and 'first_layer_done' from layer 2. `check_printer_match` keeps its AMS check. `list_print_history` says a Bambu printer keeps no history OrcaSlicer can read.
+
 ## [0.1.25] - 2026-11-13
 The OrcaSlicer MCP plugin 0.2.3 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.
 

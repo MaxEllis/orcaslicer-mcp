@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 
 from .errors import PrinterError
-from .status import klipper_snapshot, octoprint_snapshot
+from .status import bambu_snapshot, klipper_snapshot, octoprint_snapshot
 
 STATUS_OBJECTS = ["webhooks", "print_stats", "display_status", "virtual_sdcard", "extruder", "heater_bed",
                   "toolhead", "gcode_move", "fan", "configfile=warnings"]
@@ -15,6 +15,9 @@ IDLE_CONSOLE_WINDOW_S = 600.0
 
 async def take_snapshot(target, client, *, now: float | None = None) -> dict:
     notes: list[str] = []
+    if target.kind == "bambu":
+        # One read of the fork: the state OrcaSlicer's own connection keeps (printer/bambu.py).
+        return bambu_snapshot(await client.status(), target_public=target.public())
     if target.kind == "octoprint":
         printer = await client.printer()  # the state itself: without it there is no snapshot
         job: dict = {}

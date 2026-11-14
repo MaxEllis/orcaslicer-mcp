@@ -109,6 +109,10 @@ def _sync_to_store(jobs: list[dict], reasons: list[str | None], printer_id: str)
 async def print_history(target, client, limit: int, printer_id: str) -> dict:
     if target.kind == "octoprint":
         return {"supported": False, "reason": "OctoPrint has no built-in print history.", "printer": target.public()}
+    if target.kind == "bambu":
+        return {"supported": False, "printer": target.public(),
+                "reason": "A Bambu Lab printer keeps no print history OrcaSlicer can read without a Bambu account.",
+                "hint": "recall_prints has the prints recorded here with save_gcode and remember."}
     limit = max(1, min(int(limit), 50))
     jobs = await client.history_list(limit)
     try:

@@ -72,6 +72,9 @@ OrcaSlicer MCP panel, where the user can revert it.
 - `save_gcode` before printing records the slice so the finished print joins back to its settings.
 - `get_printer_status`, `wait_for_printer` and `list_print_history` read the printer. Starting, stopping or
   heating a printer is never done without the user's explicit yes.
+- Several Bambu Lab printers: `list_printers` shows the ones OrcaSlicer's Device tab knows and which is selected
+  (the one the tray tools read); `select_printer` switches, like a click there, and waits for the connection.
+  Relay its `profile_check` when present: the printer profile is for another model, so offer `select_preset`.
 
 ## More
 

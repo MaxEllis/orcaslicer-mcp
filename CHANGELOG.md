@@ -5,6 +5,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `list_printers` and `select_printer`: the printers OrcaSlicer's Device tab knows (the account's cloud printers and the LAN printers it has an access code for), which one is selected, and a switch that does what a click there does, nothing sent to any printer. With several Bambu Lab printers this is how the assistant chooses which one the tray and status tools read. `select_printer` waits for OrcaSlicer to connect and says whether it has, and reports a `profile_check` when the active printer profile is for another model, since the Device tab's selection and the printer profile are independent. Needs the OrcaSlicer MCP build with the `printer_select` capability.
+
 ## [0.1.25] - 2026-11-13
 The OrcaSlicer MCP plugin 0.2.3 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.
 

@@ -41,6 +41,7 @@ from .printer import wait as _pwait
 from .printer import history as _phistory
 from .printer import match as _pmatch
 from .printer import ams_match as _ams
+from .printer import bambu as _pbambu
 from .printer.errors import PrinterError
 from .printer.snapshot import take_snapshot
 from .printer.status import _dur as _duration_text
@@ -3016,17 +3017,19 @@ def _remembered_lead(target) -> str:
             "(OrcaSlicer can't be read): ")
 
 
-async def _with_printer(fn, bambu=None) -> dict:
+async def _with_printer(fn) -> dict:
     """Find the printer (override > OrcaSlicer profile > remembered), open the protocol that
     answers, and run fn(target, client). Printer problems come back as {error, message, hint, ...};
     once the printer is known, every reply (error or not) says which one it is in `printer`.
-    `bambu`, when given, answers instead for a Bambu Lab printer profile (which has no address
-    to open) through OrcaSlicer's own connection; its None means it could not, and the usual
-    unsupported_connection reply stands."""
+    A Bambu Lab printer profile has no address to open: its client reads through OrcaSlicer's
+    own connection (printer/bambu.py)."""
     target = None
     try:
         target = await _ptarget.resolve_target(_client)
-        target, client = await _ptarget.open_printer(target, _printer_api_key())
+        if target.kind == "bambu":
+            client = _pbambu.BambuClient(_client)
+        else:
+            target, client = await _ptarget.open_printer(target, _printer_api_key())
         async with client:
             out = await fn(target, client)
         if target.source == "remembered" and isinstance(out, dict):
@@ -3036,10 +3039,6 @@ async def _with_printer(fn, bambu=None) -> dict:
                 out["headline"] = _remembered_lead(target) + out["headline"]
         return out
     except PrinterError as e:
-        if bambu is not None and e.details.get("host_type") == "bambu":
-            out = await bambu()
-            if out is not None:
-                return out
         out = e.as_dict()
         if target is not None:
             out.setdefault("printer", target.public())
@@ -3050,15 +3049,19 @@ async def _with_printer(fn, bambu=None) -> dict:
 async def get_printer_status() -> dict:
     """Read what the 3D printer is doing now (state, temperatures, job progress, problems); wait_for_printer waits for a point in a print.
 
-    It reports state (idle, heating, printing, paused, finished, cancelled, error, shutdown,
-    offline), nozzle and bed temperatures with their targets, the current job (file, progress,
-    layer, time elapsed and left, and what the time left is based on), and any problems the
-    printer reports, each in the printer's own words with a plain-English hint for common ones.
-    Relay `headline` as-is. Never invent a cause the printer did not report.
+    It reports state (idle, preparing, heating, printing, paused, finished, cancelled, error,
+    shutdown, offline), nozzle and bed temperatures with their targets, the current job (file,
+    progress, layer, time elapsed and left, and what the time left is based on), and any problems
+    the printer reports, each in the printer's own words with a plain-English hint for common
+    ones. Relay `headline` as-is. Never invent a cause the printer did not report.
 
     Finds the printer from OrcaSlicer's active printer profile (or ORCA_PRINTER_URL), so it needs no
     extra setup once the printer is connected in OrcaSlicer. Klipper (Moonraker) printers report the
-    most; OctoPrint reports basic status. Read-only: it never sends commands to the printer."""
+    most; OctoPrint reports basic status. A Bambu Lab printer (the printer selected in OrcaSlicer's
+    Device tab, read from the state OrcaSlicer's own connection keeps; needs the OrcaSlicer MCP
+    build with bambu_status) reports its stage (bed levelling, changing filament, ...), the
+    printer's own time left, chamber temperature, fans and HMS faults with a wiki link each;
+    `bambu` holds the raw gcode_state and stage. Read-only: it never sends commands to the printer."""
     return await _with_printer(lambda t, c: take_snapshot(t, c))
 
 
@@ -3067,9 +3070,10 @@ async def wait_for_printer(
     until: Annotated[Literal["heated", "printing", "first_layer_done", "finished"], Field(description=(
         "What to wait for. 'heated': every heater with a target is within 3 °C of it. 'printing': "
         "extrusion has started. OctoPrint reports no extrusion, so there it means the job is "
-        "running with the heaters at temperature. 'first_layer_done': the second layer has begun "
-        "(Klipper only); without layer info from the slicer it is judged from the nozzle height, so "
-        "it is approximate. 'finished': the job completed, was cancelled or errored."))],
+        "running with the heaters at temperature; on a Bambu Lab printer the first layer has begun. "
+        "'first_layer_done': the second layer has begun (Klipper and Bambu Lab); without layer info "
+        "from the slicer it is judged from the nozzle height, so it is approximate. 'finished': "
+        "the job completed, was cancelled or errored."))],
     timeout_s: Annotated[int, Field(description=(
         "Seconds to wait before returning the latest status. Default 300, at most 1800. "
         "Call again to keep waiting."))] = _pwait.DEFAULT_TIMEOUT_S,
@@ -3108,25 +3112,34 @@ async def list_print_history(limit: int = 10) -> dict:
         lambda t, c: _phistory.print_history(t, c, limit, _ptarget.printer_id_for(t)))
 
 
-async def _bambu_ams_check() -> dict | None:
-    """check_printer_match on a Bambu Lab printer profile: the AMS match of the plate's filaments.
-    None when the build cannot read the printer (then the usual 'not supported' reply stands)."""
+async def _bambu_ams_check() -> dict:
+    """check_printer_match on a Bambu Lab printer profile: the AMS match of the plate's filaments."""
+    needs = PrinterError("unsupported_connection",
+                         "check_printer_match on a Bambu Lab printer needs the OrcaSlicer MCP build with the "
+                         "bambu_ams capability.", host_type="bambu")
     try:
         async with _client() as c:
             mapping = await c.get_slot_mapping()
             if not isinstance(mapping, dict) or mapping.get("kind") != "bambu":
-                return None
+                raise needs
             if not mapping.get("supported"):
                 if mapping.get("reason") == "not_supported":
-                    return None
+                    raise PrinterError("unsupported_connection", str(mapping.get("message") or needs.message),
+                                       host_type="bambu")
                 return {"supported": False, "kind": "bambu", "reason": mapping.get("reason"),
-                        "message": mapping.get("message"),
-                        "hint": "Select the printer in OrcaSlicer's Device tab and wait for it to connect."}
+                        "message": mapping.get("message"), "hint": _pbambu.SELECT_HINT}
             return await _bambu_mapping(c, mapping)
+    except NotFound as e:
+        if e.route_missing:
+            raise needs from e
+        raise PrinterError("protocol_error", f"OrcaSlicer answered the tray read with: {e}") from e
     except (UiTimeout, NotReachable) as e:
         return {"supported": False, "kind": "bambu", "reason": "orcaslicer_not_answering", "message": _err(e).get("error")}
-    except ApiError:
-        return None
+    except ApiError as e:
+        raise PrinterError("orca_unreachable", "check_printer_match couldn't read the trays from OrcaSlicer.",
+                           hint=_ptarget.orca_read_hint(
+                               e, "Start OrcaSlicer (MCP build) with the Remote API enabled."),
+                           detail=str(e)) from e
 
 
 @mcp.tool()
@@ -3149,6 +3162,8 @@ async def check_printer_match() -> dict:
     than estimated. Needs OrcaSlicer running.
     """
     async def run(t, c):
+        if t.kind == "bambu":
+            return await _bambu_ams_check()
         if t.kind != "klipper":
             return {"supported": False, "reason": "Only Klipper printers report their settings.",
                     "printer": t.public()}
@@ -3166,7 +3181,7 @@ async def check_printer_match() -> dict:
         out["printer"] = t.public()
         return out
 
-    return await _with_printer(run, bambu=_bambu_ams_check)
+    return await _with_printer(run)
 
 
 # --- Tool annotations (title + read-only/destructive hints) -----------------

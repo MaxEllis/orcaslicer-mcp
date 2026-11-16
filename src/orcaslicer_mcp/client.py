@@ -377,6 +377,10 @@ class OrcaClient:
     async def get_slot_mapping(self) -> dict:
         return await self._request("GET", "/api/v1/printer/slot_mapping", timeout=self._slot_timeout())
 
+    # Bambu Lab printer status through OrcaSlicer's own connection (capability bambu_status).
+    async def get_printer_status(self) -> dict:
+        return await self._request("GET", "/api/v1/printer/status")
+
     # Project files (fork v2.4.2-mcp.15 and later). Paths are on the OrcaSlicer host.
     async def get_project(self) -> dict:
         return await self._request("GET", "/api/v1/project")

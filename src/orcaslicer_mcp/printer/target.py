@@ -31,18 +31,18 @@ UNSUPPORTED_HOST_TYPES = {
 
 @dataclass(frozen=True)
 class PrinterTarget:
-    url: str                              # base URL, no userinfo, no trailing slash: safe to report
+    url: str                              # base URL, no userinfo, no trailing slash: safe to report ("" for a Bambu printer: read through OrcaSlicer)
     source: str                           # "override" | "profile" | "remembered"
     profile: str | None = None
     host_type: str | None = None
     printer_model: str | None = None
-    kind: str | None = None               # "klipper" | "octoprint" once a probe answered
+    kind: str | None = None               # "klipper" | "octoprint" once a probe answered; "bambu" from the profile
     remembered_at: float | None = None
     auth: tuple[str, str] | None = field(default=None, repr=False)  # basic auth from ORCA_PRINTER_URL; never reported or repr'd
 
     def public(self) -> dict:
         """What the model may see. Never the auth pair."""
-        return {"profile": self.profile, "url": self.url, "kind": self.kind,
+        return {"profile": self.profile, "url": self.url or None, "kind": self.kind,
                 "source": self.source, "remembered_at": self.remembered_at}
 
 
@@ -307,11 +307,9 @@ async def _resolve_target(fork_factory, where: dict) -> PrinterTarget:
     host_type = str(cfg.get("host_type") or "").strip().lower() or None
     if not host:
         if (model or "").startswith("Bambu Lab"):
-            raise PrinterError("unsupported_connection",
-                               "Bambu Lab printers: status, waiting and print history aren't read yet. "
-                               "get_printer_slots, get_filament_slot_mapping and check_printer_match read the "
-                               "AMS through OrcaSlicer (the OrcaSlicer MCP build with bambu_ams).",
-                               host_type="bambu")
+            # No address to open: a Bambu printer is read through OrcaSlicer's own connection (printer/bambu.py).
+            return PrinterTarget(url="", source="profile", profile=name, host_type="bambu", printer_model=model,
+                                 kind="bambu", auth=None)
         raise PrinterError("not_configured", f"The printer profile '{name}' has no connection set up.",
                            hint=_PROFILE_ADDRESS_HINT)
     check_host_type(host_type)

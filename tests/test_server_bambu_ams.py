@@ -265,12 +265,13 @@ async def test_check_printer_match_klipper_profile_never_asks_for_trays(monkeypa
 
 
 @respx.mock
-async def test_get_printer_status_bambu_profile_points_at_the_tray_tools(monkeypatch):
+async def test_get_printer_status_bambu_profile_on_a_build_without_the_route_says_what_is_needed(monkeypatch):
     _env(monkeypatch)
     bambu_profile()
+    respx.get(f"{U}/status").mock(return_value=httpx.Response(404, json={"error": "not_found"}))
     out = await srv.get_printer_status()
-    assert out["error"] == "unsupported_connection"
-    assert "get_filament_slot_mapping" in out["message"] and "check_printer_match" in out["message"]
+    assert out["error"] == "unsupported_connection" and out["host_type"] == "bambu"
+    assert "bambu_status" in out["message"] and out["printer"]["kind"] == "bambu"
 
 
 # --- review fixes (2026-11) -----------------------------------------------------------------------------------

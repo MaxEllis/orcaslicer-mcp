@@ -32,7 +32,8 @@ def heated(snap: dict) -> bool:
 
 
 def printing(snap: dict, kind: str | None) -> bool:
-    """Klipper: extrusion has started (it says "printing" before that, so filament used decides).
+    """Klipper: extrusion has started (it says "printing" before that, so filament used decides). Bambu: the
+    first layer has begun, or the stage is plain printing.
     OctoPrint reports no extrusion, and its progress is a position in the file that moves while the
     heaters are still warming, so it counts only as "printing" once its status says so, which the
     status layer reserves for a running job whose heaters are at temperature."""
@@ -41,6 +42,13 @@ def printing(snap: dict, kind: str | None) -> bool:
     if kind == "octoprint":
         return True
     job = snap.get("job") or {}
+    if kind == "bambu":
+        # No extrusion count, but a layer counter on the printers that report layers: layer 1 is the first
+        # extrusion. Without one, the stage number says whether it is past bed levelling and the rest.
+        current = (job.get("layer") or {}).get("current")
+        if current is not None:
+            return current >= 1
+        return (snap.get("bambu") or {}).get("stage") == 0
     return (job.get("filament_used_mm") or 0) > 0
 
 

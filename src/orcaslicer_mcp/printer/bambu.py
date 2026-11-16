@@ -12,6 +12,15 @@ NEEDS_BUILD = ("Reading a Bambu Lab printer's status needs the OrcaSlicer MCP bu
 SELECT_HINT = "Select the printer in OrcaSlicer's Device tab and wait for it to connect."
 
 
+def model_key(text) -> str:
+    """A printer model name compared loosely: "Bambu Lab X1 Carbon" and "X1 Carbon" are the same model."""
+    t = str(text or "").strip().lower()
+    for prefix in ("bambu lab ", "bambulab "):
+        if t.startswith(prefix):
+            t = t[len(prefix):]
+    return "".join(ch for ch in t if ch.isalnum())
+
+
 class BambuClient:
     """`factory` opens the fork client (the server's _client); one fork request per read."""
     service = "OrcaSlicer"

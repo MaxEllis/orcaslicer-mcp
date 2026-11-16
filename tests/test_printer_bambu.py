@@ -44,20 +44,20 @@ def snap(**kw):
 def test_idle_keeps_the_last_job_out_of_the_way():
     s = snap(state="IDLE", name="benchy")
     assert s["state"] == "idle" and s["job"] is None and s["connected"] is True
-    assert s["headline"] == "Idle. Nozzle 25 °C, bed 23 °C. No problems."
+    assert s["headline"] == "P1S: Idle. Nozzle 25 °C, bed 23 °C. No problems."
     assert s["printer"] == PUB and s["bambu"]["gcode_state"] == "IDLE" and s["bambu"]["connection"] == "lan"
 
 
 def test_prepare_is_preparing():
     s = snap(state="PREPARE", stage=0)
     assert s["state"] == "preparing" and s["job"]["state"] == "preparing"
-    assert s["headline"].startswith("Preparing to print benchy.")
+    assert s["headline"].startswith("P1S: Preparing to print benchy.")
 
 
 @pytest.mark.parametrize("stage, text", [(2, "Heatbed preheating"), (7, "Heating nozzle")])
 def test_running_in_a_heating_stage_is_heating(stage, text):
     s = snap(state="RUNNING", stage=stage, stage_text=text, nozzle=(120, 255), bed=(40, 90))
-    assert s["state"] == "heating" and s["headline"].startswith("Heating up to print benchy.")
+    assert s["state"] == "heating" and s["headline"].startswith("P1S: Heating up to print benchy.")
 
 
 def test_running_below_target_before_the_first_layer_is_heating():
@@ -65,11 +65,19 @@ def test_running_below_target_before_the_first_layer_is_heating():
     assert s["state"] == "heating"
 
 
-def test_running_at_temperature_in_a_prep_stage_is_printing_with_the_stage_named():
+def test_running_at_temperature_in_a_prep_stage_is_preparing_with_the_stage_named():
+    # Before the first layer (layer 0) a RUNNING printer at temperature is still getting ready: bed levelling here.
     s = snap(state="RUNNING", stage=1, stage_text="Auto bed leveling", nozzle=(255, 255), bed=(90, 90),
              progress=0, remaining=2520, layer=(0, 150))
-    assert s["state"] == "printing" and s["job"]["stage"] == "Auto bed leveling"
-    assert s["headline"].startswith("Printing benchy: 0%, about 42 min left, auto bed leveling.")
+    assert s["state"] == "preparing" and s["job"]["stage"] == "Auto bed leveling"
+    assert s["headline"].startswith("P1S: Preparing to print benchy: auto bed leveling.")
+    assert not w.printing(s, "bambu")
+
+
+def test_running_stage_change_mid_print_stays_printing():
+    s = snap(state="RUNNING", stage=4, stage_text="Changing filament", nozzle=(255, 255), bed=(90, 90),
+             progress=42, layer=(63, 150))
+    assert s["state"] == "printing" and ", changing filament." in s["headline"]
 
 
 def test_running_mid_print_reports_layer_and_the_printers_own_time_left():
@@ -79,7 +87,7 @@ def test_running_mid_print_reports_layer_and_the_printers_own_time_left():
     assert job["file"] == "benchy" and job["state"] == "running" and job["progress_percent"] == 42
     assert job["layer"] == {"current": 63, "total": 150} and job["remaining_s"] == 2520
     assert job["remaining_basis"] == "printer_estimate" and job["elapsed_s"] is None and job["filament_used_mm"] is None
-    assert s["headline"] == "Printing benchy: 42% (layer 63/150), about 42 min left. Nozzle 255/255 °C, bed 90/90 °C. No problems."
+    assert s["headline"] == "P1S: Printing benchy: 42% (layer 63/150), about 42 min left. Nozzle 255/255 °C, bed 90/90 °C. No problems."
 
 
 def test_running_reheating_mid_print_stays_printing_in_the_headline():
@@ -91,19 +99,44 @@ def test_running_reheating_mid_print_stays_printing_in_the_headline():
 def test_pause_is_paused_with_the_stage():
     s = snap(state="PAUSE", stage=6, stage_text="Paused (filament ran out)", progress=42, layer=(63, 150))
     assert s["state"] == "paused" and s["job"]["state"] == "paused" and s["job"]["remaining_s"] == 0
-    assert s["headline"].startswith("Paused benchy: 42% (layer 63/150).")
+    assert s["headline"].startswith("P1S: Paused benchy: 42% (layer 63/150).")
 
 
 def test_finish_is_finished_and_the_job_complete():
     s = snap(state="FINISH", progress=100, layer=(150, 150))
     assert s["state"] == "finished" and s["job"]["state"] == "complete"
-    assert s["headline"].startswith("Finished benchy.")
+    assert s["headline"].startswith("P1S: Finished benchy.")
 
 
 def test_failed_without_a_print_error_is_cancelled():
     s = snap(state="FAILED", progress=42)
     assert s["state"] == "cancelled" and s["job"]["state"] == "cancelled" and s["problems"] == []
-    assert s["headline"].startswith("Cancelled benchy.")
+    assert s["headline"].startswith("P1S: Cancelled benchy.")
+
+
+def test_failed_with_the_cancel_code_is_cancelled():
+    # Bambu's own table: 0300-400C "The task was canceled." A user cancel is not an error.
+    for pe in ({"value": 50348044, "code": "0300-400C", "message": "The task was canceled."},
+               {"value": 50348044, "code": "0300-400C"}, {"value": 50348044}):
+        s = snap(state="FAILED", progress=42, print_error=pe)
+        assert s["state"] == "cancelled" and s["job"]["state"] == "cancelled" and s["problems"] == [], pe
+        assert s["headline"].startswith("P1S: Cancelled benchy.")
+
+
+def test_a_print_error_carries_the_device_tabs_sentence():
+    s = snap(state="FAILED", progress=42,
+             print_error={"value": 50331905, "code": "0300-0101", "message": "The nozzle temperature is abnormal."})
+    assert s["state"] == "error"
+    assert s["problems"][0]["message"] == "The print stopped with printer error 0300-0101: The nozzle temperature is abnormal."
+    assert "Problem: The print stopped with printer error 0300-0101: The nozzle temperature is abnormal." in s["headline"]
+
+
+def test_a_paused_job_says_why_from_its_print_error():
+    s = snap(state="PAUSE", stage=6, stage_text="Paused due to filament runout", progress=42, layer=(63, 150),
+             print_error={"value": 117473297, "code": "0700-8011", "message": "AMS filament ran out."})
+    assert s["state"] == "paused"
+    assert s["problems"][0]["severity"] == "error"
+    assert s["problems"][0]["message"] == "The printer reports error 0700-8011: AMS filament ran out."
 
 
 def test_failed_with_a_print_error_is_an_error_in_the_printers_words():
@@ -111,7 +144,7 @@ def test_failed_with_a_print_error_is_an_error_in_the_printers_words():
     assert s["state"] == "error" and s["job"]["state"] == "error"
     assert s["problems"] == [{"severity": "error", "source": "job", "at": None, "hint": None,
                               "message": "The print stopped with printer error 0300-0101."}]
-    assert s["headline"].startswith("Stopped with an error while printing benchy.")
+    assert s["headline"].startswith("P1S: Stopped with an error while printing benchy.")
     assert "Problem: The print stopped with printer error 0300-0101" in s["headline"]
 
 
@@ -142,6 +175,40 @@ def test_hms_items_become_problems_with_a_wiki_link():
                                         "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/0700_2000_0002_0001")
     assert s["problems"][1]["message"].startswith("HMS 0300010000010002: a fatal motion controller fault")
     assert s["headline"].endswith("Problem: HMS 0300010000010002: a fatal motion controller fault the printer reports.")
+
+
+def test_hms_items_use_the_device_tabs_sentence_when_the_build_sends_it():
+    s = snap(hms=[{"code": "0700200000020001", "level": "common", "read": False,
+                   "message": "AMS A Slot 1 filament has run out. Please insert a new filament."}])
+    assert s["problems"][0]["message"] == (
+        "HMS 0700200000020001: AMS A Slot 1 filament has run out. Please insert a new filament.")
+    assert s["problems"][0]["hint"].endswith("/hmscode/0700_2000_0002_0001")
+
+
+def test_the_printer_read_is_named_and_kept():
+    s = snap(state="IDLE")
+    assert s["bambu"]["device"] == {"name": "P1S", "model": "Bambu Lab P1S", "connection": "lan"}
+    assert s["bambu"]["connection"] == "lan"
+    r = reply(state="IDLE")
+    r.pop("printer")
+    s = bambu_snapshot(r, target_public=PUB)
+    assert s["headline"].startswith("Idle.") and s["bambu"]["device"] == {"name": None, "model": None, "connection": None}
+
+
+def test_another_model_than_the_profile_is_a_warning_naming_both():
+    r = reply(state="RUNNING", nozzle=(220, 220), bed=(60, 60), progress=10, layer=(5, 100))
+    r["printer"] = {"name": "Office X1C", "model": "Bambu Lab X1 Carbon", "connection": "cloud"}
+    s = bambu_snapshot(r, target_public=PUB, profile_model="Bambu Lab P1S")
+    assert s["headline"].startswith("Office X1C: Printing benchy: 10% (layer 5/100)")
+    [p] = s["problems"]
+    assert p["severity"] == "warning" and p["source"] == "orcaslicer"
+    assert p["message"] == ("The printer profile 'Bambu Lab P1S 0.4 nozzle' is for a Bambu Lab P1S; the printer "
+                            "selected in OrcaSlicer's Device tab, Office X1C, is a Bambu Lab X1 Carbon.")
+    assert "select_preset" in p["hint"] and "select_printer" in p["hint"]
+    # Same model, other spelling: no warning. Unknown model: no warning.
+    assert bambu_snapshot(reply(), target_public=PUB, profile_model="P1S")["problems"] == []
+    r["printer"]["model"] = "unknown"
+    assert bambu_snapshot(r, target_public=PUB, profile_model="Bambu Lab P1S")["problems"] == []
 
 
 def test_hms_wiki_needs_a_full_code():
@@ -180,7 +247,7 @@ def test_garbage_in_the_reply_does_not_break_the_snapshot():
 def test_printing_needs_the_first_layer_on_a_bambu():
     before = snap(state="RUNNING", stage=1, stage_text="Auto bed leveling", nozzle=(255, 255), bed=(90, 90), layer=(0, 150))
     after = snap(state="RUNNING", nozzle=(255, 255), bed=(90, 90), layer=(1, 150))
-    assert before["state"] == "printing" and not w.printing(before, "bambu")
+    assert before["state"] == "preparing" and not w.printing(before, "bambu")
     assert w.printing(after, "bambu")
 
 

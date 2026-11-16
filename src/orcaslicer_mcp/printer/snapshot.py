@@ -17,7 +17,7 @@ async def take_snapshot(target, client, *, now: float | None = None) -> dict:
     notes: list[str] = []
     if target.kind == "bambu":
         # One read of the fork: the state OrcaSlicer's own connection keeps (printer/bambu.py).
-        return bambu_snapshot(await client.status(), target_public=target.public())
+        return bambu_snapshot(await client.status(), target_public=target.public(), profile_model=target.printer_model)
     if target.kind == "octoprint":
         printer = await client.printer()  # the state itself: without it there is no snapshot
         job: dict = {}

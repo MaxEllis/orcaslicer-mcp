@@ -1719,20 +1719,12 @@ def _find_device(rows: list[dict], want: str) -> dict:
                     "Device tab by hand"}
 
 
-def _model_key(text) -> str:
-    t = str(text or "").strip().lower()
-    for prefix in ("bambu lab ", "bambulab "):
-        if t.startswith(prefix):
-            t = t[len(prefix):]
-    return "".join(ch for ch in t if ch.isalnum())
-
-
 def _profile_check(profile: str, profile_model: str, dev: dict) -> dict | None:
     """When the active printer profile is for another model than the selected printer: what to tell the user."""
     printer_model = str(dev.get("model") or "")
     if not profile_model or not printer_model or printer_model.lower() == "unknown":
         return None
-    if _model_key(profile_model) == _model_key(printer_model):
+    if _pbambu.model_key(profile_model) == _pbambu.model_key(printer_model):
         return None
     return {"profile": profile, "profile_model": profile_model, "printer_model": printer_model,
             "message": f"The active printer profile '{profile}' is for a {profile_model}; the selected printer "
@@ -1796,8 +1788,10 @@ async def select_printer(
     `wait_s` for `connected` and says either way; the tray and status tools answer
     printer_offline until it is. The reply carries `profile_check` when the active printer
     profile is for another model than the printer selected: the printer still reads, but tell
-    the user and offer select_preset for the matching printer profile before slicing. Needs the
-    OrcaSlicer MCP build with the printer_select capability."""
+    the user and offer select_preset for the matching printer profile before slicing. As with a
+    click in the tab, selecting a two-nozzle printer (H2D) whose model matches the profile makes
+    OrcaSlicer sync the profile's nozzle setup from the printer the next time the Prepare tab
+    opens: say so. Needs the OrcaSlicer MCP build with the printer_select capability."""
     want = (printer or "").strip()
     if not want:
         return {"error": "printer is required: an id or a name from list_printers"}
@@ -3241,8 +3235,11 @@ async def get_printer_status() -> dict:
     most; OctoPrint reports basic status. A Bambu Lab printer (the printer selected in OrcaSlicer's
     Device tab, read from the state OrcaSlicer's own connection keeps; needs the OrcaSlicer MCP
     build with bambu_status) reports its stage (bed levelling, changing filament, ...), the
-    printer's own time left, chamber temperature, fans and HMS faults with a wiki link each;
-    `bambu` holds the raw gcode_state and stage. Read-only: it never sends commands to the printer."""
+    printer's own time left, chamber temperature, fans and HMS faults with the printer's own
+    sentence and a wiki link each; the headline starts with the name of the printer read, and
+    `bambu` holds it (`device`) with the raw gcode_state and stage. A warning says when that
+    printer is another model than the printer profile. Read-only: it never sends commands to
+    the printer."""
     return await _with_printer(lambda t, c: take_snapshot(t, c))
 
 
@@ -3451,7 +3448,7 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
 # although they write local state.
 _OPEN_WORLD_TOOLS = frozenset({"get_printer_status", "wait_for_printer", "list_print_history", "check_printer_match",
                                "select_printer"})
-_IDEMPOTENT_TOOLS = frozenset({"list_print_history"})
+_IDEMPOTENT_TOOLS = frozenset({"list_print_history", "select_printer"})
 
 
 def _apply_tool_annotations() -> None:

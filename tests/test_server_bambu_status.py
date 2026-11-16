@@ -6,7 +6,7 @@ import respx
 import orcaslicer_mcp.server as srv
 from orcaslicer_mcp.printer import target as ptarget
 from orcaslicer_mcp.printer import wait as pwait
-from tests.test_printer_bambu import reply
+from test_printer_bambu import reply  # tests/ is on sys.path (pytest prepend import mode, no package)
 
 F = "http://x:13130"
 U = f"{F}/api/v1/printer"
@@ -52,7 +52,7 @@ async def test_status_through_the_orcaslicer_profile(monkeypatch, tmp_path):
     assert out["state"] == "printing" and out["job"]["layer"] == {"current": 63, "total": 150}
     assert out["printer"] == {"profile": "Bambu Lab P1S 0.4 nozzle", "url": None, "kind": "bambu",
                               "source": "profile", "remembered_at": None}
-    assert out["headline"].startswith("Printing benchy: 42% (layer 63/150), about 42 min left.")
+    assert out["headline"].startswith("P1S: Printing benchy: 42% (layer 63/150), about 42 min left.")
     assert "notes" not in out
     # read through OrcaSlicer: no address to remember, so nothing is written for the fallback
     assert ptarget.recall_remembered() is None

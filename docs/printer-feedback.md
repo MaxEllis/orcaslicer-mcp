@@ -1,6 +1,6 @@
 # Printer feedback and print history
 
-The printer tools read from a Klipper (Moonraker) or OctoPrint printer. They never send G-code, change a temperature, or start or stop a job.
+The printer tools read from a Klipper (Moonraker) or OctoPrint printer, and a Bambu Lab printer through OrcaSlicer's own connection to it (the OrcaSlicer MCP build with `bambu_status`: status and waiting, not history). They never send G-code, change a temperature, or start or stop a job.
 
 ## Printer status and waiting
 

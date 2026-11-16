@@ -55,7 +55,11 @@ available: Bambu printers keep no history OrcaSlicer can read.
 - A fibre filled spool (`PLA-CF`, `PA6-GF`) is never offered for an unfilled slot, nor the other way round: it
   wears a standard nozzle. The warning names the tray; the fix is the right spool or the slot's preset.
 - The tray tools read the printer selected in OrcaSlicer's Device tab, not the printer profile's address, so
-  `no_printer_selected` and `printer_offline` are fixed there.
+  `no_printer_selected` and `printer_offline` are fixed there, or with `select_printer` on a build that has it.
+  Right after a switch the printer is `printer_offline` for a few seconds while OrcaSlicer connects.
+- The Device tab's selection and the active printer profile are independent: `select_printer` does not change the
+  profile, and `select_preset` on the printer group does not change the Device tab. `select_printer` reports a
+  model mismatch as `profile_check`; it is the user's call.
 
 ## Checks are heuristics, not measurements
 

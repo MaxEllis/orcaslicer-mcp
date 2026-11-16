@@ -91,6 +91,10 @@ _ACTIONS: dict[str, tuple[str, str]] = {
                                  "ask the user to click the edit button beside that slot in OrcaSlicer's sidebar "
                                  "first; set_config without filament_slot then writes that slot's preset, the one "
                                  "open in the Filament settings"),
+    "list_printers": ("Listing the Device tab's printers",
+                      "ask the user which printer is selected in OrcaSlicer's Device tab"),
+    "select_printer": ("Switching the printer in the Device tab",
+                       "ask the user to click the printer in OrcaSlicer's Device tab"),
     "save_preset:filament_slot": ("Saving one filament slot's preset",
                                   "ask the user to click the edit button beside that slot in OrcaSlicer's sidebar, "
                                   "then the save icon beside the preset name"),

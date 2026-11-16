@@ -381,6 +381,13 @@ class OrcaClient:
     async def get_printer_status(self) -> dict:
         return await self._request("GET", "/api/v1/printer/status")
 
+    # The printers OrcaSlicer's Device tab lists, and selecting one (capability printer_select).
+    async def get_printer_devices(self) -> dict:
+        return await self._request("GET", "/api/v1/printer/devices")
+
+    async def select_printer_device(self, dev_id: str) -> dict:
+        return await self._request("PUT", "/api/v1/printer/device", json={"id": dev_id})
+
     # Project files (fork v2.4.2-mcp.15 and later). Paths are on the OrcaSlicer host.
     async def get_project(self) -> dict:
         return await self._request("GET", "/api/v1/project")

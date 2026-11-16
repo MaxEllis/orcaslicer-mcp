@@ -154,6 +154,14 @@
       "description": "Choose which CANVAS tray each filament prints from on the next Send (Elegoo Centauri Carbon 2 only); it starts nothing."
     },
     {
+      "name": "list_printers",
+      "description": "List the printers OrcaSlicer's Device tab knows and say which one is selected. Read-only."
+    },
+    {
+      "name": "select_printer",
+      "description": "Select a printer in OrcaSlicer's Device tab, as clicking it there does, so the Bambu Lab printer tools read that one."
+    },
+    {
       "name": "add_plate",
       "description": "Add an empty plate, like the toolbar's Add plate button, so parts can print separately."
     },

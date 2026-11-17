@@ -12,11 +12,16 @@ TOKEN_A = "a" * 32   # made-up tokens
 TOKEN_B = "b" * 32
 
 
+LIVE = set()  # the ports that "listen" in a test: real ports on the test machine must not decide anything
+
+
 @pytest.fixture
 def datadir(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCA_DATADIR", str(tmp_path))
     monkeypatch.delenv("ORCA_API_TOKEN", raising=False)
     monkeypatch.delenv("ORCA_API_URL", raising=False)
+    LIVE.clear()
+    monkeypatch.setattr(discovery, "listening", lambda port, timeout=0.5: port in LIVE)
     return tmp_path
 
 
@@ -57,10 +62,79 @@ def test_the_build_with_its_remote_api_off_is_not_used(datadir):
         load_config()
 
 
-def test_a_running_plugin_comes_before_the_build(datadir):
+def test_a_running_plugin_comes_before_a_build_that_is_not_running(datadir):
     build_conf(datadir)
     plugin_file(datadir)
     assert load_config().source == "plugin"
+
+
+def test_a_running_build_comes_before_a_running_plugin(datadir):
+    """Both open, each on its own port (plugin 0.2.4+): the build, which can do everything the plugin can and more."""
+    build_conf(datadir, port="13130")
+    plugin_file(datadir, port=13131)
+    LIVE.update({13130, 13131})
+    cfg = load_config()
+    assert cfg.source == "build" and cfg.base_url == "http://127.0.0.1:13130" and cfg.token == TOKEN_B
+
+
+def test_a_port_a_running_plugin_serves_is_not_the_builds(datadir):
+    """A plugin before 0.2.4 on the build's port 13130: what answers there is the plugin, so its token goes there."""
+    build_conf(datadir, port="13130")
+    plugin_file(datadir, port=13130)
+    LIVE.add(13130)
+    cfg = load_config()
+    assert cfg.source == "plugin" and cfg.token == TOKEN_A
+
+
+def test_the_old_default_address_goes_to_what_is_running(datadir, monkeypatch):
+    """The Claude extension used to send http://127.0.0.1:13130 always. With the build closed and the plugin on
+    13131, the plugin answers, not the build's settings for a port nothing serves."""
+    build_conf(datadir, port="13130")
+    plugin_file(datadir, port=13131)
+    LIVE.add(13131)
+    monkeypatch.setenv("ORCA_API_URL", "http://127.0.0.1:13130")
+    cfg = load_config()
+    assert cfg.source == "plugin" and cfg.base_url == "http://127.0.0.1:13131" and cfg.token == TOKEN_A
+
+
+def test_the_old_default_address_picks_the_running_build(datadir, monkeypatch):
+    build_conf(datadir, port="13130")
+    plugin_file(datadir, port=13131)
+    LIVE.update({13130, 13131})
+    monkeypatch.setenv("ORCA_API_URL", "http://127.0.0.1:13130")
+    cfg = load_config()
+    assert cfg.source == "build" and cfg.base_url == "http://127.0.0.1:13130"
+
+
+def test_listening_on_a_real_port(monkeypatch):
+    import socket
+    monkeypatch.setattr(discovery, "_REFUSED", {})
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    try:
+        assert discovery.listening(port) is True
+    finally:
+        srv.close()
+    assert discovery.listening(port) is False
+    assert discovery.listening(None) is False
+
+
+def test_a_refusal_is_kept_for_a_few_seconds(monkeypatch):
+    """Every tool call asks; a closed port is not asked again for REFUSAL_KEPT_S."""
+    import socket
+    monkeypatch.setattr(discovery, "_REFUSED", {})
+    tries = []
+    def refuse(addr, timeout):
+        tries.append(addr)
+        raise ConnectionRefusedError
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    clock = [100.0]
+    monkeypatch.setattr(discovery.time, "monotonic", lambda: clock[0])
+    assert discovery.listening(13130) is False and discovery.listening(13130) is False and len(tries) == 1
+    clock[0] += discovery.REFUSAL_KEPT_S + 1
+    assert discovery.listening(13130) is False and len(tries) == 2
 
 
 def test_an_explicit_token_always_wins(datadir, monkeypatch):

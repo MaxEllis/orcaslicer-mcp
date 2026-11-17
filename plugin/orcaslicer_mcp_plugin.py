@@ -24,8 +24,8 @@ Every other route answers 404 with "backend": "plugin", so orcaslicer-mcp can sa
 OrcaSlicer MCP build.
 
 How it runs:
-  * on_load starts one HTTP server thread on 127.0.0.1 (port 13130 unless settings.json in the plugin
-    folder says otherwise). The token is in token.txt in the same folder and shown in the panel.
+  * on_load starts one HTTP server thread on 127.0.0.1 (port 13131, next to the OrcaSlicer MCP build's
+    13130, unless the Config tab or settings.json in the plugin folder says otherwise). The token is in token.txt in the same folder and shown in the panel.
   * OrcaSlicer's model and presets may only be read on the UI thread, and a plugin can only run Python
     there from a UI callback. The "OrcaSlicer MCP" panel is that callback: the server thread queues a
     read, posts to the panel, the panel's page posts back, and on_message (UI thread) runs the read.
@@ -59,7 +59,14 @@ import urllib.parse
 import orca
 
 PLUGIN_VERSION = "0.2.3"
-DEFAULT_PORT = 13130
+# The OrcaSlicer MCP build serves on 13130, so the plugin uses the port after it: a stock OrcaSlicer with the plugin
+# and the build can then be open together, each with its own server (orcaslicer-mcp #28). The connector finds either
+# by itself (its discovery.py), so the number appears in no setup.
+DEFAULT_PORT = 13131
+# The plugin's default up to 0.2.3. A stored port of 13130 saved by one of those versions moves to DEFAULT_PORT once
+# (moves_old_port); one saved by 0.2.4 or later is a choice and stays.
+OLD_DEFAULT_PORT = 13130
+PORT_MOVED_IN = (0, 2, 4)
 BIND_HOST = "127.0.0.1"
 MAX_BODY = 4 * 1024 * 1024
 UI_TIMEOUT_S = 10.0
@@ -1879,6 +1886,22 @@ def load_settings(folder: str) -> dict:
         return {}
 
 
+def _version_tuple(text) -> tuple:
+    """"0.2.3" -> (0, 2, 3); anything else -> (0,), older than every release."""
+    try:
+        return tuple(int(part) for part in str(text).strip().split("."))
+    except ValueError:
+        return (0,)
+
+
+def moves_old_port(port, config_version) -> bool:
+    """A stored port of 13130 that plugin 0.2.3 or older saved (or a host that can't say which version saved it) is
+    the old default: only the Config tab's Restore defaults, or a save of the port it showed, stored it. It moves to
+    DEFAULT_PORT, so the plugin no longer takes the build's port."""
+    return port == OLD_DEFAULT_PORT and \
+        _version_tuple(config_version) < PORT_MOVED_IN
+
+
 def load_port(folder: str) -> int:
     try:
         with open(os.path.join(folder, "settings.json"), encoding="utf-8") as f:
@@ -3171,6 +3194,22 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             return {}
         return cfg if isinstance(cfg, dict) else {}
 
+    def _config_version(self) -> str:
+        """The plugin version that last saved the config ("" when never saved or the host can't say)."""
+        try:
+            return str(self.get_config_version() or "")
+        except Exception:
+            return ""
+
+    def _save_moved_port(self, cfg: dict, port: int) -> None:
+        """Store the new port, so the Config tab shows it and the move happens once. OrcaSlicer's config store
+        takes its own lock, so this is safe from the loading thread."""
+        try:
+            self.save_config(json.dumps({**cfg, "port": port}))
+            trace(f"port moved from {OLD_DEFAULT_PORT} (the build's) to {port}")
+        except Exception as e:
+            trace(f"moved port not saved: {type(e).__name__}: {e}")
+
     def _on_seen(self, app: str) -> None:  # server thread: an AI app reached OrcaSlicer
         with self._lock:
             prev = self._seen
@@ -3262,7 +3301,13 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             opened = (cfg.get("open") or {}).get("n", 0) if isinstance(cfg.get("open"), dict) else 0
             self._open_seen = opened if isinstance(opened, int) and not isinstance(opened, bool) else 0
             self._token = load_or_create_token(self._folder)
-            port = settings.get("port") if "port" in settings else cfg.get("port", DEFAULT_PORT)
+            if "port" in settings:
+                port = settings.get("port")
+            else:
+                port = cfg.get("port", DEFAULT_PORT)
+                if moves_old_port(port, self._config_version()):
+                    port = DEFAULT_PORT
+                    self._save_moved_port(cfg, port)
             self._port = port if isinstance(port, int) and not isinstance(port, bool) and \
                 (port == 0 or 1024 <= port <= 65535) else DEFAULT_PORT
             self.host = PanelHost(self._folder, self._post, self._notify)

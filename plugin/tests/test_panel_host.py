@@ -2,6 +2,9 @@
 import json
 import os
 import time
+import types
+
+import pytest
 
 import fake_orca
 from conftest import call, mod
@@ -238,7 +241,87 @@ def test_config_tab_shows_token_and_port(plugin):
     html = plugin.get_config_ui()
     assert json.dumps(plugin._token) in html and str(plugin._port) in html
     assert "__TOKEN__" not in html and plugin.has_config_ui() is True
-    assert plugin.get_default_config() == {"port": 13130, "paused": False, "renew": 0}
+    assert plugin.get_default_config() == {"port": 13131, "paused": False, "renew": 0}
+
+
+def test_the_plugin_no_longer_takes_the_builds_port():
+    """#28: the build serves on 13130, so the plugin's default is 13131 and they can run side by side."""
+    assert mod.DEFAULT_PORT == 13131 and mod.OLD_DEFAULT_PORT == 13130
+
+
+@pytest.mark.parametrize("port, version, moves", [
+    (13130, "", True),        # never saved by a version that can say, or a host that can't
+    (13130, "0.2.3", True),   # the old default, stored by Restore defaults or a save of the shown port
+    (13130, "0.1.9", True),
+    (13130, "0.2.4", False),  # saved by a version that knows 13130 is the build's: a choice
+    (13130, "1.0", False),
+    (13140, "0.2.3", False),  # any other port was chosen
+    (13130, "garbled", True),
+])
+def test_moves_old_port(port, version, moves):
+    assert mod.moves_old_port(port, version) is moves
+
+
+def _load_with_config(tmp_path, config, version, settings=None):
+    fake_orca.STATE.reset(storage=str(tmp_path))
+    fake_orca.STATE.config, fake_orca.STATE.config_version = dict(config), version
+    if settings is not None:
+        (tmp_path / "settings.json").write_text(json.dumps(settings))
+    cap = mod.McpCapability()
+    saved, mod.Service = mod.Service, _NoServer
+    try:
+        UI.run_blocking(cap.on_load)
+    finally:
+        mod.Service = saved
+    return cap
+
+
+class _NoServer:
+    """Stands in for the HTTP server: records the port asked for, binds nothing (13130/13131 may be busy here)."""
+    def __init__(self, api, token, port, **kw):
+        self.port, self.token, self.thread = port, mod.TokenBox(token) if not isinstance(token, mod.TokenBox) else token, \
+            types.SimpleNamespace(is_alive=lambda: True)
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
+def test_an_old_stored_port_moves_once_and_is_saved(tmp_path):
+    cap = _load_with_config(tmp_path, {"port": 13130, "paused": False, "renew": 0}, "0.2.3")
+    try:
+        assert cap._port == 13131
+        assert fake_orca.STATE.config["port"] == 13131 and fake_orca.STATE.config["renew"] == 0
+        assert fake_orca.STATE.config_version == "0.2.4"
+        assert json.loads((tmp_path / "connection.json").read_text())["url"] == "http://127.0.0.1:13131"
+    finally:
+        cap.on_unload()
+
+
+def test_a_port_chosen_with_a_new_version_stays(tmp_path):
+    cap = _load_with_config(tmp_path, {"port": 13130}, "0.2.4")
+    try:
+        assert cap._port == 13130 and fake_orca.STATE.config == {"port": 13130}
+    finally:
+        cap.on_unload()
+
+
+def test_settings_json_still_pins_any_port(tmp_path):
+    cap = _load_with_config(tmp_path, {"port": 13130}, "0.2.3", settings={"port": 13130})
+    try:
+        assert cap._port == 13130 and fake_orca.STATE.config == {"port": 13130}  # nothing rewritten
+    finally:
+        cap.on_unload()
+
+
+def test_a_new_install_uses_the_new_port_and_writes_nothing(tmp_path):
+    cap = _load_with_config(tmp_path, {}, "")
+    try:
+        assert cap._port == 13131 and fake_orca.STATE.config == {}
+    finally:
+        cap.on_unload()
 
 
 def test_config_tab_turns_access_off_and_on(plugin):

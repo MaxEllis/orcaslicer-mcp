@@ -469,6 +469,8 @@ class State:
         self.switch_mode = "keep"  # what the person picks for unsaved edits on a preset switch (keep = old behaviour)
         self.permissions = None
         self.config = {}
+        self.config_version = ""   # the plugin version that last saved the config; "" = never saved
+        self.plugin_version = "0.2.4"  # what OrcaSlicer records as the saver (the running plugin's version)
 
 
 STATE = State()
@@ -503,7 +505,11 @@ def build_module():
         def save_config(self, text):
             import json
             STATE.config = json.loads(text)
+            STATE.config_version = STATE.plugin_version
             return True
+
+        def get_config_version(self):
+            return STATE.config_version
 
     class ExecutionResult:
         def __init__(self, ok, msg):

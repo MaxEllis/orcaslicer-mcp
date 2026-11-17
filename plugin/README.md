@@ -52,7 +52,8 @@ MCP build, and the 4 printer tools work as before because they talk to the print
    access off and on, and (folded) the token and port.
 5. orcaslicer-mcp needs no token here: while the plugin runs it writes `connection.json` (address
    and token, readable only by you) in its data folder, and orcaslicer-mcp reads it when
-   `ORCA_API_TOKEN` is not set. A port changed in the Config tab takes effect after a restart. For tests, `settings.json` in the plugin's data folder
+   `ORCA_API_TOKEN` is not set. The plugin listens on port 13131 (the OrcaSlicer MCP build uses 13130,
+   so both can be open at once). A port changed in the Config tab takes effect after a restart. For tests, `settings.json` in the plugin's data folder
    (`<OrcaSlicer data folder>/orca_plugins/plugin_data/orcaslicer_mcp_plugin/`) overrides it, and
    `"trace": true` there writes a diagnostic `plugin-trace.log`.
 

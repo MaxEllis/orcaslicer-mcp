@@ -1868,9 +1868,20 @@ def _remove_quietly(path: str) -> None:
         pass
 
 
-def remove_connection_file(folder: str) -> None:
-    for name in (CONNECTION_FILE, CONNECTION_FILE + ".tmp"):
-        _remove_quietly(os.path.join(folder, name))
+def remove_own_connection_file(folder: str) -> None:
+    """Remove connection.json, but only when this OrcaSlicer wrote it. Two OrcaSlicers can share one settings folder
+    and so this file: the OrcaSlicer MCP build loads the plugin too (it stays off there), and a second stock OrcaSlicer's
+    plugin can't get the port. Neither may take away the file of the one that serves (live test, 2026-11-18: the build
+    starting removed it). A file left by a crash is overwritten at the next start, and the connector puts it last,
+    since its process is gone."""
+    path = os.path.join(folder, CONNECTION_FILE)
+    try:
+        with open(path, encoding="utf-8") as f:
+            pid = json.load(f).get("pid")
+    except (OSError, ValueError, AttributeError):
+        return
+    if pid == os.getpid():
+        _remove_quietly(path)
 
 
 def load_or_create_token(folder: str, renew: bool = False) -> str:
@@ -3296,7 +3307,6 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             if missing:
                 raise RuntimeError(NEEDS_NEWER_TEXT.format(missing=", ".join(missing)))
             self._folder = orca.host.plugin.storage()
-            remove_connection_file(self._folder)  # one left by a crash would point the connector at a dead server
             settings = load_settings(self._folder)
             if settings.get("trace") is True:
                 _TRACE_PATH = os.path.join(self._folder, "plugin-trace.log")
@@ -3343,7 +3353,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
                 else f"{type(e).__name__}: {e}"
             self._service = None
             if self._folder:
-                remove_connection_file(self._folder)
+                remove_own_connection_file(self._folder)
             trace("on_load failed: " + self._error)
             self._notify("could not start: " + self._error, True)
             print(f"[orcaslicer-mcp-plugin] not started: {self._error}")
@@ -3365,7 +3375,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             self._service.stop()
             trace(f"server stopped, thread alive={self._service.thread.is_alive()}")
             self._service = None
-            remove_connection_file(self._folder)
+            remove_own_connection_file(self._folder)
         if self.host is not None:
             self.host.save()
         panel, self._panel = self._panel, None

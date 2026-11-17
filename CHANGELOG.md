@@ -13,6 +13,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 - On Windows, the plugin no longer makes OrcaSlicer pop up "Plugin permission request" windows about an audit event called "open" when an AI app closes or stops waiting for an answer. The plugin's server printed an error report for the dropped connection, and stock OrcaSlicer's permission check asked about each file that report read, several windows at a time. A dropped connection is now no error, and no error report is printed.
+- Two OrcaSlicers that share a settings folder no longer hide one another from the connector. Opening the OrcaSlicer MCP build, or a second stock OrcaSlicer, removed the plugin's `connection.json` while the first one was still serving. Now the plugin only removes a file it wrote itself.
 
 ## [0.1.26] - 2026-11-17
 The OrcaSlicer MCP plugin 0.2.3 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.

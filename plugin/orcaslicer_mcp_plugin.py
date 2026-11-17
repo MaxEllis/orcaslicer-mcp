@@ -1329,6 +1329,18 @@ class _Server(http.server.HTTPServer):
             self._beat = now
             trace("server loop alive")
 
+    def handle_error(self, request, client_address):
+        """A request that ended in an exception. socketserver's own version prints a traceback, and formatting one
+        inside stock OrcaSlicer reads files in a way its permission check cannot name: on Windows each one opened a
+        "Plugin permission request ... audit event open" window, several per failed request (live test, 2026-11-18).
+        An AI app that closes or stops waiting fails the next read or write here (WinError 10053/10054), so those
+        windows came up whenever the app, or the connector inside it, went away. A client that hung up is no error
+        at all; anything else gets one trace line, never a traceback."""
+        e = sys.exc_info()[1]
+        if isinstance(e, (ConnectionError, TimeoutError)):
+            return
+        trace(f"request failed: {type(e).__name__}: {e}")
+
     def server_bind(self):
         if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)

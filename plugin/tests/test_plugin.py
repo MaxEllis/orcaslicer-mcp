@@ -461,3 +461,45 @@ def test_inside_the_mcp_build_it_asks_for_no_permissions(monkeypatch):
                         raising=False)
     mod.OrcaSlicerMcpPlugin().register_capabilities()
     assert S.permissions is None and mod.orca.registered == [mod.McpCapability]
+
+
+def _no_tracebacks(monkeypatch):
+    """Formatting a traceback inside stock OrcaSlicer pops a permission window on Windows (handle_error)."""
+    import traceback
+    used = []
+    for name in ("print_exc", "format_exc", "print_exception", "format_exception"):
+        monkeypatch.setattr(traceback, name, lambda *a, _n=name, **k: used.append(_n) or "")
+    return used
+
+
+def test_a_client_that_drops_the_connection_is_no_error(plugin, monkeypatch):
+    """The AI app (or its connector) closing a kept-alive connection resets it, and the server's next read fails.
+    That must stay quiet: no traceback, and the server goes on answering."""
+    import socket
+    import struct
+    used = _no_tracebacks(monkeypatch)
+    errors = []
+    orig = plugin._service.server.handle_error
+    monkeypatch.setattr(plugin._service.server, "handle_error",
+                        lambda req, addr: (errors.append(mod.sys.exc_info()[0]), orig(req, addr)))
+    s = socket.create_connection(("127.0.0.1", plugin._service.port), timeout=5)
+    s.sendall(("GET /api/v1/status HTTP/1.1\r\nHost: x\r\nX-Api-Token: %s\r\n\r\n" % plugin._token).encode())
+    assert s.recv(64).startswith(b"HTTP/1.1 200")
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    s.close()  # a reset, as when the app's process ends
+    time.sleep(0.5)
+    assert errors and all(issubclass(e, ConnectionError) for e in errors)
+    assert used == []
+    status, _ = call(plugin, "GET", "/api/v1/status")
+    assert status == 200
+
+
+def test_another_request_error_is_one_trace_line(plugin, monkeypatch, tmp_path):
+    used = _no_tracebacks(monkeypatch)
+    log = tmp_path / "trace.log"
+    monkeypatch.setattr(mod, "_TRACE_PATH", str(log))
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        plugin._service.server.handle_error(None, ("127.0.0.1", 1))
+    assert used == [] and "request failed: ValueError: boom" in log.read_text()

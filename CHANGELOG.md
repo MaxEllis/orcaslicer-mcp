@@ -7,13 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-11-18
+The OrcaSlicer MCP plugin 0.2.4 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.
+
 ### Changed
-- The OrcaSlicer MCP plugin 0.2.4 serves on port 13131, next to the OrcaSlicer MCP build's 13130, so a stock OrcaSlicer with the plugin and the build can be open at the same time. Before, both used 13130, and whichever started second had no server. A plugin that still has the old 13130 in its saved settings moves once; a port set in its `settings.json` stays. Nothing needs setting up again: the connector finds the plugin's port by itself.
-- With both open, the connector talks to the build, which can do everything the plugin does and more. It counts the build as open when something answers on the build's port that the plugin doesn't hold. An old Claude extension setting of `http://127.0.0.1:13130` now reaches whichever OrcaSlicer is running.
+- The plugin now uses port 13131. The OrcaSlicer MCP build keeps 13130, so a stock OrcaSlicer with the plugin and the build can be open at the same time. They used to share 13130, and whichever started second had no server. A plugin that saved the old 13130 in its settings moves once. A port set in its `settings.json` stays. There is nothing to set up again: the connector finds the plugin's port by itself.
+- With both open, the connector uses the build, which can do everything the plugin does and more. The build counts as open when its port answers and the plugin isn't the one holding it. An old Claude extension setting of `http://127.0.0.1:13130` now reaches whichever OrcaSlicer is running.
 
 ### Fixed
-- On Windows, the plugin no longer makes OrcaSlicer pop up "Plugin permission request" windows about an audit event called "open" when an AI app closes or stops waiting for an answer. The plugin's server printed an error report for the dropped connection, and stock OrcaSlicer's permission check asked about each file that report read, several windows at a time. A dropped connection is now no error, and no error report is printed.
-- Two OrcaSlicers that share a settings folder no longer hide one another from the connector. Opening the OrcaSlicer MCP build, or a second stock OrcaSlicer, removed the plugin's `connection.json` while the first one was still serving. Now the plugin only removes a file it wrote itself.
+- On Windows, closing an AI app could make OrcaSlicer pop up "Plugin permission request" windows about "open", several at a time. An app that stopped waiting for an answer did the same. The plugin printed an error report for the dropped connection, and OrcaSlicer asked about each file that report read. A dropped connection is no longer an error, and the plugin prints no error reports.
+- Two OrcaSlicers that share a settings folder no longer hide each other from the connector. Opening the OrcaSlicer MCP build, or a second stock OrcaSlicer, deleted the plugin's `connection.json` while the first one was still running. Now the plugin only deletes a file it wrote.
 
 ## [0.1.26] - 2026-11-17
 The OrcaSlicer MCP plugin 0.2.3 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.

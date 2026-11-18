@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-LATEST_PLUGIN_VERSION = "0.2.3"
+LATEST_PLUGIN_VERSION = "0.2.4"
 PLUGIN_DOWNLOAD_URL = "https://github.com/MaxEllis/orcaslicer-mcp/releases/latest"
 
 _VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")

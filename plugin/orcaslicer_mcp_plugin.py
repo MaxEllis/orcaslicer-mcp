@@ -3191,6 +3191,11 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         self._seen_written = None  # the (time, app) last saved for the Config tab
         self._unloading = False
         self._ui_language = None  # OrcaSlicer's language, once read on the UI thread (_language)
+        # Notifications wait here until OrcaSlicer first calls us on its UI thread. on_load runs on the loader thread
+        # while OrcaSlicer is still starting, before its main window exists; a notification posted then makes
+        # OrcaSlicer 2.5.1 crash at launch (Plater::get_notification_manager on a null Plater, SIGSEGV).
+        self._ui_ready = False
+        self._held_notes: list[tuple[str, bool]] = []
         self.host = None
 
     def get_name(self):
@@ -3200,7 +3205,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
     def has_config_ui(self):
         return True
 
-    def get_config_ui(self):
+    def get_config_ui(self):  # UI thread
+        self._ui_up()
         if self._in_build:
             return IN_BUILD_HTML
         return CONFIG_HTML.replace("__TOKEN__", _inline(self._token)).replace("__PORT__", _inline(self._port)) \
@@ -3387,6 +3393,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
 
     def on_lifecycle_event(self, event, ctx):  # UI thread, except SliceStarted and GCodeExportFinished (slicing worker)
         name = getattr(event, "name", str(event))
+        if name not in ("SliceStarted", "GCodeExportFinished"):  # the rest arrive on the UI thread
+            self._ui_up()
         if name in SLICE_EVENTS:
             try:  # records only: nothing here may touch OrcaSlicer's UI from the slicing worker
                 self.slices.event(name, ctx)
@@ -3424,7 +3432,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             trace(f"journal baseline after undo failed: {e}")
             self.journal.invalidate()
 
-    def execute(self):
+    def execute(self):  # UI thread
+        self._ui_up()
         try:
             panel = self._ensure_panel()
             panel.show()
@@ -3496,6 +3505,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             raise ApiReply(503, {"error": "ui_not_ready", "detail": str(e)})
 
     def _on_message(self, message):  # UI thread
+        self._ui_up()
         message = message or {}
         if "t" in message:
             if message.get("t") == "tick":
@@ -3531,6 +3541,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         self._pump.run_pending()
 
     def _tick(self):  # UI thread, every 500 ms while the page is open
+        self._ui_up()
         now = time.monotonic()
         if now - self._last_tick < 1.0:
             return
@@ -3574,7 +3585,23 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             except Exception:
                 pass
 
+    def _ui_up(self) -> None:  # UI thread: OrcaSlicer is past startup, so held notifications can be shown
+        with self._lock:
+            if self._ui_ready:
+                return
+            self._ui_ready = True
+            held, self._held_notes = self._held_notes, []
+        for text, warning in held:
+            self._push(text, warning)
+
     def _notify(self, text, warning=False):
+        with self._lock:
+            if not self._ui_ready:
+                self._held_notes.append((text, warning))
+                return
+        self._push(text, warning)
+
+    def _push(self, text, warning=False):
         ui = orca.host.ui
         level = ui.NotificationLevel.WarningNotificationLevel if warning else \
             ui.NotificationLevel.RegularNotificationLevel

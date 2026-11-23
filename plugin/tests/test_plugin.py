@@ -1,7 +1,10 @@
 import json
 import types
 import os
+import sys
 import time
+
+import pytest
 
 import fake_orca
 from conftest import ROOT, call, mod
@@ -317,7 +320,7 @@ def test_a_host_without_a_needed_call_says_which_orcaslicer_is_needed(tmp_path):
         fake_orca.UI.run_blocking(cap.on_load)
         assert cap._service is None
         assert cap._error.startswith("needs OrcaSlicer 2.5.0 or later") and "orca.host.ui.create_dock_panel" in cap._error
-        fake_orca.UI.run_blocking(cap._ui_up)  # held until OrcaSlicer's first UI-thread call
+        fake_orca.UI.run_blocking(lambda: cap._ui_up("test"))  # held until OrcaSlicer's window is drawn
         assert any("needs OrcaSlicer 2.5.0 or later" in text for _lvl, text in S.notifications)
     finally:
         mod.orca.host.ui.create_dock_panel = saved
@@ -565,3 +568,96 @@ def test_another_request_error_is_one_trace_line(plugin, monkeypatch, tmp_path):
     except ValueError:
         plugin._service.server.handle_error(None, ("127.0.0.1", 1))
     assert used == [] and "request failed: ValueError: boom" in log.read_text()
+
+
+def test_a_taken_port_at_launch_waits_for_the_window_before_saying_so(tmp_path):
+    """Issue #27, reproduced on stock OrcaSlicer 2.5.1: when on_load fails (here its port is taken), its "could not
+    start" notification used to reach OrcaSlicer before the main window existed and crashed it at launch. It now
+    waits until OrcaSlicer's Plater exists, even if a UI-thread call comes before the window does."""
+    import socket
+    fake_orca.STATE.reset(storage=str(tmp_path))
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen(1)
+    (tmp_path / "settings.json").write_text(json.dumps({"port": taken.getsockname()[1]}))
+    S.plater = None  # still on the splash screen: no main window yet
+    cap = mod.McpCapability()
+    try:
+        cap.on_load()
+        assert cap._service is None and cap._error.startswith("OSError")
+        cap.on_lifecycle_event(types.SimpleNamespace(name="PlateCreated"), None)  # a UI-thread call, no window yet
+        cap.get_config_ui()
+        assert S.notifications == [] and not S.crashed
+        S.plater, S.gl_ready = fake_orca.Plater(S.model), False  # the window exists, its 3D view isn't drawn yet
+        cap.on_lifecycle_event(types.SimpleNamespace(name="PresetSelected"), None)
+        assert S.notifications == []  # a notification shown now would never appear
+        S.gl_ready = True
+        cap.on_lifecycle_event(types.SimpleNamespace(name="DeviceDiscovered"), None)  # not a UI-thread event
+        assert S.notifications == []
+        cap.on_lifecycle_event(types.SimpleNamespace(name="PlateSelected"), None)
+        assert [t for _, t in S.notifications] == ["OrcaSlicer MCP: could not start: " + cap._error]
+        assert not S.crashed
+        cap.on_lifecycle_event(types.SimpleNamespace(name="PlateSelected"), None)  # shown once
+        assert len(S.notifications) == 1
+    finally:
+        taken.close()
+        cap.on_unload()
+
+
+def test_slicing_and_device_events_never_show_held_notifications(tmp_path, monkeypatch):
+    """They arrive on the slicing worker, network or upload threads, where nothing may touch OrcaSlicer's window."""
+    fake_orca.STATE.reset(storage=str(tmp_path))
+    monkeypatch.setattr(mod.orca.host, "app_info", lambda: {"version": "2.5.1", "orca_mcp_version": "2.5.1-mcp.1"},
+                        raising=False)
+    cap = mod.McpCapability()
+    cap.on_load()  # inside the build: one notice, held
+    try:
+        for name in ("SliceStarted", "SliceGeometryFinished", "GCodeExportStarted", "GCodeExportFinished",
+                     "SlicingJobComplete", "DeviceOnline", "DeviceDiscovered", "UploadStarted", "UploadFinished",
+                     "PrintJobStarted", "PrintStateChanged"):
+            cap.on_lifecycle_event(types.SimpleNamespace(name=name), None)
+        assert S.notifications == []
+        cap.on_lifecycle_event(types.SimpleNamespace(name="PresetSelected"), None)
+        assert [t for _, t in S.notifications] == ["OrcaSlicer MCP: " + mod.IN_BUILD_TEXT]
+    finally:
+        cap.on_unload()
+
+
+def test_the_port_reuse_rule_per_platform():
+    """SO_REUSEADDR off Windows (a restart takes the port back at once); exclusive on Windows (#28)."""
+    import sys
+    assert mod._Server.allow_reuse_address == (sys.platform != "win32")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows binds exclusively and keeps no port busy after a close")
+def test_a_restart_takes_the_port_back_while_an_ai_app_still_holds_a_connection():
+    """Issue #27's trigger: an AI app's connector keeps its connection open; OrcaSlicer quits (its side closes the
+    connection first) and is opened again within a minute. That left the port busy, and the new bind failed with
+    "Address already in use"."""
+    import socket
+    first = mod._Server(("127.0.0.1", 0), mod.http.server.BaseHTTPRequestHandler)
+    port = first.server_address[1]
+    client = socket.create_connection(("127.0.0.1", port), timeout=5)  # the AI app's kept-alive connection
+    conn, _ = first.socket.accept()
+    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+    client.recv(100)
+    conn.close()  # OrcaSlicer quits: its side closes first, the AI app still holds its end
+    first.server_close()
+    second = None
+    try:
+        second = mod._Server(("127.0.0.1", port), mod.http.server.BaseHTTPRequestHandler)  # OrcaSlicer opened again
+        assert second.server_address[1] == port
+    finally:
+        client.close()
+        if second is not None:
+            second.server_close()
+
+
+def test_a_second_orcaslicer_still_cannot_share_a_listening_port():
+    """Taking the port back after a restart must not let a second running OrcaSlicer listen on the same port (#28)."""
+    first = mod._Server(("127.0.0.1", 0), mod.http.server.BaseHTTPRequestHandler)
+    try:
+        with pytest.raises(OSError):
+            mod._Server(("127.0.0.1", first.server_address[1]), mod.http.server.BaseHTTPRequestHandler)
+    finally:
+        first.server_close()

@@ -463,6 +463,8 @@ class State:
         self.storage = storage
         self.panels: list[Panel] = []
         self.notifications: list[tuple] = []
+        self.crashed = False  # a notification was pushed while there was no Plater
+        self.gl_ready = True  # the 3D view (where notifications are drawn) is set up
         self.links: list[tuple] = []  # (text, hyper_text, on_click) of notifications with a link
         self.page_silent = False
         self.decline_selection = False
@@ -477,9 +479,19 @@ STATE = State()
 
 
 def _push_notification(lvl, text, hyper_text="", on_click=None):
+    if STATE.plater is None:  # stock 2.5.1 dereferences the null Plater here and crashes (SIGSEGV, issue #27)
+        STATE.crashed = True
+        return
     STATE.notifications.append((lvl, text))
     if hyper_text:
         STATE.links.append((text, hyper_text, on_click))
+
+
+
+def _plater():
+    if STATE.plater is None:  # stock 2.5 (PluginHostApp.cpp current_plater) before the main window is built
+        raise RuntimeError("Plater is not available")
+    return STATE.plater
 
 
 def _create_dock_panel(html, title="", width=0, height=0, on_message=None, on_close=None, dock="right"):
@@ -547,7 +559,8 @@ def build_module():
                                    filament=Editor("filaments"))
     orca.host = types.SimpleNamespace(
         preset_bundle=lambda: STATE.bundle,
-        plater=lambda: STATE.plater,
+        plater=_plater,
+        gl_info=lambda: {"renderer": "fake"} if STATE.gl_ready else None,
         model=lambda: STATE.model,
         app_info=lambda: (_ui_only(), {"version": "2.5.0"})[1],
         plugin=types.SimpleNamespace(storage=lambda: STATE.storage),

@@ -7,24 +7,26 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-11-24
+The OrcaSlicer MCP plugin 0.2.5 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.
+
 ### Changed
-- On the plugin, switching presets while some settings have unsaved edits is now refused, and the reply names the edits. OrcaSlicer used to open its Transfer / Discard / Save window, and every request from the AI app waited until someone answered it. The assistant now asks you first: save the edits in OrcaSlicer, or let it put them back. The OrcaSlicer MCP build still drops them and says which, as before.
-- The plugin shows fewer notifications, as the build does. A change is already listed in the panel, so it no longer gets a notification as well. Refusals show at most one notification every 5 seconds; a run of refused changes used to stack several. The arrow in "Layer height 0.2 -> 0.28" no longer shows as "?".
+- Switching presets on the plugin while settings have unsaved edits is now refused, and the reply names the edits. OrcaSlicer used to open its Transfer / Discard / Save window, and every request waited until someone answered it. Your assistant now asks you first: save the edits in OrcaSlicer, or let it put them back. The OrcaSlicer MCP build still drops them and says which, as before.
+- The plugin shows fewer notifications, as the build does. Changes are listed in the panel, so they get no notification of their own. Refusals show at most one notification every 5 seconds. The arrow in "Layer height 0.2 -> 0.28" no longer shows as "?".
 
 ### Fixed
-- Stock OrcaSlicer 2.5 could crash at launch with the plugin installed ([#27](https://github.com/MaxEllis/orcaslicer-mcp/issues/27)). When the plugin could not start, it said so straight away, before OrcaSlicer's window existed, and OrcaSlicer crashed. The message now waits until the window is drawn, and shows with your first change in OrcaSlicer.
-- The usual reason it could not start: OrcaSlicer was closed while an AI app was connected and opened again within about a minute, so its port was still busy. On Linux and macOS the plugin now takes its port back at once. A second OrcaSlicer still can't share it.
-- When another program has the plugin's port, the plugin now says so in the build's words: "Couldn't start: port 13131 may be in use by another program". Its Config tab shows it too, with Token and port opened to pick another one. It used to show only a raw `OSError` line.
-- Two AI apps used at once no longer hold each other up. The plugin answers one request at a time, and a connection the first app left open made the second one wait until it closed, about 5 seconds, long enough for its status check to give up. Each reply now closes its connection.
-- Turning Assistant access off in the plugin's Config tab takes effect at once. With the panel closed, the AI app's next request still went through, changes included.
-- The plugin refuses values that make OrcaSlicer stop and ask in a window: a layer height outside the printer's Layer height limits, a max volumetric speed under 0.5 mm³/s, an ironing spacing under 0.05 mm. That window held up every request until someone clicked, and the click, not the request, decided the value. The refusal uses the build's wording.
-- A connection that sends nothing no longer holds up the plugin. It is dropped after 3 seconds.
-- After a failed start, the plugin's panel says it couldn't start, and why. It used to say "Assistant access is off".
-- The plugin's Config tab says "Connected" only for an AI app that has connected since OrcaSlicer started. Right after a restart it showed the previous session's app as connected.
-- `token.txt` in the plugin's folder can now be read by your user only, like `connection.json`. Other users of a shared Mac or Linux computer could read it.
-- A refusal keeps its explanation: why a preset switch was refused, why OrcaSlicer didn't answer in time, and, on the plugin, which settings were already changed when a later one was refused.
-- Number lists are checked more fully before they reach OrcaSlicer: a nozzle temperature above 1500 °C, or text that is not a number (OrcaSlicer stores it as 0), is refused.
-- On the plugin, Bed type and other project settings are refused with a plain explanation and where to change them by hand. When OrcaSlicer can't be found, the message now mentions the plugin's permissions: answering No to OrcaSlicer's permission prompt turns the plugin off without a word.
+- Stock OrcaSlicer 2.5 could crash at startup with the plugin installed ([#27](https://github.com/MaxEllis/orcaslicer-mcp/issues/27)). When the plugin could not start, it said so before OrcaSlicer's window existed, and OrcaSlicer crashed. The message now waits for the window.
+- A busy port was one reason the plugin could not start. OrcaSlicer was closed while an AI app was connected, then opened again within a minute. On Linux and macOS the plugin now gets its port back at once. A second OrcaSlicer still can't share it.
+- When another program has its port, the plugin says so in the build's words: "Couldn't start: port 13131 may be in use by another program". Its Config tab shows it too. Its panel says why it didn't start, not "Assistant access is off".
+- Two AI apps using the plugin at once no longer hold each other up. Each reply now closes its connection, and a connection that sends nothing is dropped after 3 seconds.
+- Turning Assistant access off in the plugin's Config tab takes effect at once. With the panel closed, the next request still went through.
+- The plugin refuses values that make OrcaSlicer stop and ask in a window, in the build's words. These are a layer height outside the printer's Layer height limits, a max volumetric speed under 0.5 mm³/s and an ironing spacing under 0.05 mm. That window held up every request, and the click, not the request, decided the value.
+- After a restart, the plugin's Config tab says "Connected" only once an AI app has connected again.
+- The plugin's `token.txt` can now be read by your user only, like `connection.json`.
+- A refusal keeps its reason: why a preset switch was refused, why OrcaSlicer didn't answer in time, and, on the plugin, which settings had already changed.
+- Number lists are checked more fully: a nozzle temperature above 1500 °C, or text that is not a number (OrcaSlicer stores it as 0), is refused before it reaches OrcaSlicer.
+- On the plugin, Bed type and other project settings are refused with a plain reason and where to change them by hand.
+- When OrcaSlicer can't be found, the message now mentions the plugin's permissions. Answering No to OrcaSlicer's permission prompt turns the plugin off without a word.
 - `rename_preset` on the plugin no longer switches presets before finding out that the plugin can't save them.
 
 ## [0.1.27] - 2026-11-18

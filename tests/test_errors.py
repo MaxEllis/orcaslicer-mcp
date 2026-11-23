@@ -45,3 +45,21 @@ def test_plugin_404_names_the_limits():
 def test_plugin_503_keeps_the_reason():
     e = error_from_status(503, {"error": "paused", "detail": "the panel was closed"})
     assert str(e) == "paused: the panel was closed"
+
+
+def test_409_keeps_its_detail_sentence():
+    e = error_from_status(409, {"error": "unsaved_edits", "modified": {"print": ["layer_height"]},
+                                "detail": "Switching would drop your edits."})
+    assert str(e) == "unsaved_edits: Switching would drop your edits."
+    assert str(error_from_status(409, {"error": "already_slicing"})) == "already_slicing"
+
+
+def test_504_keeps_its_cause_when_given():
+    e = error_from_status(504, {"error": "ui_timeout", "detail": "the panel did not answer; is OrcaSlicer busy?"})
+    assert str(e) == ("ui_timeout: OrcaSlicer's window didn't answer in time (the panel did not answer; "
+                      "is OrcaSlicer busy?); ask the user to look at OrcaSlicer, then try again.")
+
+
+def test_not_editable_has_no_describe_setting_tail():
+    e = error_from_status(422, {"applied": [], "errors": {"curr_bed_type": "not_editable_in_current_config"}})
+    assert "describe_setting" not in str(e) and "Nothing was changed." in str(e)

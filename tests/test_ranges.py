@@ -55,8 +55,8 @@ def test_vector_values_checked_per_element():
 
 def test_non_numbers_and_unknown_keys_are_left_to_orcaslicer():
     assert ranges.out_of_range({"wall_loops": "lots", "nope": -5, "enable_support": True}) == {}
-    # A named bound such as max_temp is not checked here.
-    assert ranges.out_of_range({"nozzle_temperature": 9999}) == {}
+    # max_temp (1500) is now resolved: 9999 is out, a real temperature is not.
+    assert "nozzle_temperature" in ranges.out_of_range({"nozzle_temperature": 9999})
 
 
 def test_unit_escapes_are_decoded():
@@ -130,3 +130,64 @@ def test_fork_reply_shape_with_both_top_level_and_errors_entry():
     assert set(e.ranges) == {"layer_height", "sparse_infill_density"}
     assert e.ranges["layer_height"]["value"] == "-1"          # from the top level, not overwritten
     assert "between 0% and 100%" in e.ranges["sparse_infill_density"]["detail"]
+
+
+# --- plugin gaps: max_temp, text in number lists, project settings, partial writes, 409 ---------
+def test_max_temp_constant_is_checked():
+    assert "nozzle_temperature" in ranges.out_of_range({"nozzle_temperature": "9999"})
+    assert ranges.out_of_range({"nozzle_temperature": "220"}) == {}
+    assert ranges._bound("max_temp") == 1500 and ranges._bound("-max_temp") == -1500
+
+
+def test_not_numbers_finds_text_in_number_lists():
+    f = ranges.not_numbers({"nozzle_temperature": "abc"})
+    assert "(nozzle_temperature) must be a number; abc is not" in f["nozzle_temperature"]
+    f = ranges.not_numbers({"nozzle_temperature": "220,abc"})
+    assert "abc (entry 2) is not" in f["nozzle_temperature"]
+    assert ranges.not_numbers({"nozzle_temperature": ["220", "NIL ", ""]}) == {}
+    assert ranges.not_numbers({"nozzle_temperature": "220,215"}) == {}
+    assert ranges.not_numbers({"layer_height": "abc", "nope": "x"}) == {}  # scalars/unknown left alone
+
+
+@respx.mock
+async def test_set_config_refuses_text_in_a_number_list(monkeypatch):
+    _env(monkeypatch)
+    put = respx.put(f"{BASE}/api/v1/config").mock(return_value=httpx.Response(200, json={}))
+    out = await srv.set_config({"nozzle_temperature": "220,abc"})
+    assert put.call_count == 0
+    assert out["error"].startswith("invalid_values: ") and "Nothing was changed" in out["error"]
+    assert out["errors"] == {"nozzle_temperature": "not_a_number"}
+    out = await srv.edit_preset("print", "P", {"nozzle_temperature": "abc"})
+    assert out["errors"] == {"nozzle_temperature": "not_a_number"}
+
+
+@respx.mock
+async def test_plugin_project_setting_gets_a_hint(monkeypatch):
+    import orcaslicer_mcp.client as cl
+    _env(monkeypatch)
+    monkeypatch.setattr(cl, "_BACKENDS", {BASE: "plugin"})
+    respx.put(f"{BASE}/api/v1/config").mock(return_value=httpx.Response(
+        422, json={"applied": [], "errors": {"curr_bed_type": "not_editable_in_current_config"}}))
+    out = await srv.set_config({"curr_bed_type": "Textured PEI Plate"})
+    assert "describe_setting" not in out["error"]
+    assert "OrcaSlicer MCP build" in out["hint"] and "Prepare tab" in out["hint"]
+
+
+@respx.mock
+async def test_partial_write_is_passed_through(monkeypatch):
+    _env(monkeypatch)
+    respx.put(f"{BASE}/api/v1/config").mock(return_value=httpx.Response(
+        422, json={"applied": ["layer_height"], "partial": True, "errors": {"wall_loops": "Invalid value"},
+                   "detail": "settings in an earlier group were already applied"}))
+    out = await srv.set_config({"layer_height": 0.2, "wall_loops": 3})
+    assert out["applied"] == ["layer_height"] and out["partial"] is True
+
+
+@respx.mock
+async def test_409_reply_carries_modified_and_its_sentence_once(monkeypatch):
+    _env(monkeypatch)
+    respx.put(f"{BASE}/api/v1/preset").mock(return_value=httpx.Response(
+        409, json={"error": "unsaved_edits", "modified": {"print": ["layer_height"]}, "detail": "Edits would be lost."}))
+    out = await srv.select_preset("print", "P")
+    assert out["error"] == "unsaved_edits: Edits would be lost."
+    assert out["modified"] == {"print": ["layer_height"]} and "detail" not in out  # the sentence is in `error`

@@ -1,3 +1,4 @@
+import json
 import httpx, respx
 import orcaslicer_mcp.server as srv
 
@@ -148,6 +149,8 @@ async def test_missing_route_still_reports_capability_missing(monkeypatch):
 async def test_rename_preset_deletes_source_after_saving_copy(monkeypatch):
     _env(monkeypatch)
     calls = []
+    respx.get("http://x:13130/api/v1/status").mock(  # the build: rename_preset asks before its first step
+        return_value=httpx.Response(200, json={"app": "OrcaSlicer", "capabilities": []}))
     respx.put("http://x:13130/api/v1/preset").mock(
         side_effect=lambda req: (calls.append(("select", req.read().decode())),
                                  httpx.Response(200, json={"selected": "x"}))[1])
@@ -164,6 +167,17 @@ async def test_rename_preset_deletes_source_after_saving_copy(monkeypatch):
     assert "delete" in ops
     assert ops.index("delete") > ops.index("save")
     assert '"old"' in calls[[op for op, _ in calls].index("delete")][1]
+
+
+@respx.mock
+async def test_rename_preset_on_the_plugin_switches_nothing(monkeypatch):
+    """The plugin cannot save presets: refused before the first step selects the old preset for nothing."""
+    _env(monkeypatch)
+    respx.get("http://x:13130/api/v1/status").mock(
+        return_value=httpx.Response(200, json={"app": "OrcaSlicer", "backend": "plugin", "capabilities": []}))
+    select = respx.put("http://x:13130/api/v1/preset").mock(return_value=httpx.Response(200, json={}))
+    out = await srv.rename_preset("print", "old", "new")
+    assert not select.called and "OrcaSlicer MCP build" in json.dumps(out)
 
 
 # --- cancel_slice (fork F2 fix adds POST /slice/cancel) ---

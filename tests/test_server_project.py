@@ -366,5 +366,5 @@ async def test_move_project_file_exists_keeps_detail(monkeypatch):
     respx.post("http://x:13130/api/v1/project/move").mock(return_value=httpx.Response(409, json={
         "error": "exists", "path": "/u/b.3mf", "detail": "a file is already there; pass overwrite:true to replace it"}))
     out = await srv.move_project_file("/u/a.3mf", "/u/b.3mf")
-    assert out["error"] == "exists" and out["path"] == "/u/b.3mf" and "overwrite" in out["detail"]
+    assert out["error"].startswith("exists") and out["path"] == "/u/b.3mf" and "overwrite" in out["detail"]
     assert "hint" not in out

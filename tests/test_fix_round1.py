@@ -83,7 +83,7 @@ async def test_connect_timeouts_say_not_reachable(exc):
     respx.get(f"{BASE}/api/v1/config").mock(side_effect=exc)
     out = await srv.get_config(None)
     assert out["error"].startswith("not_reachable: ")
-    assert "dialog" not in out["error"]
+    assert "dialog may be open" not in out["error"]
     assert "on and awake" in out["error"]  # x:13130 is another computer
 
 

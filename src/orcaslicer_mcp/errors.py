@@ -129,7 +129,8 @@ def _out_of_range_from_body(body: dict) -> "OutOfRange | None":
 
 
 # Refusals that are about who may change a setting, not about its value.
-_POLICY_TOKENS = frozenset({"blocked_by_remote_api_policy"})
+# Not editable here (the plugin cannot reach project settings) is the same kind of answer: the value is fine.
+_POLICY_TOKENS = frozenset({"blocked_by_remote_api_policy", "not_editable_in_current_config"})
 
 
 def _invalid_values_message(errors: dict) -> str:
@@ -165,6 +166,10 @@ def _error_from_status(status: int, body: dict) -> ApiError:
     if status == 400:
         return BadRequest(msg)
     if status == 409:
+        # A refusal's own sentence (e.g. which edits a preset switch would drop) stays with its token.
+        detail = body.get("detail")
+        if body.get("error") and isinstance(detail, str) and detail.strip():
+            return Conflict(f"{body['error']}: {detail.strip()}")
         return Conflict(msg)
     if status == 422:
         oor = _out_of_range_from_body(body)
@@ -175,6 +180,11 @@ def _error_from_status(status: int, body: dict) -> ApiError:
             return Validation(_invalid_values_message(errors), errors)
         return Validation(msg, errors)
     if status == 504:
+        # The plugin says why its panel did not answer; relay that instead of guessing at a dialog.
+        detail = body.get("detail")
+        if isinstance(detail, str) and detail.strip():
+            return UiTimeout(f"ui_timeout: OrcaSlicer's window didn't answer in time ({detail.strip().rstrip('. ')}); "
+                             "ask the user to look at OrcaSlicer, then try again.")
         return UiTimeout("ui_timeout: OrcaSlicer's window didn't answer in time; a dialog may be open "
                          "in it, ask the user to look, then try again.")
     # The plugin answers 503 with a reason the user can act on ("paused": its panel was closed), and 500 with

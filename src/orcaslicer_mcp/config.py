@@ -6,7 +6,8 @@ from .discovery import discover, env_value as _env, names_this_computer, port_of
 NOT_FOUND = ("ORCA_API_TOKEN is not set and OrcaSlicer wasn't found on this computer: open OrcaSlicer with the "
              "OrcaSlicer MCP plugin activated (or the OrcaSlicer MCP build with its Remote API on). If OrcaSlicer uses "
              "its own settings folder (--datadir), set ORCA_DATADIR to it; for OrcaSlicer on another computer set "
-             "ORCA_API_URL and ORCA_API_TOKEN.")
+             "ORCA_API_URL and ORCA_API_TOKEN. With the OrcaSlicer MCP plugin, the plugin must be turned on and its "
+             "permissions allowed (Plugins dialog > OrcaSlicer MCP).")
 
 
 @dataclass(frozen=True)

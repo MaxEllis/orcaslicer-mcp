@@ -12,7 +12,7 @@ from .errors import (error_from_status, NotReachable, NotFound, ApiError, UiTime
 
 POLICY_TOKEN = "blocked_by_remote_api_policy"
 from . import settings_schema
-from .ranges import out_of_range
+from .ranges import out_of_range, not_numbers
 from .guard import (BlockedKey, sensitive_keys, changed_keys, check_placeholders,
                     redact_secrets)
 
@@ -47,10 +47,12 @@ def unreachable_message(base_url: str, e: Exception | None = None) -> str:
     if backend == "build":
         ask = "Is OrcaSlicer open, with Preferences > Remote API turned on?"
     elif backend == "plugin":
-        ask = "Is OrcaSlicer open, with the OrcaSlicer MCP plugin turned on?"
+        ask = ("Is OrcaSlicer open, with the OrcaSlicer MCP plugin turned on and its permissions "
+               "allowed (Plugins dialog > OrcaSlicer MCP)?")
     else:
         ask = ("Is OrcaSlicer open, with Preferences > Remote API turned on? With the OrcaSlicer "
-               "MCP plugin on stock OrcaSlicer instead: is the plugin turned on?")
+               "MCP plugin on stock OrcaSlicer instead: is the plugin turned on, with its permissions "
+               "allowed (Plugins dialog > OrcaSlicer MCP)?")
     if not _is_local(base_url):
         ask += " OrcaSlicer runs on another computer here: is that computer on and awake, and on the network?"
     return (f"not_reachable: OrcaSlicer isn't answering at {base_url}"
@@ -245,6 +247,14 @@ class OrcaClient:
     async def _check_ranges(self, changes: dict, current_reader) -> None:
         """Refuse values outside their setting's range. Only when something fails are the present
         values read (current_reader(keys)), so a value written back unchanged is never refused."""
+        bad = not_numbers(changes or {})
+        if bad:
+            # OrcaSlicer stores text in a number list as 0 without a word, the build and the plugin alike (parity
+            # audit 2026-11-24, row 4, checked on both): refuse it here for both.
+            details = list(bad.values())
+            await self._refused_note(", ".join(_label(k) for k in bad), "Not a number", "; ".join(details))
+            raise Validation(f"invalid_values: {'; '.join(details)}. Nothing was changed.",
+                             {k: "not_a_number" for k in bad})
         found = out_of_range(changes or {})
         if not found:
             return

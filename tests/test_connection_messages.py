@@ -83,3 +83,11 @@ def test_504_from_orcaslicer_says_to_look_for_a_dialog():
 def test_401_says_where_the_token_comes_from():
     e = error_from_status(401, {"error": "unauthorized"})
     assert "Preferences > Remote API" in str(e) and "ORCA_API_TOKEN" in str(e)
+
+
+def test_plugin_texts_name_the_permissions():
+    from orcaslicer_mcp.config import NOT_FOUND
+    assert "permissions allowed (Plugins dialog > OrcaSlicer MCP)" in NOT_FOUND
+    assert "permissions allowed" in cl.unreachable_message(BASE)
+    cl._BACKENDS[BASE] = "plugin"
+    assert "permissions allowed" in cl.unreachable_message(BASE)

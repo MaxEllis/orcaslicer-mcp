@@ -30,12 +30,17 @@ _UNIT_FIXES = {"ssecond": "s", "NNewton": "N", "ggram": "g"}
 
 def _bound(raw) -> float | None:
     """A schema bound as a number: 0, 2.0, "0.5f" or "5.f" (C++ float literals the extractor
-    kept as text). Named constants such as "max_temp" are left unchecked."""
+    kept as text). "max_temp" is the one named constant that is resolved; other names are left unchecked."""
     if isinstance(raw, bool):
         return None
     if isinstance(raw, (int, float)):
         return float(raw) if math.isfinite(raw) else None
     if isinstance(raw, str):
+        # PrintConfig.cpp: `const int max_temp = 1500;` (the shipped schema keeps the constant's name).
+        if raw.strip() == "max_temp":
+            return 1500.0
+        if raw.strip() == "-max_temp":
+            return -1500.0
         m = re.fullmatch(r"\s*(-?\d+(?:\.\d*)?)f?\s*", raw)
         if m:
             return float(m.group(1))
@@ -180,4 +185,28 @@ def out_of_range(changes: dict, current: dict | None = None) -> dict[str, dict]:
                           "min_exclusive": key in _MUST_BE_POSITIVE, "unit": shown_unit,
                           "detail": describe_problem(key, el, lo, hi, shown_unit, idx)}
             break
+    return found
+
+
+def not_numbers(changes: dict) -> dict[str, str]:
+    """{key: sentence} for numeric LIST settings holding text that is not a number. OrcaSlicer stores
+    such text as 0 without a word, on the OrcaSlicer MCP build and the plugin alike. "nil" is
+    OrcaSlicer's own "no value" entry and empty entries are left alone; scalars are refused by
+    OrcaSlicer itself."""
+    found: dict[str, str] = {}
+    for key, value in (changes or {}).items():
+        rec = settings_schema.describe(key)
+        if not rec or rec.get("type") not in _VECTOR_TYPES:
+            continue
+        or_percent = "OrPercent" in rec["type"]
+        elems = _elements(value, True)
+        for i, el in enumerate(elems):
+            if not isinstance(el, str) or not el.strip() or el.strip().lower() == "nil":
+                continue
+            if _parse(el, or_percent) is None:
+                label = rec.get("full_label") or rec.get("label")
+                name = f"{label} ({key})" if label else key
+                where = f" (entry {i + 1})" if len(elems) > 1 else ""
+                found[key] = f"{name} must be a number; {el.strip()}{where} is not"
+                break
     return found

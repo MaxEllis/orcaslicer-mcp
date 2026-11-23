@@ -431,15 +431,35 @@ def _err(e: ApiError) -> dict:
                                   **({"min_exclusive": True} if r.get("min_exclusive") else {}),
                                   **({"index": r["index"]} if r.get("index") is not None else {})}
                               for k, r in e.ranges.items()}
-        if "blocked_by_remote_api_policy" in (e.errors or {}).values() and _backend_now() == "plugin":
-            out["hint"] = ("The OrcaSlicer MCP plugin never lets the assistant change scripts, custom "
-                           "G-code or printer connection settings. Ask the user to make this change "
-                           "in the OrcaSlicer window.")
-        elif "blocked_by_remote_api_policy" in (e.errors or {}).values():
-            out["hint"] = ("OrcaSlicer itself refused these keys: Preferences > Remote API > "
-                           "'Allow script, G-code and connection edits' is off. Ask the user to "
-                           "tick it, then ask again; or to make the change themselves in the "
-                           "OrcaSlicer window.")
+        else:
+            # A write can be refused after an earlier group was applied; the assistant must know a setting did change.
+            if isinstance(body.get("applied"), list) and body["applied"]:
+                out["applied"] = body["applied"]
+            if body.get("partial") is True:
+                out["partial"] = True
+        values = (e.errors or {}).values()
+        hints = []
+        if "blocked_by_remote_api_policy" in values and _backend_now() == "plugin":
+            hints.append("The OrcaSlicer MCP plugin never lets the assistant change scripts, custom "
+                         "G-code or printer connection settings. Ask the user to make this change "
+                         "in the OrcaSlicer window.")
+        elif "blocked_by_remote_api_policy" in values:
+            hints.append("OrcaSlicer itself refused these keys: Preferences > Remote API > "
+                         "'Allow script, G-code and connection edits' is off. Ask the user to "
+                         "tick it, then ask again; or to make the change themselves in the "
+                         "OrcaSlicer window.")
+        if "not_editable_in_current_config" in values and _backend_now() == "plugin":
+            hints.append("The OrcaSlicer MCP plugin can change print, filament and printer settings only. "
+                         "Project settings such as Bed type, the wipe tower position and flushing volumes "
+                         "need the OrcaSlicer MCP build; ask the user to change it in the OrcaSlicer window "
+                         "(Bed type is the plate type list on the Prepare tab).")
+        if hints:
+            out["hint"] = " ".join(hints)
+    elif isinstance(e, Conflict):
+        # The refusal's sentence is already in `error` (errors.py); the unsaved edits it names travel as data too.
+        body = getattr(e, "body", None) or {}
+        if isinstance(body.get("modified"), dict) and body["modified"]:
+            out["modified"] = body["modified"]
     return out
 
 
@@ -2500,6 +2520,12 @@ async def select_preset(
     so call save_preset first if any unsaved edit should survive. Newer slicer builds report
     which groups were affected as 'discarded_changes' in the reply.
 
+    On the OrcaSlicer MCP plugin (stock OrcaSlicer) nothing is discarded: while any preset group
+    has unsaved edits the switch is refused with unsaved_edits, naming them under `modified`,
+    because OrcaSlicer would stop for a window on the user's screen. Ask the user whether to keep
+    them (they save them in OrcaSlicer) or drop them (set_config with each key set to null), then
+    switch.
+
     This also makes it the canonical way to reset dirty config. It leaves the last slice
     invalid, so re-slice afterwards. Use list_presets for valid names. Because of this, make
     filament selections and edits before print-group edits (docs/order-of-operations.md)."""
@@ -2864,6 +2890,9 @@ async def rename_preset(
     afterwards."""
     try:
         async with _client() as c:
+            # The plugin cannot save presets: refuse before the first step switches the user's preset for nothing.
+            if (refusal := await _plugin_refusal(c)) is not None:
+                return refusal
             await c.select_preset(type, old_name)
             await c.save_preset(type, new_name)
             await c.select_preset(type, new_name)

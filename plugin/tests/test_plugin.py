@@ -81,7 +81,8 @@ def test_put_config_applies_and_marks_modified(plugin):
     assert (status, body) == (200, {"applied": ["layer_height", "nozzle_temperature"], "errors": {}})
     _, st = call(plugin, "GET", "/api/v1/status")
     assert st["modified"]["print"] == ["layer_height"] and st["modified"]["filament"] == ["nozzle_temperature"]
-    assert any("Layer height 0.2 \u2192 0.28" in t for _, t in S.notifications)
+    # The panel lists the change, so no notification repeats it while the panel is open (the build's api_notify).
+    assert not any("AI changed" in t for _, t in S.notifications)
 
 
 def test_put_config_refuses_sensitive_and_applies_nothing(plugin):
@@ -462,7 +463,7 @@ def test_the_connection_file_is_written_through_its_path(tmp_path, monkeypatch):
 def test_a_failed_connection_write_leaves_nothing_behind(tmp_path, monkeypatch):
     def refuse(*a, **k):
         raise PermissionError("refused by OrcaSlicer")
-    monkeypatch.setattr(mod.json, "dump", refuse)
+    monkeypatch.setattr(mod.os, "replace", refuse)
     import pytest
     with pytest.raises(PermissionError):
         mod.write_connection_file(str(tmp_path), 13130, "t" * 48)

@@ -372,7 +372,7 @@ def test_row_wording_matches_the_build(plugin):
     call(plugin, "PUT", "/api/v1/config", {"filament_colour": "#1FB8A6"})
     row = history_rows(plugin)[-1]
     assert (row["label"], row["value"], row["before"]) == ("Filament 1 colour", "#1FB8A6", "#F2754E")
-    call(plugin, "PUT", "/api/v1/preset", {"type": "print", "name": "My Fast"})
+    call(plugin, "PUT", "/api/v1/preset", {"type": "print", "name": "My Fast", "if_unsaved": "ask"})
     assert history_rows(plugin)[-1]["undo"] == {"verb": "Switch back",
                                                 "tip": "Switch Print preset back to 0.20mm Standard @Fake"}
     call(plugin, "PUT", "/api/v1/preset", {"type": "print", "name": "Nope"})
@@ -546,7 +546,7 @@ def test_activity_note_refused_row_and_validation(plugin):
     assert (row["kind"], row["label"], row["value"], row["where"]) == \
         ("refused", "Post-processing Scripts", "Not allowed", "Blocked by the connector")
     assert call(plugin, "POST", "/api/v1/activity/note", {"kind": "setting", "text": "x"}) == \
-        (400, {"error": "bad_kind"})
+        (400, {"error": "bad_kind", "detail": "kind is slice, refused or note"})
     assert call(plugin, "POST", "/api/v1/activity/note", {"kind": "slice", "text": "  "}) == \
         (400, {"error": "missing_text"})
     status, _ = call(plugin, "POST", "/api/v1/activity/note", {"kind": "slice", "text": "é" * 200})
@@ -555,9 +555,9 @@ def test_activity_note_refused_row_and_validation(plugin):
 
 
 def test_activity_note_refused_while_access_is_off(plugin):
-    plugin._paused = True
+    S.config["paused"] = True  # the Config tab's switch
     status, body = call(plugin, "POST", "/api/v1/activity/note", {"kind": "slice", "text": "Compared 2 options"})
-    plugin._paused = False
+    S.config["paused"] = False
     assert status == 503 and body["error"] == "paused"
     assert not posts(plugin, "history") or all(r["label"] != "Compared 2 options" for r in history_rows(plugin))
 
@@ -580,7 +580,8 @@ def test_activity_note_drops_control_and_format_characters(plugin):
 def _switch_rows(plugin, mode):
     S.switch_mode = mode
     call(plugin, "PUT", "/api/v1/config", {"wall_loops": 3})
-    call(plugin, "PUT", "/api/v1/preset", {"type": "print", "name": "My Fast"})
+    # "ask": OrcaSlicer's own window decides about the unsaved edit (without it the switch is refused)
+    call(plugin, "PUT", "/api/v1/preset", {"type": "print", "name": "My Fast", "if_unsaved": "ask"})
     rows = last(plugin, "history")["rows"]
     return next(r for r in rows if r["label"] == "Wall loops"), next(r for r in rows if r["kind"] == "preset")
 

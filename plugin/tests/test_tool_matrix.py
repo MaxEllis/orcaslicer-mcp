@@ -14,6 +14,10 @@ import sys
 
 import pytest
 
+import fake_orca
+
+S = fake_orca.STATE
+
 try:
     from orcaslicer_mcp import errors as _errors
     HAS_PLUGIN_ERRORS = hasattr(_errors, "PLUGIN_LIMITS")
@@ -43,6 +47,8 @@ EXPECT_WORKS = {"get_status", "get_config", "set_config", "list_presets", "get_p
                 "select_preset", "list_objects", "get_project",
                 # after the user pressed Slice plate (plugin 0.2.0)
                 "get_slice_status", "get_slice_warnings", "get_gcode", "describe_plate", "save_gcode"}
+# A preset switch is refused while any edit is unsaved (OrcaSlicer would ask in a window).
+SWITCHES_PRESETS = {"select_preset", "rename_preset", "set_filament_slot_preset"}
 READS_THE_SLICE = {"get_slice_status", "get_slice_warnings", "get_slice_breakdown", "get_gcode",
                    "describe_plate", "save_gcode"}
 CUBE = pathlib.Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "cube_flat.gcode.xz"
@@ -83,6 +89,10 @@ def test_every_tool_is_honest_about_the_plugin(folder, plugin, monkeypatch, caps
             args = ARGS.get(tool.name) or _fill(tool.input_schema)
             if tool.name in READS_THE_SLICE:  # earlier tools change settings: the user slices again first
                 slice_now(plugin, gcode)
+            if tool.name in SWITCHES_PRESETS:  # earlier tools leave unsaved edits: the user saves or discards them
+                for coll in (S.bundle.prints, S.bundle.filaments, S.bundle.printers):
+                    for p in coll.presets:
+                        p._cfg = dict(p._saved)
             try:
                 text = _text(await server.mcp.call_tool(tool.name, args))
             except Exception as e:  # validation of made-up args, etc.

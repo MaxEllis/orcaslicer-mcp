@@ -700,6 +700,96 @@ def read_project() -> dict:
             "objects": int(plater.model().object_count()), "modified": modified}
 
 
+# Values OrcaSlicer's settings pages question in a window of their own (ConfigManipulation.cpp): a layer height outside
+# Printer Settings > Layer height limits ("Adjust it to the limit automatically?" Adjust / Ignore), a max volumetric
+# speed under 0.5 and an ironing spacing under 0.05 ("Value was reset"). Through the plugin that window opens on the
+# user's screen, this request and every one after it waits until someone answers, and the click, not the request,
+# decides the value (parity audit 2026-11-24, row 3). The plugin refuses them first, in the words of the build's own
+# range check (config_value_in_range), which refuses a layer height below the printer's lowest the same way.
+OUT_OF_RANGE_PREFIX = "out_of_range: "
+MIN_LAYER_HEIGHT = 0.01  # the build's kMinLayerHeight, also when the printer profile leaves its limit at 0
+MIN_VOLUMETRIC_SPEED = 0.5  # check_filament_max_volumetric_speed
+IRONING_SPACING_MIN = 0.05  # PrintConfig.hpp
+LAYER_LIMITS_WHERE = "Printer Settings > Layer height limits"
+_LIMIT_EPS = 1e-6
+
+
+def _config_numbers(text) -> list:
+    """Each element of a config value as a number; None for one that is not a number, "nil" included."""
+    out = []
+    for part in str(text if text is not None else "").split(","):
+        try:
+            n = float(part.strip())
+        except ValueError:
+            out.append(None)
+            continue
+        out.append(n if n == n and n not in (float("inf"), float("-inf")) else None)
+    return out
+
+
+def _num_text(n: float) -> str:
+    return format(n, "g")
+
+
+def _range_problem(key: str, text: str, index, value, lo, hi, unit: str, tail: str = "") -> dict:
+    """The build's out_of_range reply for one value: {"error", "key", "value", "min", "max", "detail"} (+ index)."""
+    label, u = display_label(key), f" {unit}" if unit else ""
+    got = f"{_num_text(value)}{u}" if value is not None else (text.strip() or "nothing")
+    if value is None:
+        sentence = f"{label} must be a number (got {got})"
+    elif lo is not None and hi is not None:
+        sentence = f"{label} must be between {_num_text(lo)}{u} and {_num_text(hi)}{u} (got {got})"
+    else:
+        sentence = f"{label} must be at least {_num_text(lo)}{u} (got {got})"
+    detail = sentence + (f"; {tail}" if tail else "")
+    out = {"error": "out_of_range", "key": key, "value": _num_text(value) if value is not None else text,
+           "min": lo, "max": hi, "detail": detail}
+    if index is not None:
+        out["index"] = index
+    return out
+
+
+def dialog_value_problems(groups: dict, printer_preset) -> dict:
+    """{key: out_of_range reply} for each changed value OrcaSlicer would question in a window (see above). groups is
+    plan_config_write's {group: [(key, text, old)]}; the layer height is judged against the printer limits this batch
+    leaves (it may change min_layer_height too), else the edited printer preset's. UI thread."""
+    batch = {key: text for items in groups.values() for key, text, _old in items}
+
+    def printer_numbers(key):
+        text = batch[key] if key in batch else printer_preset.config_value(key)
+        return [n for n in _config_numbers(text) if n is not None]
+    found = {}
+    for items in groups.values():
+        for key, text, old in items:
+            if text == old:
+                continue  # written back unchanged: nothing for OrcaSlicer to ask about
+            if key in ("layer_height", "initial_layer_print_height"):
+                lows, highs = printer_numbers("min_layer_height"), printer_numbers("max_layer_height")
+                lo = max(min(lows) if lows else 0.0, MIN_LAYER_HEIGHT)
+                # OrcaSlicer asks about the highest only for the layer height itself, and only when the printer sets one.
+                hi = max(highs) if key == "layer_height" and highs and max(highs) > _LIMIT_EPS else None
+                n = (_config_numbers(text) or [None])[0]
+                if n is None or n < lo - _LIMIT_EPS or (hi is not None and n > hi + _LIMIT_EPS):
+                    tail = (f"the printer's limits are set in {LAYER_LIMITS_WHERE}" if hi is not None
+                            else f"the lowest the printer allows is set in {LAYER_LIMITS_WHERE}")
+                    found[key] = _range_problem(key, text, None, n, lo, hi, "mm", tail)
+                continue
+            if key == "filament_max_volumetric_speed":
+                lo, unit, nil_ok = MIN_VOLUMETRIC_SPEED, "mm\u00b3/s", False
+            elif key in ("ironing_spacing", "support_ironing_spacing", "filament_ironing_spacing"):
+                lo, unit, nil_ok = IRONING_SPACING_MIN, "mm", key == "filament_ironing_spacing"
+            else:
+                continue
+            parts = str(text).split(",")
+            for i, (part, n) in enumerate(zip(parts, _config_numbers(text))):
+                if n is None and nil_ok and part.strip().lower() == "nil":
+                    continue  # "no value of its own": the print setting applies
+                if n is None or n < lo - _LIMIT_EPS:
+                    found[key] = _range_problem(key, part, i if len(parts) > 1 else None, n, lo, None, unit)
+                    break
+    return found
+
+
 def plan_config_write(changes: dict) -> dict:
     """UI thread: route each key to its preset group and apply the policy. Returns
     {"groups": {group: [(key, text, old)]}, "errors": {key: reason}, "slot": n}."""
@@ -729,11 +819,15 @@ def plan_config_write(changes: dict) -> dict:
                 errors[key] = "blocked_by_remote_api_policy"
                 continue
         groups.setdefault(group, []).append((key, text, old))
+    first_problem = None
+    for key, problem in dialog_value_problems(groups, edited["printer"]).items():
+        errors[key] = OUT_OF_RANGE_PREFIX + problem["detail"]
+        first_problem = first_problem or problem
     # The Filament tab edits one preset; write through the first slot that uses it.
     names = list(bundle.current_filament_preset_names())
     fname = edited["filament"].name
     slot = names.index(fname) + 1 if fname in names else 1
-    return {"groups": groups, "errors": errors, "slot": slot, "slots": len(names),
+    return {"groups": groups, "errors": errors, "out_of_range": first_problem, "slot": slot, "slots": len(names),
             "using": [i + 1 for i, n in enumerate(names) if n == fname] or [slot],
             "presets": {g: p.name for g, p in edited.items()}}
 
@@ -747,7 +841,7 @@ REASONS = {
     "not_editable_in_current_config": "Not editable here", "redacted_placeholder": "Hidden value",
     "unknown_preset": "No such preset", "incompatible_preset": "Not compatible",
     "slot_out_of_range": "No such filament", "select_cancelled": "Switch cancelled",
-    "select_failed": "Couldn't select",
+    "select_failed": "Couldn't select", "out_of_range": "Out of range", "unsaved_edits": "Unsaved changes",
 }
 # Where a refusal is explained. The build names the Preferences box that allows a blocked key; the plugin has
 # none, so it says the plugin never does it. Other refusals read "<key>: <error>", as in the build.
@@ -997,11 +1091,32 @@ def refusal_row(label: str, error: str, where: str | None = None, fallback: str 
     return {"kind": "refused", "label": label, "value": REASONS.get(error, fallback), "where": where}
 
 
+# Keys OrcaSlicer keeps for the session only: they differ from the saved preset without being an edit anyone made.
+SESSION_ONLY_KEYS = frozenset({"extruder_nozzle_stats"})
+
+
+def unsaved_groups_text(unsaved: dict) -> str:
+    """"print (Layer height, Wall loops) and filament (Nozzle temperature)": at most four settings per group."""
+    parts = []
+    for group, keys in unsaved.items():
+        names = [display_label(k) for k in keys[:4]] + ([f"{len(keys) - 4} more"] if len(keys) > 4 else [])
+        parts.append(f"{group} ({', '.join(names)})")
+    return " and ".join(parts)
+
+
+def unsaved_changes_text(unsaved: dict) -> str:
+    """The panel row's explanation of a switch refused for unsaved changes."""
+    return (f"Unsaved changes to {unsaved_groups_text(unsaved)}. Save or discard them, then ask again: "
+            "OrcaSlicer would ask about them in a window first.")
+
+
 def config_refusal_row(key: str, error: str) -> dict:
     if error == "blocked_by_remote_api_policy":
         return refusal_row(setting_label(key), error)
     if error == "not_editable_in_current_config":
         return refusal_row(setting_label(key), error, NEEDS_BUILD)
+    if error.startswith(OUT_OF_RANGE_PREFIX):  # the build's row: "Out of range", and the sentence that says why
+        return refusal_row(setting_label(key), "out_of_range", error[len(OUT_OF_RANGE_PREFIX):])
     return refusal_row(setting_label(key), error, f"{key}: {error}")
 
 
@@ -1200,7 +1315,7 @@ class Api:
         self.pump.call(lambda: None)  # refused like every other request while assistant access is off
         kind = data.get("kind")
         if kind not in ("slice", "refused", "note"):
-            raise ApiReply(400, {"error": "bad_kind"})
+            raise ApiReply(400, {"error": "bad_kind", "detail": "kind is slice, refused or note"})  # the build's words
         text = _note_text(data.get("text"), 160)
         if not text:
             raise ApiReply(400, {"error": "missing_text"})
@@ -1230,7 +1345,11 @@ class Api:
         if errors:
             self.notify("Couldn't update settings: " + settings_list_text(errors), True)
             record([config_refusal_row(k, errors[k]) for k in changes if k in errors])
-            return 422, {"applied": [], "errors": errors}
+            body = {"applied": [], "errors": errors}
+            # The first out-of-range value at the top level too, as the build replies: {"error": "out_of_range", "key",
+            # "value", "min", "max", "detail"}.
+            body.update(plan.get("out_of_range") or {})
+            return 422, body
         applied, shown, rows = [], [], []
         for group, _ in GROUPS:
             items = plan["groups"].get(group)
@@ -1268,7 +1387,9 @@ class Api:
                 multi = multiline_sides(key, old, text)
                 before = multi.get("before", setting_value(key, old))
                 value = multi.get("value", setting_value(key, text))
-                shown.append(f"{label} {before} \u2192 {value}" if multi else f"{label} {old} \u2192 {text}")
+                # ASCII: OrcaSlicer's notification font has no arrow glyph (an arrow showed as "?"; the build's api_notify
+                # says the same).
+                shown.append(f"{label} {before} -> {value}" if multi else f"{label} {old} -> {text}")
                 target = {"kind": "setting", "group": group, "key": key,
                           "slot": plan["slot"] if group == "filament" else None,
                           "preset": preset, "value": text, "before": old}
@@ -1285,7 +1406,13 @@ class Api:
         return 200, {"applied": applied, "errors": {}}
 
     def _select_preset(self, data: dict):
-        """The trial header does not apply here: the build counts it only on settings writes and slices."""
+        """The trial header does not apply here: the build counts it only on settings writes and slices.
+
+        With unsaved changes in any preset group, OrcaSlicer's switch stops for a Transfer / Discard / Save window on
+        the user's screen (a second one for another group's changes), and this request and every one after it waits
+        for the answer. The build discards them instead and says so; the plugin cannot do that without the window, so
+        it refuses (409 unsaved_edits, naming them) and switches nothing (parity audit 2026-11-24, row 2).
+        {"if_unsaved": "ask"} still lets OrcaSlicer ask, as before."""
         record = self.record
         ptype, name = self._type_name(data)
         if ptype not in dict(GROUPS):
@@ -1298,16 +1425,26 @@ class Api:
             bundle = orca.host.preset_bundle()
             names = list(bundle.current_filament_preset_names())
             found = _collection(bundle, ptype).find_preset(name) is not None
+            unsaved = {g: keys for g, attr in GROUPS
+                       if (keys := [k for k in _modified_keys(getattr(bundle, attr)) if k not in SESSION_ONLY_KEYS])}
             if ptype == "filament":
-                return found, (names[slot - 1] if slot <= len(names) else ""), len(names)
-            return found, _collection(bundle, ptype).selected_preset_name(), len(names)
+                return found, (names[slot - 1] if slot <= len(names) else ""), len(names), unsaved
+            return found, _collection(bundle, ptype).selected_preset_name(), len(names), unsaved
 
-        found, before, slots = self.pump.call(current)
+        found, before, slots, unsaved = self.pump.call(current)
         label = preset_label(ptype, slot, slots)
         if not found:
             self.notify(f"No such {ptype} preset '{name}'", True)
             record([refusal_row(label, "unknown_preset", f"unknown_preset: {name}")])
             raise ApiReply(422, {"error": "unknown_preset"})
+        if unsaved and data.get("if_unsaved") != "ask":
+            self.notify(f"Didn't switch to {ptype} preset '{name}': there are unsaved changes", True)
+            record([refusal_row(label, "unsaved_edits", unsaved_changes_text(unsaved))])
+            raise ApiReply(409, {"error": "unsaved_edits", "modified": unsaved,
+                                 "detail": ("OrcaSlicer would stop and ask on screen what to do with the unsaved changes to "
+                                            + unsaved_groups_text(unsaved) + ", and wait for an answer. Nothing was "
+                                            "switched. Ask the user to save or discard them in OrcaSlicer, or put them "
+                                            "back, then switch again.")})
         # OrcaSlicer's own selection flow: with unsaved edits it asks the person at the screen
         # whether to keep, transfer or discard them, and this request waits for the answer.
         try:
@@ -1334,7 +1471,8 @@ class Api:
                      "target": {"kind": "preset", "ptype": ptype, "slot": slot, "value": name,
                                 "before": before, "dropped": dropped}}])
         return 200, {"selected": name, "discarded_changes": [],
-                     "note": "OrcaSlicer asks on screen about unsaved edits; nothing is discarded silently"}
+                     "note": "OrcaSlicer asked on screen about the unsaved edits; nothing is discarded silently"
+                     if unsaved else "nothing was discarded: no preset had unsaved edits"}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1383,6 +1521,9 @@ class TokenBox:
 
 
 CLIENT_HEADER = "X-OrcaSlicer-MCP-Client"
+CONNECTION_TIMEOUT_S = 15.0
+REQUEST_READ_TIMEOUT_S = 3.0
+NOTICE_EVERY_S = 5.0  # the build's api_notify shows one notification per 5 s
 SEEN_WRITE_EVERY = 60.0  # seconds between saves of the same app's last-request time  # the AI app's name, sent by orcaslicer-mcp (shown in the Config tab)
 
 
@@ -1390,6 +1531,17 @@ def make_handler(api: Api, token: TokenBox, on_seen=None):
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "OrcaSlicerMCPPlugin/" + PLUGIN_VERSION
+        # The server takes one connection at a time: without a limit, a connection that sends nothing, or half a
+        # request, held up every other request until it closed (parity audit 2026-11-24, row 9). The build serves
+        # connections side by side and gives each 15 s to read and write. Here the request itself gets
+        # REQUEST_READ_TIMEOUT_S: a client on this computer sends it within milliseconds, and every reply closes its
+        # connection, so none waits idle between requests. A silent one is then dropped before an AI app's own wait
+        # for the next request runs out. Writing the reply keeps the build's 15 s.
+        timeout = CONNECTION_TIMEOUT_S
+
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(REQUEST_READ_TIMEOUT_S)
 
         def log_message(self, *args):
             pass
@@ -1420,6 +1572,7 @@ def make_handler(api: Api, token: TokenBox, on_seen=None):
                 self.close_connection = True
                 return self._reply(413, {"error": "body_too_large"})
             body = self.rfile.read(n) if n else b""
+            self.connection.settimeout(CONNECTION_TIMEOUT_S)  # the request is in: the reply gets the build's time
             trace(f"request {method} {self.path}")
             supplied = self.headers.get("X-Api-Token") or ""
             current = token.value
@@ -1875,20 +2028,34 @@ CONNECTION_PRODUCT = "orcaslicer-mcp-plugin"
 def write_connection_file(folder: str, port: int, token: str) -> None:
     data = {"product": CONNECTION_PRODUCT, "version": PLUGIN_VERSION, "url": f"http://{BIND_HOST}:{port}",
             "token": token, "pid": os.getpid(), "written": int(time.time())}
-    path = os.path.join(folder, CONNECTION_FILE)
+    write_private_file(os.path.join(folder, CONNECTION_FILE), json.dumps(data))
+
+
+def write_private_file(path: str, text: str) -> None:
+    """Write a file only its owner can read (where the OS has modes), replacing it whole.
+
+    Made owner-only first, then written through its PATH. OrcaSlicer's permission check lets a plugin write in its own
+    folder without asking, but only when it can see the path: writing through the file descriptor (os.fdopen) showed it
+    a bare number, and it asked the user about an unnamed "open" (seen on a real OrcaSlicer 2.5, 2026-11-11)."""
     tmp = path + ".tmp"
-    # Made owner-only first (where the OS has modes), then written through its PATH. OrcaSlicer's permission check
-    # lets a plugin write in its own folder without asking, but only when it can see the path: writing through the
-    # file descriptor (os.fdopen) showed it a bare number, and it asked the user about an unnamed "open" (seen on a
-    # real OrcaSlicer 2.5, 2026-11-11).
     try:
         os.close(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600))
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+            f.write(text)
         os.replace(tmp, path)
     except BaseException:
         _remove_quietly(tmp)
         raise
+
+
+def _shared_with_others(path: str) -> bool:
+    """True when users other than the owner may read the file (never on Windows, which has no such modes)."""
+    if sys.platform == "win32":
+        return False
+    try:
+        return bool(os.stat(path).st_mode & 0o077)
+    except OSError:
+        return False
 
 
 def _remove_quietly(path: str) -> None:
@@ -1915,18 +2082,25 @@ def remove_own_connection_file(folder: str) -> None:
 
 
 def load_or_create_token(folder: str, renew: bool = False) -> str:
+    """The token in token.txt, made (or renewed) when there is none. The file is owner-only like connection.json, which
+    holds the same token: plugins up to 0.2.4 wrote it readable by every user of the computer (parity audit 2026-11-24,
+    row 17), and such a file is made owner-only when it is next read."""
     path = os.path.join(folder, "token.txt")
     if not renew:
         try:
             with open(path, encoding="utf-8") as f:
                 tok = f.read().strip()
             if len(tok) >= 32:
+                if _shared_with_others(path):
+                    try:
+                        write_private_file(path, tok + "\n")
+                    except OSError as e:
+                        trace(f"token file not made owner-only: {type(e).__name__}: {e}")
                 return tok
         except OSError:
             pass
     tok = secrets.token_hex(24)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(tok + "\n")
+    write_private_file(path, tok + "\n")
     return tok
 
 
@@ -2672,6 +2846,7 @@ class PanelHost:
         self.on_undone = lambda text: None
         # OrcaSlicer's language for the page ("" = English) and its own words in it (set_language, UI thread).
         self.language, self.words = "", OrcaWords("")
+        self.off_text = ""  # the panel's line while the server is off, when it is not the switch ("" = CAPS's)
         self._remove_stale()
 
     def set_language(self, language: str) -> None:
@@ -2734,6 +2909,8 @@ class PanelHost:
             if local:  # OrcaSlicer's own words, for the page only (GET /activity and the rows stay English)
                 r["local"] = local
         caps = dict(CAPS, language=self.language)
+        if self.off_text:
+            caps["off_text"] = self.off_text
         return {"type": "history", "version": PANEL_PROTOCOL_VERSION, "rows": page["rows"],
                 "groups": page["groups"], "capabilities": caps, "restored_to": None,
                 "restore_failed": False, "can_undo_restore": False}
@@ -3092,7 +3269,7 @@ input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);
   </div>
 </details>
 <script>
-var TOKEN = __TOKEN__, LISTENING = __PORT__, ERR = __ERROR__, BUSY = __BUSY__;
+var TOKEN = __TOKEN__, LISTENING = __PORT__, ERR = __ERROR__, BUSY = __BUSY__, STARTED = __STARTED__;
 var APPS = __SETUP__, ICON = __ICONS__, UV = __UV__;
 var cfg = window.orca.getConfig() || {}, S = { app: "claude", done: null, open: false, shown: false, opened: null }, armed = null;
 function $(i){ return document.getElementById(i); }
@@ -3112,7 +3289,9 @@ function drawStatus(){
   var off = cfg.paused === true, st = cfg.status || {}, h;
   if (ERR) h = '<span class="dot off"></span><div class="what"><b>Couldn’t start</b><span>' + esc(ERR) + '</span></div>';
   else if (off) h = '<span class="dot off"></span><div class="what"><b>Paused</b><span>OrcaSlicer refuses your AI app’s requests.</span></div>';
-  else if (st.seen) h = '<span class="dot ok"></span><div class="what"><b>' + esc(st.app ? "Connected to " + st.app : "Connected") + '</b><span>Last request ' + when(st.seen) + '</span></div>';
+  else if (st.seen && st.seen >= STARTED) h = '<span class="dot ok"></span><div class="what"><b>' + esc(st.app ? "Connected to " + st.app : "Connected") + '</b><span>Last request ' + when(st.seen) + '</span></div>';
+  // A request from before OrcaSlicer last started: the app may have gone since, so it isn't shown as connected.
+  else if (st.seen) h = '<span class="dot wait"></span><div class="what"><b>Waiting for your AI app</b><span>' + esc(st.app ? "Last connected to " + st.app + " " : "Last connected ") + when(st.seen) + '</span></div>';
   else h = '<span class="dot wait"></span><div class="what"><b>Waiting for your AI app</b><span>The panel beside the 3D view shows when it connects.</span></div>';
   h += '<button class="switch" role="switch" id="sw" aria-checked="' + !off + '" aria-label="Assistant access"><span>Assistant access</span><span class="track"></span></button>';
   $("status").innerHTML = h;
@@ -3230,6 +3409,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         self._ui_ready = False
         self._held_notes: list[tuple[str, bool]] = []
         self._port_busy = False  # on_load failed because another program has the port (port_busy)
+        self._started = time.time()  # the Config tab says "Connected" only for requests since then
+        self._last_notice = 0.0  # monotonic time of the last notification a request showed (_request_notice)
         self.host = None
 
     def get_name(self):
@@ -3246,7 +3427,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         return CONFIG_HTML.replace("__TOKEN__", _inline(self._token)).replace("__PORT__", _inline(self._port)) \
             .replace("__SETUP__", _inline(setup_apps(custom_datadir(self._folder)))) \
             .replace("__ICONS__", _inline(SETUP_ICONS)).replace("__UV__", _inline(UV_URL)) \
-            .replace("__ERROR__", _inline(self._startup_problem())).replace("__BUSY__", _inline(self._port_busy))
+            .replace("__ERROR__", _inline(self._startup_problem())).replace("__BUSY__", _inline(self._port_busy)) \
+            .replace("__STARTED__", _inline(int(self._started)))
 
     def _startup_problem(self) -> str:
         """Why the server isn't running, for the Config tab's status line ("" when it started)."""
@@ -3256,6 +3438,15 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             return (f"Port {self._port} may be in use by another program. Pick another port under Token and port, "
                     "then restart OrcaSlicer.")
         return "The server did not start: " + self._error
+
+    def _panel_off_text(self) -> str:
+        """The panel's line when the server did not start. Without it the panel said "Assistant access is off.", which
+        blames the switch (parity audit 2026-11-24, row 11); the build's pane says "The Remote API couldn't start.
+        Check its port." English only: the panel's translations come from the build's page, which has no such line."""
+        if self._port_busy:
+            return (f"OrcaSlicer MCP couldn't start: port {self._port} may be in use by another program. Pick another "
+                    f"port under {SETTINGS_HINT}, then restart OrcaSlicer.")
+        return f"OrcaSlicer MCP couldn't start ({self._error}). {SETTINGS_HINT} says more."
 
     def get_default_config(self):
         return {"port": DEFAULT_PORT, "paused": False, "renew": 0}
@@ -3312,14 +3503,18 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         if first and self.host is not None:
             self._post(self._setup_msg())
 
+    def _set_paused(self, paused: bool) -> None:  # UI or server thread
+        with self._lock:
+            if paused == self._paused:
+                return
+            self._paused = paused
+        self._post(self._state())
+        self._notify("assistant access turned " + ("off" if paused else "on"))
+
     def _poll_config(self) -> None:  # UI thread
         cfg = self._read_config()
         self._write_seen(cfg)
-        paused = cfg.get("paused") is True
-        if paused != self._paused:
-            self._paused = paused
-            self._post(self._state())
-            self._notify("assistant access turned " + ("off" if paused else "on"))
+        self._set_paused(cfg.get("paused") is True)
         renew = cfg.get("renew", 0)
         if isinstance(renew, int) and not isinstance(renew, bool) and renew > self._renew_seen:
             self._renew_seen = renew
@@ -3386,7 +3581,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             self.host.on_action = self._journal_before_panel
             self.host.on_undone = self._journal_panel
             self._slice_folders = current_slice_folders()
-            api = Api(self._pump, notify=self._notify, record=self.host.record, journal=self.journal,
+            api = Api(self._pump, notify=self._request_notice, record=self.host.record, journal=self.journal,
                       on_switch=self.host.dropped_after_switch, slices=self.slices, slice_folders=self._slice_folders)
             self._service = Service(api, self._token, self._port, on_seen=self._on_seen)
             self._port = self._service.port
@@ -3406,6 +3601,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
                 remove_own_connection_file(self._folder)
             trace("on_load failed: " + self._error)
             self._port_busy = port_busy(e)
+            if self.host is not None:
+                self.host.off_text = self._panel_off_text()
             self._notify(port_busy_text(self._port) if self._port_busy else "could not start: " + self._error, True)
             print(f"[orcaslicer-mcp-plugin] not started: {self._error}")
 
@@ -3539,7 +3736,11 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         except Exception as e:
             raise ApiReply(503, {"error": "ui_not_ready", "detail": str(e)})
 
-    def _panel_for_request(self):
+    def _panel_for_request(self):  # server thread
+        # The switch as the Config tab stored it, read at every request. _poll_config only runs while the panel's page
+        # ticks, so with the panel closed the first request after the user turned access off was served, writes
+        # included (parity audit 2026-11-24, row 1). OrcaSlicer's config store takes its own lock.
+        self._set_paused(self._read_config().get("paused") is True)
         if self._paused:
             raise ApiReply(503, {"error": "paused",
                                  "detail": "the user turned assistant access off in the OrcaSlicer MCP "
@@ -3650,6 +3851,22 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         trace(f"OrcaSlicer's window is up ({where}): showing {len(held)} held notification(s)")
         for text, warning in held:
             self._push(text, warning)
+
+    def _request_notice(self, text, warning=False):  # server thread: what a request changed or refused
+        """The build's rules for these (api_notify): a change is already a row in the panel, so no notification for it
+        while the panel is open, which on the plugin is whenever an assistant is at work; a refusal still shows, at
+        most one notification per NOTICE_EVERY_S. A run of refused writes stacked six of them (parity audit
+        2026-11-24, row 5)."""
+        with self._lock:
+            panel_open = self._panel is not None
+        if not warning and panel_open:
+            return
+        now = time.monotonic()
+        with self._lock:
+            if now - self._last_notice < NOTICE_EVERY_S:
+                return
+            self._last_notice = now
+        self._notify(text, warning)
 
     def _notify(self, text, warning=False):
         with self._lock:

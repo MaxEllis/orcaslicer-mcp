@@ -538,8 +538,9 @@ def _no_tracebacks(monkeypatch):
 
 
 def test_a_client_that_drops_the_connection_is_no_error(plugin, monkeypatch):
-    """The AI app (or its connector) closing a kept-alive connection resets it, and the server's next read fails.
-    That must stay quiet: no traceback, and the server goes on answering."""
+    """The AI app (or its connector) giving up mid-request resets the connection, and the server's read fails. That
+    must stay quiet: no traceback, and the server goes on answering. (Each reply closes its connection since 0.2.5, so
+    the reset now comes while the request is still arriving.)"""
     import socket
     import struct
     used = _no_tracebacks(monkeypatch)
@@ -548,8 +549,8 @@ def test_a_client_that_drops_the_connection_is_no_error(plugin, monkeypatch):
     monkeypatch.setattr(plugin._service.server, "handle_error",
                         lambda req, addr: (errors.append(mod.sys.exc_info()[0]), orig(req, addr)))
     s = socket.create_connection(("127.0.0.1", plugin._service.port), timeout=5)
-    s.sendall(("GET /api/v1/status HTTP/1.1\r\nHost: x\r\nX-Api-Token: %s\r\n\r\n" % plugin._token).encode())
-    assert s.recv(64).startswith(b"HTTP/1.1 200")
+    s.sendall(("GET /api/v1/status HTTP/1.1\r\nHost: x\r\nX-Api-Token: %s\r\n" % plugin._token).encode())
+    time.sleep(0.3)  # the server is reading the headers; the blank line that ends them never comes
     s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
     s.close()  # a reset, as when the app's process ends
     time.sleep(0.5)
@@ -595,7 +596,8 @@ def test_a_taken_port_at_launch_waits_for_the_window_before_saying_so(tmp_path):
         cap.on_lifecycle_event(types.SimpleNamespace(name="DeviceDiscovered"), None)  # not a UI-thread event
         assert S.notifications == []
         cap.on_lifecycle_event(types.SimpleNamespace(name="PlateSelected"), None)
-        assert [t for _, t in S.notifications] == ["OrcaSlicer MCP: could not start: " + cap._error]
+        port = taken.getsockname()[1]  # in the build's words, with where to change it
+        assert [t for _, t in S.notifications] == ["OrcaSlicer MCP: " + mod.port_busy_text(port)]
         assert not S.crashed
         cap.on_lifecycle_event(types.SimpleNamespace(name="PlateSelected"), None)  # shown once
         assert len(S.notifications) == 1
@@ -661,3 +663,62 @@ def test_a_second_orcaslicer_still_cannot_share_a_listening_port():
             mod._Server(("127.0.0.1", first.server_address[1]), mod.http.server.BaseHTTPRequestHandler)
     finally:
         first.server_close()
+
+
+def test_a_busy_port_shows_in_the_config_tab_like_the_builds_preferences(tmp_path):
+    """The build's Preferences say "Couldn't start: port N may be in use by another program"; the plugin's Config tab
+    says the same and opens Token and port, where the port is changed."""
+    import socket
+    fake_orca.STATE.reset(storage=str(tmp_path))
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen(1)
+    port = taken.getsockname()[1]
+    (tmp_path / "settings.json").write_text(json.dumps({"port": port}))
+    cap = mod.McpCapability()
+    try:
+        cap.on_load()
+        html = cap.get_config_ui()
+        assert "__ERROR__" not in html and "__BUSY__" not in html
+        assert f"ERR = {json.dumps(cap._startup_problem())}" in html and "BUSY = true" in html
+        assert cap._startup_problem().startswith(f"Port {port} may be in use by another program")
+    finally:
+        taken.close()
+        cap.on_unload()
+
+
+def test_a_running_plugin_shows_no_problem_in_the_config_tab(plugin):
+    html = plugin.get_config_ui()
+    assert 'ERR = ""' in html and "BUSY = false" in html
+
+
+def test_only_bind_errors_for_a_taken_port_count_as_busy():
+    import errno
+    assert mod.port_busy(OSError(errno.EADDRINUSE, "Address already in use"))
+    assert mod.port_busy(OSError(10048, "WSAEADDRINUSE"))
+    assert not mod.port_busy(PermissionError("network_socket not granted"))  # OrcaSlicer's permission check
+    assert not mod.port_busy(OSError(errno.ENOENT, "No such file"))
+    assert not mod.port_busy(RuntimeError("needs OrcaSlicer 2.5.0 or later"))
+
+
+def test_a_second_ai_app_is_not_held_up_by_the_first_ones_idle_connection(plugin):
+    """The server takes one connection at a time. An AI app's kept-alive connection left idle made a second app wait
+    until the first app's client dropped it (6 s measured; the connector waits 5 s for a status read). Each reply now
+    closes its connection, as the build serves both at once."""
+    import http.client
+    tok = {"X-Api-Token": plugin._token}
+    port = plugin._service.port
+    a = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        a.request("GET", "/api/v1/plates", headers=tok)
+        r = a.getresponse()
+        r.read()
+        assert r.getheader("Connection") == "close"
+        b = http.client.HTTPConnection("127.0.0.1", port, timeout=10)  # app A keeps its end open
+        t0 = time.monotonic()
+        b.request("GET", "/api/v1/plates", headers=tok)
+        b.getresponse().read()
+        assert time.monotonic() - t0 < 2.0
+        b.close()
+    finally:
+        a.close()

@@ -41,6 +41,7 @@ How it runs:
 from __future__ import annotations
 
 import collections
+import errno
 import hashlib
 import hmac
 import http.server
@@ -68,6 +69,20 @@ DEFAULT_PORT = 13131
 OLD_DEFAULT_PORT = 13130
 PORT_MOVED_IN = (0, 2, 4)
 BIND_HOST = "127.0.0.1"
+# Bind errors that mean another program has the port: EADDRINUSE everywhere; on Windows also WSAEADDRINUSE and
+# WSAEACCES (a port another program holds exclusively, or one Windows has reserved).
+PORT_BUSY_ERRNOS = frozenset({errno.EADDRINUSE, 10048} | ({10013} if sys.platform == "win32" else set()))
+
+
+def port_busy(e: BaseException) -> bool:
+    return isinstance(e, OSError) and getattr(e, "errno", None) in PORT_BUSY_ERRNOS
+
+
+def port_busy_text(port) -> str:
+    """The build says the same in its Preferences ("Couldn't start: port N may be in use by another program. Pick another
+    port, then close Preferences to try again."); the plugin's port is in its Config tab and is read at start."""
+    return (f"Couldn't start: port {port} may be in use by another program. Pick another port in the plugin's Config tab "
+            "(Token and port), then restart OrcaSlicer.")
 MAX_BODY = 4 * 1024 * 1024
 UI_TIMEOUT_S = 10.0
 # Stock 2.5 creates a plugin's dock panel only once its Prepare view is on screen, so an OrcaSlicer that opens on its
@@ -1385,6 +1400,11 @@ def make_handler(api: Api, token: TokenBox, on_seen=None):
             else:
                 data, ctype = json.dumps(body).encode("utf-8"), "application/json"
             self.send_response(status)
+            # One request per connection. The server takes one connection at a time, so a kept-alive connection an AI
+            # app left idle made a second app wait until the first app's client dropped it (about 5 s, as long as the
+            # connector waits for a status read). The build serves both at once.
+            self.send_header("Connection", "close")
+            self.close_connection = True
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -3072,7 +3092,7 @@ input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);
   </div>
 </details>
 <script>
-var TOKEN = __TOKEN__, LISTENING = __PORT__;
+var TOKEN = __TOKEN__, LISTENING = __PORT__, ERR = __ERROR__, BUSY = __BUSY__;
 var APPS = __SETUP__, ICON = __ICONS__, UV = __UV__;
 var cfg = window.orca.getConfig() || {}, S = { app: "claude", done: null, open: false, shown: false, opened: null }, armed = null;
 function $(i){ return document.getElementById(i); }
@@ -3090,7 +3110,8 @@ function copyText(text, done){
 }
 function drawStatus(){
   var off = cfg.paused === true, st = cfg.status || {}, h;
-  if (off) h = '<span class="dot off"></span><div class="what"><b>Paused</b><span>OrcaSlicer refuses your AI app’s requests.</span></div>';
+  if (ERR) h = '<span class="dot off"></span><div class="what"><b>Couldn’t start</b><span>' + esc(ERR) + '</span></div>';
+  else if (off) h = '<span class="dot off"></span><div class="what"><b>Paused</b><span>OrcaSlicer refuses your AI app’s requests.</span></div>';
   else if (st.seen) h = '<span class="dot ok"></span><div class="what"><b>' + esc(st.app ? "Connected to " + st.app : "Connected") + '</b><span>Last request ' + when(st.seen) + '</span></div>';
   else h = '<span class="dot wait"></span><div class="what"><b>Waiting for your AI app</b><span>The panel beside the 3D view shows when it connects.</span></div>';
   h += '<button class="switch" role="switch" id="sw" aria-checked="' + !off + '" aria-label="Assistant access"><span>Assistant access</span><span class="track"></span></button>';
@@ -3159,6 +3180,7 @@ $("saveport").onclick = function(){
   $("pnote").textContent = p === LISTENING ? "Saved." : "Saved. It takes effect after OrcaSlicer restarts (or the plugin is deactivated and activated).";
 };
 if (window.orca.onConfig) window.orca.onConfig(function(c){ cfg = c || {}; draw(); });
+if (BUSY) $("adv").open = true;  // the port box is in there
 draw();
 </script></body></html>"""
 
@@ -3207,6 +3229,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         # that the window exists rather than trust that no UI-thread call ever comes before it.
         self._ui_ready = False
         self._held_notes: list[tuple[str, bool]] = []
+        self._port_busy = False  # on_load failed because another program has the port (port_busy)
         self.host = None
 
     def get_name(self):
@@ -3222,7 +3245,17 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             return IN_BUILD_HTML
         return CONFIG_HTML.replace("__TOKEN__", _inline(self._token)).replace("__PORT__", _inline(self._port)) \
             .replace("__SETUP__", _inline(setup_apps(custom_datadir(self._folder)))) \
-            .replace("__ICONS__", _inline(SETUP_ICONS)).replace("__UV__", _inline(UV_URL))
+            .replace("__ICONS__", _inline(SETUP_ICONS)).replace("__UV__", _inline(UV_URL)) \
+            .replace("__ERROR__", _inline(self._startup_problem())).replace("__BUSY__", _inline(self._port_busy))
+
+    def _startup_problem(self) -> str:
+        """Why the server isn't running, for the Config tab's status line ("" when it started)."""
+        if not self._error:
+            return ""
+        if self._port_busy:
+            return (f"Port {self._port} may be in use by another program. Pick another port under Token and port, "
+                    "then restart OrcaSlicer.")
+        return "The server did not start: " + self._error
 
     def get_default_config(self):
         return {"port": DEFAULT_PORT, "paused": False, "renew": 0}
@@ -3372,7 +3405,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             if self._folder:
                 remove_own_connection_file(self._folder)
             trace("on_load failed: " + self._error)
-            self._notify("could not start: " + self._error, True)
+            self._port_busy = port_busy(e)
+            self._notify(port_busy_text(self._port) if self._port_busy else "could not start: " + self._error, True)
             print(f"[orcaslicer-mcp-plugin] not started: {self._error}")
 
     def _open_panel_at_load(self) -> None:

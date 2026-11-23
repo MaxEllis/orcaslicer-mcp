@@ -10,6 +10,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Fixed
 - Stock OrcaSlicer 2.5 could crash at launch with the plugin installed ([#27](https://github.com/MaxEllis/orcaslicer-mcp/issues/27)). When the plugin could not start, it said so straight away, before OrcaSlicer's window existed, and OrcaSlicer crashed. The message now waits until the window is drawn, and shows with your first change in OrcaSlicer.
 - The usual reason it could not start: OrcaSlicer was closed while an AI app was connected and opened again within about a minute, so its port was still busy. On Linux and macOS the plugin now takes its port back at once. A second OrcaSlicer still can't share it.
+- When another program has the plugin's port, the plugin now says so in the build's words: "Couldn't start: port 13131 may be in use by another program". Its Config tab shows it too, with Token and port opened to pick another one. It used to show only a raw `OSError` line.
+- Two AI apps used at once no longer hold each other up. The plugin answers one request at a time, and a connection the first app left open made the second one wait until it closed, about 5 seconds, long enough for its status check to give up. Each reply now closes its connection.
 
 ## [0.1.27] - 2026-11-18
 The OrcaSlicer MCP plugin 0.2.4 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.

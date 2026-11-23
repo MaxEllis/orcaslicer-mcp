@@ -897,7 +897,8 @@ def test_the_config_tab_neither_polls_nor_claims_a_failed_open(plugin):
     """On a real OrcaSlicer 2.5 the open Config tab never sees the plugin's saves (2026-11-11): it doesn't poll, says
     'Opening in your browser' with Copy link instead of reporting a failure it can't know, and names a time of day."""
     html = plugin.get_config_ui()
-    assert "setInterval" not in html and "Couldn" not in html and "c.opened" not in html
+    assert "setInterval" not in html and "Couldn’t open" not in html and "Couldn't open" not in html \
+        and "c.opened" not in html
     assert "Opening in your browser. Nothing opened?" in html and "Last request ' + when(st.seen)" in html
     assert "max-width:640px" in html  # squares stay squares on a wide dialog
 

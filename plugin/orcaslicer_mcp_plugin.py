@@ -5,7 +5,7 @@
 # name = "OrcaSlicer MCP"
 # description = "Lets an AI assistant read your OrcaSlicer setup, change settings and read the slices you make, through the orcaslicer-mcp server. Loading models, starting a slice, plates, renders and projects need the OrcaSlicer MCP build."
 # author = "Max Ellis"
-# version = "0.2.4"
+# version = "0.2.5"
 # ///
 """OrcaSlicer MCP: part of the OrcaSlicer MCP Remote API, served by a plugin on stock OrcaSlicer 2.5.
 
@@ -59,7 +59,7 @@ import urllib.parse
 
 import orca
 
-PLUGIN_VERSION = "0.2.4"
+PLUGIN_VERSION = "0.2.5"
 # The OrcaSlicer MCP build serves on 13130, so the plugin uses the port after it: a stock OrcaSlicer with the plugin
 # and the build can then be open together, each with its own server (orcaslicer-mcp #28). The connector finds either
 # by itself (its discovery.py), so the number appears in no setup.

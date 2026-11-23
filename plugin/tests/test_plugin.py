@@ -1,4 +1,5 @@
 import json
+import types
 import os
 import time
 
@@ -227,6 +228,8 @@ def test_failed_thread_start_closes_the_socket(tmp_path, monkeypatch):
     cap = mod.McpCapability()
     cap.on_load()
     assert "PermissionError" in cap._error and cap._service is None
+    assert not S.notifications  # held during startup: OrcaSlicer's window may not exist yet
+    cap.get_config_ui()  # OrcaSlicer's first UI-thread call shows it
     assert any("could not start" in t for _, t in S.notifications)
     import socket
     s = socket.socket()
@@ -314,6 +317,7 @@ def test_a_host_without_a_needed_call_says_which_orcaslicer_is_needed(tmp_path):
         fake_orca.UI.run_blocking(cap.on_load)
         assert cap._service is None
         assert cap._error.startswith("needs OrcaSlicer 2.5.0 or later") and "orca.host.ui.create_dock_panel" in cap._error
+        fake_orca.UI.run_blocking(cap._ui_up)  # held until OrcaSlicer's first UI-thread call
         assert any("needs OrcaSlicer 2.5.0 or later" in text for _lvl, text in S.notifications)
     finally:
         mod.orca.host.ui.create_dock_panel = saved
@@ -482,6 +486,30 @@ def test_activated_inside_the_mcp_build_it_starts_nothing(tmp_path, monkeypatch)
         assert cap._service is None and not made and not (storage / "connection.json").exists()
         assert notes == [mod.IN_BUILD_TEXT] and not cap._error
         assert cap.get_config_ui() == mod.IN_BUILD_HTML and "Not needed in this OrcaSlicer" in mod.IN_BUILD_HTML
+    finally:
+        cap.on_unload()
+
+
+def test_notifications_from_on_load_wait_for_the_ui(tmp_path, monkeypatch):
+    """on_load runs while OrcaSlicer is still starting, before its main window exists. A notification posted then
+    crashed OrcaSlicer 2.5.1 at launch (null Plater in get_notification_manager), so the plugin holds them until
+    OrcaSlicer first calls it on the UI thread."""
+    storage = tmp_path / "orca_plugins" / "plugin_data" / "orcaslicer_mcp_plugin"
+    storage.mkdir(parents=True)
+    fake_orca.STATE.reset(storage=str(storage))
+    monkeypatch.setattr(mod.orca.host, "app_info", lambda: {"version": "2.5.1", "orca_mcp_version": "2.5.1-mcp.1"},
+                        raising=False)
+    cap = mod.McpCapability()
+    cap.on_load()
+    try:
+        assert fake_orca.STATE.notifications == []  # nothing reaches OrcaSlicer during startup
+        cap.on_lifecycle_event(types.SimpleNamespace(name="SliceStarted"), None)  # slicing worker: still held
+        assert fake_orca.STATE.notifications == []
+        cap.on_lifecycle_event(types.SimpleNamespace(name="NewProject"), None)  # UI thread: shown now, once
+        assert [t for _, t in fake_orca.STATE.notifications] == ["OrcaSlicer MCP: " + mod.IN_BUILD_TEXT]
+        cap.get_config_ui()
+        cap._notify("later")  # after the UI is up, notifications go straight through
+        assert [t for _, t in fake_orca.STATE.notifications][1:] == ["OrcaSlicer MCP: later"]
     finally:
         cap.on_unload()
 

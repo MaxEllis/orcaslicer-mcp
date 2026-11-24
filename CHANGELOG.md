@@ -7,9 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-11-25
+The OrcaSlicer MCP plugin 0.2.6 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.
+
 ### Fixed
-- A plugin installed from OrcaCloud could say "could not start: RuntimeError: Cloud plugin storage is unavailable before networking is initialized" and stay off until OrcaSlicer was restarted. OrcaSlicer gives an OrcaCloud plugin its data folder only once its networking is up and you are signed in to OrcaCloud, and it can start the plugin before that. The plugin now waits for the folder and starts when it comes. Before 0.2.5 the same failure could crash OrcaSlicer at startup ([#27](https://github.com/MaxEllis/orcaslicer-mcp/issues/27)).
-- Signed out of OrcaCloud, the plugin now says it starts once you sign in, in a notification and in its Config tab, and starts when you do. When OrcaSlicer can't be found, the connector now points to that Config tab, which says why the plugin hasn't started.
+- Installed from OrcaCloud, the plugin could say "could not start: RuntimeError: Cloud plugin storage is unavailable before networking is initialized". Then it stayed off until OrcaSlicer was restarted. OrcaSlicer gives a plugin from OrcaCloud its data folder only when it is online and you are signed in to OrcaCloud. It can start the plugin before that. The plugin now waits for its folder and starts when it comes. Before 0.2.5 the same failure could crash OrcaSlicer at startup ([#27](https://github.com/MaxEllis/orcaslicer-mcp/issues/27)).
+- If you are signed out of OrcaCloud, the plugin now says it starts once you sign in. You see this in a notification and in its Config tab. It starts as soon as you sign in.
+- When OrcaSlicer can't be found, the connector now points to the plugin's Config tab, which says why the plugin hasn't started.
 
 ## [0.1.28] - 2026-11-24
 The OrcaSlicer MCP plugin 0.2.5 for stock OrcaSlicer 2.5 is attached below (`orcaslicer_mcp_plugin.py`) and on [OrcaCloud](https://cloud.orcaslicer.com/p/16d116a6bc41), which keeps it up to date.

@@ -66,7 +66,19 @@ uv publish
 echo "== 5/8 commit + tag =="
 git add pyproject.toml packaging/server.json packaging/mcpb/manifest.json packaging/lhm.plugin.json uv.lock
 git commit -m "chore: release $VER" || echo "   (nothing to commit)"
-git tag "v$VER" && git push origin HEAD "v$VER"
+git tag "v$VER"
+# PyPI already has $VER here, so a failed push cannot be fixed by running the script again. GitHub answered one push
+# with a 500 (0.1.29, 2026-11-25) and took it 30 s later: try three times before stopping.
+for wait in 0 10 30; do
+  sleep "$wait"
+  git push origin HEAD "v$VER" && break
+  if [ "$wait" = 30 ]; then
+    echo "FAIL: the push failed 3 times and PyPI already has $VER: do not rerun this script. Push by hand" >&2
+    echo "      (git push origin HEAD v$VER), then do steps 6-8 below by hand." >&2
+    exit 1
+  fi
+  echo "   push failed, trying again"
+done
 
 echo "== 6/8 pack the Claude Desktop extension =="
 npx --yes @anthropic-ai/mcpb pack packaging/mcpb "orcaslicer-mcp-$VER.mcpb"

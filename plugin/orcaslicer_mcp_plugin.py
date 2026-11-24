@@ -1654,6 +1654,29 @@ def missing_host_calls() -> list[str]:
     return missing
 
 
+# A plugin installed from OrcaCloud gets its data folder only once OrcaSlicer's networking is up and someone is signed
+# in to OrcaCloud (stock 2.5's PluginManager::get_storage_dir raises before that). OrcaSlicer loads plugins on their
+# own thread before it starts networking, so on_load can ask too early: 0.2.5 then said "could not start" and stayed off
+# until OrcaSlicer was restarted (OrcaCloud comment on 2.5.2, 2026-11-24), and before 0.2.5 that notification crashed
+# OrcaSlicer at launch (issue #27). The plugin now keeps asking and starts when the folder comes.
+STORAGE_RETRY_S = (0.25, 2.0)  # the first and the longest pause between asks
+STORAGE_NOTICE_AFTER_S = 20.0  # a wait this long is said once (a slow start says nothing)
+SIGN_IN_TEXT = ("it starts once you sign in to OrcaCloud. OrcaSlicer keeps the data of a plugin installed from "
+                "OrcaCloud with your account.")
+
+
+def storage_wait_text(reason: str) -> str:
+    """What the user is told while the data folder isn't there yet, after "OrcaSlicer MCP: " in a notification and
+    capitalised in the Config tab (the reason is OrcaSlicer's own English)."""
+    if "logged-in user" in reason:
+        return SIGN_IN_TEXT
+    return f"it is waiting for OrcaSlicer to start its networking ({reason})."
+
+
+def _reason(e: BaseException) -> str:
+    return str(e) or type(e).__name__
+
+
 def request_permissions(wanted: dict) -> dict:
     """Ask for everything at once, as OrcaSlicer prefers. Some 2.5 builds refuse a keyword they do not know with a
     TypeError (another plugin stopped loading on exactly that); then ask again without the newest keywords, and
@@ -3270,6 +3293,7 @@ input[type=number]{width:90px;font:inherit;color:var(--fg);background:var(--bg);
 </details>
 <script>
 var TOKEN = __TOKEN__, LISTENING = __PORT__, ERR = __ERROR__, BUSY = __BUSY__, STARTED = __STARTED__;
+var WAIT = __WAIT__;  // an OrcaCloud install before OrcaSlicer's networking or a sign-in: why it hasn't started yet
 var APPS = __SETUP__, ICON = __ICONS__, UV = __UV__;
 var cfg = window.orca.getConfig() || {}, S = { app: "claude", done: null, open: false, shown: false, opened: null }, armed = null;
 function $(i){ return document.getElementById(i); }
@@ -3288,6 +3312,7 @@ function copyText(text, done){
 function drawStatus(){
   var off = cfg.paused === true, st = cfg.status || {}, h;
   if (ERR) h = '<span class="dot off"></span><div class="what"><b>Couldn’t start</b><span>' + esc(ERR) + '</span></div>';
+  else if (WAIT) h = '<span class="dot wait"></span><div class="what"><b>Not started yet</b><span>' + esc(WAIT.charAt(0).toUpperCase() + WAIT.slice(1)) + '</span></div>';
   else if (off) h = '<span class="dot off"></span><div class="what"><b>Paused</b><span>OrcaSlicer refuses your AI app’s requests.</span></div>';
   else if (st.seen && st.seen >= STARTED) h = '<span class="dot ok"></span><div class="what"><b>' + esc(st.app ? "Connected to " + st.app : "Connected") + '</b><span>Last request ' + when(st.seen) + '</span></div>';
   // A request from before OrcaSlicer last started: the app may have gone since, so it isn't shown as connected.
@@ -3401,6 +3426,12 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         self._seen = None          # (time, app) of the last accepted request, from the server thread
         self._seen_written = None  # the (time, app) last saved for the Config tab
         self._unloading = False
+        # An OrcaCloud install before OrcaSlicer's networking is up or anyone is signed in: why there is no data folder
+        # yet ("" once it came), and the thread that keeps asking (_storage_wait)
+        self._waiting = ""
+        self._storage_thread = None
+        self._storage_stop = threading.Event()
+        self._starting = False  # the storage thread got the folder and is starting the server (on_unload leaves it)
         self._ui_language = None  # OrcaSlicer's language, once read on the UI thread (_language)
         # Notifications wait here until OrcaSlicer's main window exists (_ui_up). on_load runs on the loader thread
         # while OrcaSlicer is still starting, before that window exists; a notification posted then makes OrcaSlicer
@@ -3428,7 +3459,8 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             .replace("__SETUP__", _inline(setup_apps(custom_datadir(self._folder)))) \
             .replace("__ICONS__", _inline(SETUP_ICONS)).replace("__UV__", _inline(UV_URL)) \
             .replace("__ERROR__", _inline(self._startup_problem())).replace("__BUSY__", _inline(self._port_busy)) \
-            .replace("__STARTED__", _inline(int(self._started)))
+            .replace("__STARTED__", _inline(int(self._started))) \
+            .replace("__WAIT__", _inline(storage_wait_text(self._waiting) if self._waiting else ""))
 
     def _startup_problem(self) -> str:
         """Why the server isn't running, for the Config tab's status line ("" when it started)."""
@@ -3547,11 +3579,27 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
     # -- lifecycle --------------------------------------------------------------------------
     def on_load(self):
         try:
-            global _TRACE_PATH
             missing = missing_host_calls()
             if missing:
                 raise RuntimeError(NEEDS_NEWER_TEXT.format(missing=", ".join(missing)))
-            self._folder = orca.host.plugin.storage()
+            try:
+                folder = orca.host.plugin.storage()
+            except Exception as e:  # an OrcaCloud install before networking or a sign-in (STORAGE_RETRY_S)
+                if running_in_mcp_build(app_info()):
+                    self._in_build = True
+                    self._notify(IN_BUILD_TEXT)
+                    return
+                self._wait_for_storage(e)
+                return
+        except Exception as e:
+            self._failed(e)
+            return
+        self._start(folder)
+
+    def _start(self, folder: str) -> None:  # the loader thread, or the storage thread for an OrcaCloud install
+        try:
+            global _TRACE_PATH
+            self._folder = folder
             settings = load_settings(self._folder)
             if settings.get("trace") is True:
                 _TRACE_PATH = os.path.join(self._folder, "plugin-trace.log")
@@ -3594,39 +3642,95 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
             trace(f"server thread started, alive={self._service.thread.is_alive()}")
             self._open_panel_at_load()
         except Exception as e:
-            self._error = str(e) if isinstance(e, RuntimeError) and str(e).startswith("needs OrcaSlicer") \
-                else f"{type(e).__name__}: {e}"
-            self._service = None
-            if self._folder:
-                remove_own_connection_file(self._folder)
-            trace("on_load failed: " + self._error)
-            self._port_busy = port_busy(e)
-            if self.host is not None:
-                self.host.off_text = self._panel_off_text()
-            self._notify(port_busy_text(self._port) if self._port_busy else "could not start: " + self._error, True)
-            print(f"[orcaslicer-mcp-plugin] not started: {self._error}")
+            self._failed(e)
+
+    def _failed(self, e: BaseException) -> None:
+        self._error = str(e) if isinstance(e, RuntimeError) and str(e).startswith("needs OrcaSlicer") \
+            else f"{type(e).__name__}: {e}"
+        self._service = None
+        if self._folder:
+            remove_own_connection_file(self._folder)
+        trace("on_load failed: " + self._error)
+        self._port_busy = port_busy(e)
+        if self.host is not None:
+            self.host.off_text = self._panel_off_text()
+        self._notify(port_busy_text(self._port) if self._port_busy else "could not start: " + self._error, True)
+        print(f"[orcaslicer-mcp-plugin] not started: {self._error}")
+
+    def _wait_for_storage(self, error: BaseException) -> None:
+        self._waiting = _reason(error)
+        print(f"[orcaslicer-mcp-plugin] waiting for its data folder: {self._waiting}")
+        self._storage_thread = threading.Thread(target=self._storage_wait, name="OrcaSlicer MCP storage", daemon=True)
+        self._storage_thread.start()
+
+    def _storage_wait(self) -> None:  # storage thread: ask until OrcaSlicer has the folder, then start as on_load would
+        began, pause, told, first = time.monotonic(), STORAGE_RETRY_S[0], "", self._waiting
+        while not self._storage_stop.wait(pause):
+            try:
+                folder = orca.host.plugin.storage()
+            except Exception as e:
+                self._waiting = _reason(e)
+                if not told and time.monotonic() - began >= STORAGE_NOTICE_AFTER_S:
+                    told = storage_wait_text(self._waiting)
+                    self._notify(told, True)
+                pause = min(pause * 2, STORAGE_RETRY_S[1])
+                continue
+            with self._lock:
+                if self._unloading:
+                    return
+                self._waiting = ""
+                self._starting = True
+                if told:  # still held (OrcaSlicer's window isn't up): no longer true, so never shown
+                    self._held_notes = [n for n in self._held_notes if n[0] != told]
+            try:
+                self._start(folder)
+            finally:
+                with self._lock:
+                    self._starting = False
+                    late = self._unloading
+            trace(f"data folder came {time.monotonic() - began:.1f} s after on_load (first answer: {first})")
+            if late:  # on_unload came while it was starting and left the server and the panel to this thread
+                self._stop_service()
+                self._close_panel()
+            return
+
+    def _stop_service(self) -> None:
+        service, self._service = self._service, None
+        if service is not None:
+            service.stop()
+            trace(f"server stopped, thread alive={service.thread.is_alive()}")
+            remove_own_connection_file(self._folder)
 
     def _open_panel_at_load(self) -> None:
         """Usability finding m8 (Rita's F7): show the empty panel as soon as the plugin is activated, so there is
         something to see before the assistant first connects. If OrcaSlicer can't make it now, the first request
         opens it as before."""
         try:
+            with self._lock:
+                panel = self._panel
+            opened = panel is not None and panel.is_open()  # by the menu while an OrcaCloud install waited
             self._ensure_panel()
+            if opened:
+                self._send_all()
         except Exception as e:
             trace(f"panel at load failed: {type(e).__name__}: {e}")
 
     def on_unload(self):
         trace("on_unload")
-        self._unloading = True  # closing our own pane below is not the user closing it: no banner
+        with self._lock:
+            self._unloading = True  # closing our own pane below is not the user closing it: no banner
+            starting = self._starting
+        self._storage_stop.set()  # an OrcaCloud install still waiting for its folder stops asking
         self._pump.close()
-        if self._service is not None:
-            self._service.stop()
-            trace(f"server stopped, thread alive={self._service.thread.is_alive()}")
-            self._service = None
-            remove_own_connection_file(self._folder)
+        if not starting:  # else the storage thread is starting the server right now and stops it when done
+            self._stop_service()
         if self.host is not None:
             self.host.save()
-        panel, self._panel = self._panel, None
+        self._close_panel()
+
+    def _close_panel(self) -> None:
+        with self._lock:
+            panel, self._panel = self._panel, None
         if panel is not None:
             try:
                 panel.close()
@@ -3684,6 +3788,9 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
         if self._error:
             return orca.ExecutionResult.failure(orca.PluginResult.RecoverableError,
                                                 "The server did not start: " + self._error)
+        if self._waiting:
+            return orca.ExecutionResult.failure(orca.PluginResult.RecoverableError,
+                                                "OrcaSlicer MCP has not started yet: " + storage_wait_text(self._waiting))
         return orca.ExecutionResult.success(f"OrcaSlicer MCP is listening on {BIND_HOST}:{self._port}.")
 
     # -- panel ------------------------------------------------------------------------------
@@ -3728,7 +3835,7 @@ class McpCapability(orca.script.ScriptPluginCapabilityBase):
                              self._paused)
 
     def _state(self) -> dict:
-        return {"type": "state", "api": "off" if (self._paused or self._error) else "on"}
+        return {"type": "state", "api": "off" if (self._paused or self._error or self._waiting) else "on"}
 
     def _panel_any(self):
         try:

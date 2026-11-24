@@ -91,3 +91,16 @@ def test_plugin_texts_name_the_permissions():
     assert "permissions allowed" in cl.unreachable_message(BASE)
     cl._BACKENDS[BASE] = "plugin"
     assert "permissions allowed" in cl.unreachable_message(BASE)
+
+
+def test_plugin_texts_say_where_it_tells_why_it_has_not_started():
+    """A plugin installed from OrcaCloud waits for OrcaSlicer's sign-in before it starts (plugin 0.2.6); its Config tab
+    says so, and the connector sends the user there."""
+    from orcaslicer_mcp.config import NOT_FOUND
+    assert "Config tab there says why" in NOT_FOUND and "signed in to OrcaCloud" in NOT_FOUND
+    cl._BACKENDS.pop(BASE, None)
+    assert "Config tab there says why" in cl.unreachable_message(BASE)
+    cl._BACKENDS[BASE] = "plugin"
+    assert "Config tab there says why" in cl.unreachable_message(BASE)
+    cl._BACKENDS[BASE] = "build"
+    assert "Config tab" not in cl.unreachable_message(BASE)

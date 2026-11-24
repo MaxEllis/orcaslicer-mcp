@@ -7,7 +7,8 @@ NOT_FOUND = ("ORCA_API_TOKEN is not set and OrcaSlicer wasn't found on this comp
              "OrcaSlicer MCP plugin activated (or the OrcaSlicer MCP build with its Remote API on). If OrcaSlicer uses "
              "its own settings folder (--datadir), set ORCA_DATADIR to it; for OrcaSlicer on another computer set "
              "ORCA_API_URL and ORCA_API_TOKEN. With the OrcaSlicer MCP plugin, the plugin must be turned on and its "
-             "permissions allowed (Plugins dialog > OrcaSlicer MCP).")
+             "permissions allowed (Plugins dialog > OrcaSlicer MCP). If it hasn't started, its Config tab there says "
+             "why: a plugin installed from OrcaCloud starts once OrcaSlicer is signed in to OrcaCloud.")
 
 
 @dataclass(frozen=True)

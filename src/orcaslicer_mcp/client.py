@@ -48,11 +48,11 @@ def unreachable_message(base_url: str, e: Exception | None = None) -> str:
         ask = "Is OrcaSlicer open, with Preferences > Remote API turned on?"
     elif backend == "plugin":
         ask = ("Is OrcaSlicer open, with the OrcaSlicer MCP plugin turned on and its permissions "
-               "allowed (Plugins dialog > OrcaSlicer MCP)?")
+               "allowed (Plugins dialog > OrcaSlicer MCP)? If it hasn't started, its Config tab there says why.")
     else:
         ask = ("Is OrcaSlicer open, with Preferences > Remote API turned on? With the OrcaSlicer "
                "MCP plugin on stock OrcaSlicer instead: is the plugin turned on, with its permissions "
-               "allowed (Plugins dialog > OrcaSlicer MCP)?")
+               "allowed (Plugins dialog > OrcaSlicer MCP)? If it hasn't started, its Config tab there says why.")
     if not _is_local(base_url):
         ask += " OrcaSlicer runs on another computer here: is that computer on and awake, and on the network?"
     return (f"not_reachable: OrcaSlicer isn't answering at {base_url}"
